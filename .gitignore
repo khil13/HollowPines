@@ -5,3 +5,4 @@ tests/*.json
 tests/story_out.txt
 __pycache__/
 tools/out/
+site/

@@ -25,7 +25,8 @@ python3 build.py                     # writes game.html (CDN three.js) and test.
 cd tests
 python3 test_mechanics.py            # 50 checks: movement, skeleton and gait, camera, touch UI, climbing, gathering, store, horse, hunting, camp, fishing, law, NPCs, doors, day/night, encounters, save slots
 python3 test_story.py                # 91 checks: two full playthroughs with opposite choices, plus failure and retry
-python3 test_controller.py           # 45 checks: movement, frame-rate independence, animation states and crossfades, camera, collision, real touch input
+python3 test_controller.py           # 54 checks: movement, frame-rate independence, animation states and crossfades, camera, collision, real touch input, retargeted clips
+python3 test_pwa.py                  # 6 checks: manifest, icons, installability, offline play
 ```
 Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
 
@@ -78,6 +79,15 @@ Retargeted clips (Quaternius Universal Animation Library 1 and 2, CC0) are used 
 If the extra data is missing, every one falls back to the original clip or procedural pose.
 
 Gait phase follows distance travelled using the stride measured from the clips, and two-bone leg IK keeps feet on slopes. Still missing: a jog that suits chibi proportions (the library's walk, jog and sprint retarget into a hunched scramble, so the rig's own Walk/Run blend stays), plus turn-in-place and start/stop clips.
+
+## Install on your phone
+The game is published at **https://khil13.github.io/HollowPines/** whenever `main` passes CI (the `deploy` job in `.github/workflows/tests.yml`). It's an installable web app: once loaded it works offline and opens full screen.
+- **iPhone/iPad (Safari):** open the link, tap Share, then Add to Home Screen.
+- **Android (Chrome):** open the link, tap the ⋮ menu, then Install app (or Add to Home screen).
+
+How it's built: `build.py` writes `site/` with a full page head, `manifest.webmanifest`, icons (`tools/make_icons.py` draws them into `assets/icons/`), local copies of three.js and an offline cache (`pwa/sw.js`). Each build has its own cache name, so an installed copy updates the next time it's opened while online. Saved games live in that browser on that device, separate from the claude.ai preview. `tests/test_pwa.py` checks the manifest, icons, installability and that the game runs offline.
+
+One-time setup: in the repository's Settings, open Pages and set the source to **GitHub Actions**.
 
 ## Run locally
 ```
