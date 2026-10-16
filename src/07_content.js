@@ -139,7 +139,7 @@ const World = {
     prop(G(sheriff), M(GEO.box, '#6b4226', 2.2, 0.9, 1.0, 0, 0.8, -1.2), 0, 0, 0); Col.box(-23.1, -20.9, 6.3, 7.3, sheriff.y, sheriff.y + 1.25, { block: true });
     for (let i = 0; i < 7; i++) G(sheriff).add(M(GEO.cyl, '#555', 0.03, 2.6, 0.03, 1.4 + i * 0.35, 1.65, -1.8)); Col.box(-20.7, -18.2, 4.6, 6.4, sheriff.y, sheriff.y + 3, { block: true });
     const boardM = M(GEO.box, '#8b6a47', 1.6, 1.1, 0.08, -3.8, 1.9, 0.6); boardM.rotation.y = Math.PI / 2; G(sheriff).add(boardM); for (let i = 0; i < 3; i++) { const pp = M(GEO.box, '#f4ead3', 0.04, 0.4, 0.3, -3.75, 1.9 + (i % 2) * 0.2, 0.2 + i * 0.4); G(sheriff).add(pp); }
-    Interact.add({ pos: () => ({ x: -25.5, y: sheriff.floor, z: 8.6 }), r: 1.8, pri: 0.4, opts: () => { const o = []; if (S.bounty > 0) o.push({ label: `Pay bounty ($${S.bounty.toFixed(2)})`, fn: () => Law.payAtOffice() }); const bm = Missions.st('bounty_rook'); if (bm.status === 'available') o.push({ label: 'Read poster: Rook Malloy', fn: () => Dialog.start(null, STORY.posterRook()) }); if (!o.length) o.push({ label: 'Wanted posters (none open)', disabled: true, fn: () => {} }); return o; } });
+    Interact.add({ pos: () => ({ x: -25.5, y: sheriff.floor, z: 8.6 }), r: 1.8, pri: 0.4, opts: p => { const o = []; if (S.bounty > 0) o.push({ label: `Pay bounty ($${S.bounty.toFixed(2)})`, fn: () => Law.payAtOffice() }); const bm = Missions.st('bounty_rook'); if (bm.status === 'available') o.push({ label: 'Read poster: Rook Malloy', fn: () => Dialog.start(null, STORY.posterRook()) }); const so = SIDE.boardOpts(p); o.unshift(...so.filter(x => x.label.startsWith('Turn in'))); o.push(...so.filter(x => !x.label.startsWith("Turn in"))); /* turn-ins first, the story poster before the rotating ones (only three prompts show) */ if (!o.length) o.push({ label: 'Wanted posters (none open)', disabled: true, fn: () => {} }); return o; } });
     container({ id: 'sheriff_cab', label: 'gun cabinet', x: -25, z: 5.2, y: sheriff.floor, owner: 'pike', loot: [['ammo_rev', 12]], restock: 4 });
     // homes
     const bed = (b, lx, lz) => { b.g.add(M(GEO.box, '#6b4226', 1.1, 0.5, 2.1, lx, 0.6, lz)); b.g.add(M(GEO.box, '#c8443a', 1.05, 0.15, 1.5, lx, 0.92, lz + 0.25)); b.g.add(M(GEO.box, '#f4ead3', 0.8, 0.15, 0.4, lx, 0.95, lz - 0.75)); };
@@ -197,7 +197,7 @@ const World = {
     /* --- Rook's hideout at the ford (bounty) --- */
     const fx = riverX(-120) + 22, fz = -128; this.campfire(fx, fz, false); const tt = new THREE.Group(); tt.position.set(fx + 3, Terrain.height(fx + 3, fz - 3), fz - 3); sc.add(tt); const tc = M(GEO.cone, '#a0794f', 1.6, 1.8, 1.6, 0, 0.9, 0); tc.geometry = new THREE.ConeGeometry(1, 1, 4); tt.add(tc); Col.circle(fx + 3, fz - 3, 1.1, Terrain.height(fx + 3, fz - 3) - 1, Terrain.height(fx + 3, fz - 3) + 2, { block: true, cover: true });
     /* --- vegetation, rocks, gatherables --- */
-    this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build();
+    this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
     /* --- graves near the cabin: environmental story --- */
     for (let i = 0; i < 2; i++) { const gx = -158 + i * 1.6, gz = -78; const g = new THREE.Group(); g.position.set(gx, Terrain.height(gx, gz), gz); sc.add(g); g.add(M(GEO.box, '#8b6a47', 0.1, 1.0, 0.1, 0, 0.5, 0)); g.add(M(GEO.box, '#8b6a47', 0.6, 0.1, 0.1, 0, 0.75, 0)); g.add(M(GEO.box, '#7a6a52', 0.7, 0.15, 1.6, 0, 0.07, 0.9)); }
     Interact.add({ pos: () => ({ x: -157.2, y: Terrain.height(-157, -78), z: -78 }), r: 1.8, opts: () => [{ label: 'Read grave markers', fn: () => { UI.banner('Hollow Cabin', 'Two markers', '"T. Ashby, homesteader. Sold to the railroad, never left." The ground is older than Eli\'s visit. Someone else lost this land first.'); if (!S.evidence.graves) { S.evidence.graves = true; journal('Two graves by Hollow Cabin. The Ashbys "sold to the railroad" and never left. Same story as the Greers, years earlier.', 'evidence'); } } }] });
@@ -319,7 +319,7 @@ const World = {
   apply() {
     const farmOcc = S.locations.farm === 'occupied'; if (this.farmBoards) this.farmBoards.visible = !farmOcc;
     for (const n of NPC.all.slice()) if (n.cond && !n.cond()) NPC.despawn(n);
-    STORY.spawnWorldNPCs(); Camps.apply();
+    STORY.spawnWorldNPCs(); Camps.apply(); SIDE.percival();
     for (const n of NPC.all) if (n.key && S.chars[n.key] === 'dead' && n.alive) n.setDead(true);
   },
 };

@@ -72,7 +72,7 @@ const Game = {
     Sky.update(dt); P.update(dt); H.update(dt); Fishing.update(dt);
     for (const n of NPC.all) { const d = Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.update(dt, d > 110 && !n.tags.includes('story')); }
     for (const a of Animal.all) a.update(dt, a.distP > 150);
-    DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); this.wildlifeTick(dt); Dialog.update();
+    DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); this.wildlifeTick(dt); Dialog.update();
     if (!Dialog.open && !UI.panelOpen) Interact.update(P); else UI.prompts([]);
     FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Ambient.update(dt); Terrain.waterU.uTime.value = this.time;
     // discovery

@@ -16,6 +16,7 @@ Stylized frontier open-world game: rounded, expressive characters with procedura
 - `src/08_story.js` — cast, reactive dialogue, missions, encounters
 - `src/08b_ch4.js` — Chapter 4, Night at Willow Bridge (tail, eavesdrop, confrontation)
 - `src/08c_ch5.js` — Chapter 5, The Ledger (Survey Camp 3, allies, four endings)
+- `src/08d_side.js` — bounty board, stranger missions, road encounters, travelers, landmarks
 - `src/09_ui.js` — HUD, panels, map, shop, camp, fishing
 - `src/10_main.js` — boot, camera (including the two-shot conversation camera), main loop, test hooks (`window.HP`)
 
@@ -32,6 +33,7 @@ python3 test_pwa.py                  # 6 checks: manifest, icons, installability
 python3 test_camps.py                # 15 checks: traveler camps (routine, night theft, waking sleepers, hold-ups) and outlaw hideouts (takedowns, clearing, loot, reoccupation)
 python3 test_gunplay.py              # 10 checks: aim-in speed, camera keeping up with the mouse, soft lock, hit zones, misses, recoil, spread
 python3 test_ch4.py                  # 34 checks: Chapter 4 start, unseen tail, eavesdropping, four endings, failure, retry and reload
+python3 test_side.py                 # 27 checks: bounty board (alive, dead, runner), three stranger missions, road encounters, travelers, landmarks
 python3 test_ch5.py                  # 23 checks: Chapter 5's four endings, allies fighting, silent takedown, quiet rescue, fail/retry, reload
 ```
 Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
@@ -62,6 +64,32 @@ The finale. Ride into the marker at the foot of the trail north of Coyote Mill a
 - **The Cranes** come if Dutchy is your ally, led by Fenwick (or Sal if Fenwick is dead). They open fire from the gate, and once Eli is free they execute Vane. **Ending: cranes.**
 - **Alone:** cut Eli loose from the survey tent at the back of camp. Crouched takedowns from behind are silent, and getting him out with no alarm is an optional objective. Vane steps into the gate on the way out. Draw on him (**ending: gun**), or take his $200 and hand over every paper you carry (**ending: payout**). If you took his money in Chapter 4, he remembers.
 - Allies fight Vane's men on their own: they pick targets, close in and shoot. Eli dying fails the mission, and a reload restarts it on the trail. Afterwards Eli lives in Juniper Gap (unless you took the payout), and an epilogue sums up the valley's fate.
+
+## Side content
+RDR2-style things to do between (and after) story chapters, in `src/08d_side.js`:
+- **Bounty board** at the sheriff's office. After Chapter 1, two wanted posters are always up, with a new one each day. Each poster names the outlaw, the crime, an alive and a dead reward, and the hideout they were seen near. There are six outlaws at five hideouts:
+  - **Gangs** ride with two or three men.
+  - **Runners** bolt the moment they see you, then fight if you catch them.
+  - **The sleeper** dozes by the fire; sneak up and knock him out.
+  - **The brawler** fights only with his fists, so beat him down with yours.
+  - To turn one in, knock them out, hogtie them and carry them (or stow them on your horse) to the board for the full reward. Or bring proof from the body for the lower one.
+- **Stranger missions:**
+  - **Hank's Strike:** Hank's map, a shovel from Mae's, gold below Lookout Ridge, and claim jumpers you can persuade (honor 10+), pay or fight. Then split the gold with Hank, or lie.
+  - **Doc's Medicine:** examine the robbed wagon on the cabin road, follow the tracks to the old quarry, and steal or fight for the crate. Doc treats you free afterwards.
+  - **Still Life:** keep low and quiet while Percival Lumley photographs deer at Pine Hollow (standing or moving near them ruins the plate), then drive off the wolves.
+- **Road encounters** near trails, once a day each:
+  - **Hold-up:** road agents robbing a traveler. Shoot them, cut yourself in, or ride on.
+  - **Snakebite:** a bitten traveler. Suck out the venom or give him a tonic.
+  - **Ambush:** a cry for help that's really a trap.
+- **Travelers** walk the trails in daylight (prospectors, farmhands, drifters, a preacher). You can greet or rob them like anyone else.
+- **Landmarks:**
+  - A telegraph line along the main road.
+  - Juniper Gap Cemetery, with the Calloways' headstone.
+  - Doc's wrecked wagon on the cabin road.
+  - A fishing dock below the bridge.
+  - Hay bales and a scarecrow at the Greer farm.
+  - A carcass with circling vultures.
+  - New signposts.
 
 ## Mission framework
 Missions are data: stages, objectives (`O.goto`, `O.talk`, `O.item`, `O.clues`, `O.defeat`, `O.check`), optional objectives, fail rules, branching `next`, `prereq` and `blocked` conditions, and `complete`/`failOutcome` hooks that write to world state. Mission types: main, side, hunt, bounty, plus dynamic encounters. A failed mission offers Retry (restores a checkpoint taken at mission start) or Accept (the failure becomes part of the story).
