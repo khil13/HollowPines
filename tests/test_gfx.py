@@ -1,6 +1,7 @@
 """Atmosphere and combat effects: the sun's arc matches the day, a long golden hour, dark nights where lanterns
 matter, valley mist at dawn, and gunfight effects (muzzle flash and smoke, dirt where misses land, blood on hits,
-enemy muzzle smoke, gallop dust) that clean themselves up."""
+enemy muzzle smoke, gallop dust) that clean themselves up. Plus the render pipeline: post-processing tiers, textured
+buildings, the dense grass field and the water shader."""
 import asyncio, json
 from run import boot
 from playwright.async_api import async_playwright
@@ -48,6 +49,25 @@ async def main():
         r = await ev(pg, """(()=>{ X.reset(); const H = HP.Game.horse; H.pos.set(-90, H.pos.y, -20); H.yaw = 0; const n0 = X.sprites().length; let made = 0; for (let i = 0; i < 40; i++) { H.speed = 12; H.onG = true; HP.sim(X.F, X.F); } const b = fwd(H.yaw);
             return { dust: X.sprites().filter(p => p.m.position.y < H.pos.y + 1.5).length, speed: +H.speed.toFixed(1) }; })()""")
         check('horses: a galloping horse kicks up a trail of dust', r['dust'] >= 4, r)
+
+        # --- render pipeline: post-processing, textures, grass, water ---
+        tiers = {}
+        for q in ('low', 'medium', 'high'):
+            await ev(pg, f"Settings.set('quality', '{q}')"); await pg.wait_for_timeout(500)  # real frames, so every shader compiles
+            tiers[q] = await ev(pg, "({ on: Post.on, ao: Post.ao, fxaa: Post.fxaa, grass: Grass.mesh ? Grass.mesh.geometry.instanceCount : 0, inScene: !!(Grass.mesh && Grass.mesh.parent) })")
+        check('post: low quality renders straight to screen with no grass field; medium adds grading + grass; high adds AO, FXAA and the densest grass',
+              not tiers['low']['on'] and tiers['low']['grass'] == 0 and tiers['medium']['on'] and not tiers['medium']['ao'] and tiers['medium']['grass'] > 10000 and tiers['high']['on'] and tiers['high']['ao'] and tiers['high']['fxaa'] and tiers['high']['grass'] > tiers['medium']['grass'] and tiers['high']['inScene'], tiers)
+        r = await ev(pg, """(()=>{ const bw = []; for (const b of Buildings) if (b.o) b.g.traverse(o => { if (WallMeshes.includes(o)) bw.push(o); }); const walls = bw.filter(m => m.material.map).length; let roofs = 0; for (const b of Buildings) for (const rf of b.roofs || []) rf.traverse(o => { if (o.material && o.material.map) roofs++; });
+            const uv = WallMeshes[0].geometry.attributes.uv; let mx = 0; for (let i = 0; i < uv.count; i++) mx = Math.max(mx, uv.getX(i), uv.getY(i)); return { walls, total: bw.length, roofs, uvMax: +mx.toFixed(2) }; })()""")
+        check('textures: building walls and roofs carry wood siding / shingle textures tiled in metres', r['walls'] == r['total'] and r['total'] > 20 and r['roofs'] > 5 and r['uvMax'] > 1.5, r)
+        r = await ev(pg, """(()=>{ const b = Buildings[0]; return { trail: Grass.at(TRAILS[0][1][0], TRAILS[0][1][1]), inside: Grass.at((b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2), pond: Grass.at(PONDS[0].x, PONDS[0].z), meadow: Grass.at(-95, 30) }; })()""")
+        check('grass: thick in open meadows, none on trails, in ponds or under buildings', r['meadow'] > 0.6 and r['trail'] < 0.05 and r['inside'] == 0 and r['pond'] == 0, r)
+        r = await ev(pg, """(()=>{ HP.tp(-95, 30); HP.sim(0.2, X.F); const U = Grass.U, P = HP.Game.player; const ok = U.uPushA.value.distanceTo(P.pos) < 0.01 && Math.hypot(U.uCam.value.x - HP.Game.cam.pos.x, U.uCam.value.y - HP.Game.cam.pos.z) < 0.01; const t0 = WIND.uTime.value; HP.sim(0.5, X.F); return { follows: ok, wind: WIND.uTime.value > t0 }; })()""")
+        check('grass: the field follows the camera, bends away from the player and sways in the wind', r['follows'] and r['wind'], r)
+        r = await ev(pg, """(()=>{ const u = Terrain.waterU; HP.S.weather.kind = 'clear'; HP.S.weather.next = 99; HP.S.time.hour = 12; HP.sim(0.5, X.F); const t0 = u.uTime.value, top = u.uTop.value.equals(Sky.domeU.top.value), cam = u.uCamPos.value.distanceTo(HP.Game.camera.position) < 0.01, dry = u.uRain.value;
+            Sky.weather = HP.S.weather.kind = 'rain'; HP.sim(4, X.F); const wet = u.uRain.value; HP.S.weather.kind = 'clear'; Sky.weather = 'clear'; HP.sim(0.1, X.F); return { moves: u.uTime.value > t0, top, cam, dry: +dry.toFixed(2), wet: +wet.toFixed(2), depth: !!u.tH.value }; })()""")
+        check('water: reflects the current sky, ripples over time, knows its depth, and roughens in the rain', r['moves'] and r['top'] and r['cam'] and r['depth'] and r['dry'] < 0.1 and r['wet'] > 0.6, r)
+        await ev(pg, "Settings.set('quality', 'low')")
 
         bad = [e for e in errs if 'favicon' not in e]
         check('no page errors', not bad, bad[:5])
