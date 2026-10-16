@@ -5,7 +5,7 @@ const Game = {
     await Assets.init();
     const canvas = $('view'); this.mobile = matchMedia('(pointer:coarse)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent); this.quality = Settings.v.quality === 'auto' ? (this.mobile ? 'medium' : 'high') : Settings.v.quality;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !this.mobile, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.quality === 'high' ? 1.6 : this.quality === 'medium' ? 1.25 : 0.9)); this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.quality === 'high' ? 1.6 : this.quality === 'medium' ? 1.25 : 0.9)); this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
     this.scene = new THREE.Scene(); this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 900); this.resize(); addEventListener('resize', () => this.resize());
     Input.init(canvas); this.cam = new CamRig(this.camera);
     Terrain.build(this.scene); Sky.init(this.scene); FX.init(this.scene); World.build(); Fishing.init(); Ambient.init(); this.applyQuality();

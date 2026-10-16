@@ -20,6 +20,15 @@ const Sky = {
       vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
       fragmentShader: 'uniform vec3 top; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol; varying vec3 vD; void main(){ float h = clamp(vD.y,-0.2,1.0); vec3 c = mix(hor, top, pow(max(h,0.0),0.55)); float s = max(dot(vD, normalize(sunDir)),0.0); c += sunCol * (pow(s,8.0)*0.25 + pow(s,64.0)*0.5); if (h < 0.0) c = mix(hor, hor*0.85, -h*5.0); gl_FragColor = vec4(c,1.0); }' }));
     this.dome.renderOrder = -1; scene.add(this.dome);
+    // low valley mist: a soft noise sheet at a fixed height, so hills rise out of it and hollows fill with it at dawn
+    this.mistU = { uOp: { value: 0 }, uCol: { value: new THREE.Color('#e6e8e4') }, uCam: { value: new THREE.Vector3() }, uT: { value: 0 } };
+    this.mist = new THREE.Mesh(new THREE.PlaneGeometry(700, 700, 1, 1).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({ uniforms: this.mistU, transparent: true, depthWrite: false, fog: false,
+      vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+      fragmentShader: 'uniform float uOp; uniform vec3 uCol; uniform vec3 uCam; uniform float uT; varying vec3 vW; float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); } float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); } void main(){ vec2 p = vW.xz * 0.018 + vec2(uT * 0.01, uT * 0.004); float m = n(p) * 0.6 + n(p * 2.3) * 0.4; float d = distance(vW.xz, uCam.xz); float a = uOp * smoothstep(0.25, 0.75, m) * smoothstep(14.0, 55.0, d) * (1.0 - smoothstep(260.0, 340.0, d)); gl_FragColor = vec4(uCol, a); }' }));
+    this.mist.renderOrder = 2; this.mist.frustumCulled = false; scene.add(this.mist);
+    // sun glare: a soft additive halo that blooms when you look toward a low sun
+    const gc = document.createElement('canvas'); gc.width = gc.height = 128; const gg = gc.getContext('2d'), gr = gg.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(255,240,210,1)'); gr.addColorStop(0.25, 'rgba(255,200,140,0.45)'); gr.addColorStop(1, 'rgba(255,170,90,0)'); gg.fillStyle = gr; gg.fillRect(0, 0, 128, 128);
+    this.glare = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(gc), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false })); this.glare.scale.setScalar(140); scene.add(this.glare);
   },
   night() { const h = S.time.hour; return h < 5.5 || h > 20.5; },
   advance(hours) { S.time.hour += hours; while (S.time.hour >= 24) { S.time.hour -= 24; S.time.day++; Game.newDay(); } },
@@ -30,22 +39,26 @@ const Sky = {
     this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
     const raining = this.weather === 'rain'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
     if (Math.abs(this.wet - (this._lw || 0)) > 0.04) { this._lw = this.wet; Terrain.setWet(this.wet); }
-    const h = S.time.hour; const th = (h - 6) / 12 * Math.PI; const sy = Math.sin(th), sx = Math.cos(th);
-    const day = smoothstep(-0.12, 0.25, sy); const dusk = Math.max(0, 1 - Math.abs(sy - 0.05) * 5) * (1 - this.cloud * 0.6);
+    const h = S.time.hour; const th = (h - 5.5) / 14.5 * Math.PI; const sy = Math.sin(th), sx = Math.cos(th); // sunrise ~5:30, sunset ~20:00 (night() and the street lamps agree)
+    const day = smoothstep(-0.1, 0.22, sy); const dusk = (sy > -0.08 ? 1 - smoothstep(0.02, 0.45, sy) : 0) * (1 - this.cloud * 0.7); this.golden = dusk; // a long golden hour, RDR2-style
+    const mist = (smoothstep(4.6, 5.8, h) * (1 - smoothstep(7.4, 9.6, h)) + (this.weather === 'rain' ? 0.5 : 0)) * (1 - this.cloud * 0.3); this.mistAmt = mist;
     const P = Game.player.pos; this.sun.position.set(P.x + sx * 80, P.y + Math.max(8, sy * 90), P.z + 35); this.sun.target.position.copy(P);
     this.sunM.position.set(Game.cam.pos.x + sx * 350, Game.cam.pos.y + sy * 350, Game.cam.pos.z + 140); this.sunM.visible = sy > -0.1;
     this.moonM.position.set(Game.cam.pos.x - sx * 350, Game.cam.pos.y - sy * 350, Game.cam.pos.z - 120); this.moonM.visible = sy < 0.1;
     this.stars.position.copy(Game.cam.pos); this.stars.material.opacity = (1 - day) * (1 - this.cloud * 0.8);
-    const cDay = new THREE.Color('#8fcbea').lerp(new THREE.Color('#9aa7b0'), this.cloud * 0.8), cNight = new THREE.Color('#141d3a'), cDusk = new THREE.Color('#f0a066');
-    const sky = cNight.clone().lerp(cDay, day).lerp(cDusk, dusk * 0.6); const top = new THREE.Color('#141d3a').lerp(new THREE.Color('#4f9ad2').lerp(new THREE.Color('#7f8b94'), this.cloud * 0.8), day).lerp(new THREE.Color('#e08a5a'), dusk * 0.25);
+    const cDay = new THREE.Color('#8fcbea').lerp(new THREE.Color('#9aa7b0'), this.cloud * 0.8), cNight = new THREE.Color('#0a1024'), cDusk = new THREE.Color('#f4a35c');
+    const sky = cNight.clone().lerp(cDay, day).lerp(cDusk, dusk * 0.8); const top = new THREE.Color('#0a1024').lerp(new THREE.Color('#4f9ad2').lerp(new THREE.Color('#7f8b94'), this.cloud * 0.8), day).lerp(new THREE.Color('#6a7fb0'), dusk * 0.35);
     const hor = sky.clone().lerp(new THREE.Color('#ffffff'), 0.25 * day * (1 - this.cloud * 0.5)); this.domeU.top.value.copy(top); this.domeU.hor.value.copy(hor); this.domeU.sunDir.value.set(sx, sy, 0.4); this.domeU.sunCol.value.set(dusk > 0.3 ? '#ffb070' : '#fff2cc').multiplyScalar(day * (1 - this.cloud * 0.8));
-    this.dome.position.copy(Game.cam.pos); Game.scene.background = hor; Game.scene.fog.color.copy(hor).lerp(new THREE.Color('#9fb6a0'), 0.12);
-    Game.scene.fog.density = raining ? 0.0085 : this.cloud > 0.4 ? 0.0045 : 0.0032; WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
-    this.sun.intensity = day * (1 - this.cloud * 0.55) * 0.95 + (1 - day) * 0.08; this.sun.color.set(dusk > 0.3 ? '#ffc890' : '#fff1d6'); if (day < 0.2) this.sun.position.set(P.x - sx * 80, P.y + 60, P.z - 30);
-    this.hemi.intensity = 0.3 + day * 0.32; this.hemi.color.set(day > 0.3 ? '#cfe3f0' : '#7f93c8'); this.amb.intensity = 0.12 + (1 - day) * 0.1;
+    this.dome.position.copy(Game.cam.pos); Game.scene.background = hor; Game.scene.fog.color.copy(hor).lerp(new THREE.Color('#9fb6a0'), 0.12 * day).lerp(new THREE.Color('#f0b07a'), dusk * 0.3).lerp(new THREE.Color('#e3e6e2'), mist * 0.5);
+    Game.scene.fog.density = (raining ? 0.0085 : this.cloud > 0.4 ? 0.0045 : 0.003) + mist * 0.0045 + dusk * 0.0008;
+    this.mist.position.set(Game.cam.pos.x, 4.2, Game.cam.pos.z); this.mistU.uCam.value.copy(Game.cam.pos); this.mistU.uT.value += dt; this.mistU.uOp.value = Math.min(0.85, mist * 0.75 + (1 - day) * 0.12); this.mistU.uCol.value.copy(Game.scene.fog.color).lerp(new THREE.Color('#ffffff'), 0.25 * day);
+    this.glare.position.copy(this.sunM.position); this.glare.material.opacity = sy > -0.05 ? (0.08 + dusk * 0.4) * (1 - this.cloud * 0.8) : 0; this.glare.scale.setScalar(70 + dusk * 90); WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
+    // warm low sun and long shadows at golden hour; at night the 'sun' becomes a dim blue moonlight and the world goes properly dark
+    this.sun.intensity = day * (1 - this.cloud * 0.55) * (0.95 + dusk * 0.2) + (1 - day) * 0.16; this.sun.color.set('#fff1d6').lerp(new THREE.Color('#ff8a3a'), dusk).lerp(new THREE.Color('#8fa8e0'), 1 - day); if (day < 0.2) this.sun.position.set(P.x - sx * 80, P.y + 60, P.z - 30);
+    this.hemi.intensity = 0.13 + day * 0.47; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.05 + day * 0.07;
     this.cloudMat.color.set(raining ? '#8e979e' : '#ffffff'); for (const c of this.clouds.children) { c.position.x += dt * 1.5; if (c.position.x > 280) c.position.x = -280; c.visible = Math.random() < 2 && (c.id % 3 < 1 + this.cloud * 2); }
     this.rain.visible = raining; if (raining) { this.rain.position.set(Game.cam.pos.x, Game.cam.pos.y - 8, Game.cam.pos.z); const a = this.rain.geometry.attributes.position.array; for (let i = 0; i < a.length; i += 6) { a[i + 1] -= dt * 26; a[i + 4] -= dt * 26; if (a[i + 1] < 0) { a[i + 1] += 22; a[i + 4] += 22; } } this.rain.geometry.attributes.position.needsUpdate = true; }
-    const lampOn = h > 19 || h < 6.2; for (const l of Game.lamps) l.intensity = lampOn ? 1.1 : 0;
+    const lampOn = h > 19 || h < 6.2; for (const l of Game.lamps) l.intensity = lampOn ? 1.15 + (1 - day) * 0.6 : 0; // lanterns matter once it's dark
     // ambience
     Sfx.bed('wind', 0.05 + clamp((P.y - 10) / 30, 0, 0.12) + this.cloud * 0.04); Sfx.bed('rain', raining ? 0.18 : 0);
     const rd = Math.abs(P.x - riverX(P.z)); Sfx.bed('river', clamp(1 - rd / 30, 0, 1) * 0.12);
