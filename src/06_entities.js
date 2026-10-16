@@ -315,7 +315,8 @@ class Person {
       if (this.witness && this.state !== 'combat') return [{ label: `Pay off ($8)`, disabled: S.money < 8, fn: () => this.payoff() }, { label: 'Intimidate', crime: true, fn: () => this.intimidate() }];
       return [];
     }
-    if (this.state === 'handsup') return [];
+    if (this.isAsleep()) return []; // no prompts on a sleeper (and none crowding the lockbox beside the bedroll)
+    if (this.state === 'handsup') return Game.player.aiming && !this.robbed ? [{ label: `Rob ${this.name}`, crime: true, fn: () => this.rob() }] : [];
     const o = []; const tree = this.talk ? this.talk(this) : null;
     if (tree) o.push({ label: `Talk to ${this.name}`, fn: () => Dialog.start(this, tree) });
     o.push({ label: 'Greet', fn: () => this.greeted(p) });
@@ -339,6 +340,11 @@ class Person {
     if (this.brave > 0.6 && c.type !== 'murder') { this.state = 'confront'; this.confrontT = 3; this.say(pick(['Hey! I saw that!', 'You can\'t do that here!'])); }
     else { this.state = 'report'; this.say(pick(['Sheriff! Sheriff!', 'Help!', 'Somebody get the law!'])); this.path = null; }
   }
+  isAsleep() { return this.state === 'routine' && this.atPlace && this.act === 'sleep' && !(this.wakeT > 0); }
+  wake() { this.wakeT = 25; this.anim.expr = 'alarm'; this.face(Game.player.pos); this.say(pick(['Huh? Who\'s there?', 'Hey! What are you doing here?', 'Wake up! Someone\'s in camp!']), 3); }
+  // a hold-up: once their hands are up at gunpoint, take what they carry (a witnessed robbery: bounty and honor)
+  rob() { this.robbed = true; const cash = Math.round(rand(3, 10) * 100) / 100; Inv.money(cash, `robbed from ${this.name}`); this.mem.robbed = S.time.day; Game.player.anim.play('taunt');
+    this.say(pick(['Take it! Just take it!', 'That\'s all I have!', 'You\'ll hang for this.']), 3); Law.crime('robbery', this.pos, { victim: this }); Missions.emit('robbery', { npc: this }); }
   payoff() { Inv.money(-8, `paid off ${this.name}`); this.witness = null; this.state = 'routine'; this.say('I didn\'t see nothin\'.'); if (this.key) Rep.rel(this.key, -6); this.anim.expr = 'calm'; }
   intimidate() { Game.player.anim.play('taunt'); const ok = Math.random() < (Game.player.weapon !== 'fists' ? 0.8 : 0.5); if (ok) { this.witness = null; this.state = 'routine'; this.say('A-alright. I never saw a thing.'); Rep.honor(-3, 'intimidation'); if (this.key) Rep.rel(this.key, -12); } else { this.say('You don\'t scare me!'); this.state = 'report'; this.sp = 6; } }
   investigate(pos) { if (this.hostileToPlayer || this.lawman && S.wanted) return; if (this.brave > 0.5 && this.state === 'routine') { this.state = 'investigate'; this.invPos = pos; this.invT = 10; this.path = null; this.say('What was that?'); } }
@@ -361,7 +367,7 @@ class Person {
     if (fromP && this.lawful && !this.lawman && this.alive && this.hp > 0 && o.melee && this.brave > 0.55) { this.fightPlayer(true); this.say(pick(['You want a fight? You got one!', 'Why you...!'])); }
     if (this.hp <= 0) { if (o.melee || this.knockoutOnly) this.knockdown(); else { this.setDead(); if (fromP) { S.stats.kills++; Missions.emit('kill', { npc: this }); } } }
   }
-  knockdown() { this.downed = true; this.downT = this.tags.includes('bounty') ? 1e9 : 30; this.state = 'down'; this.hp = 0; Sfx.burst(250, 0.3, 0.2); Missions.emit('ko', { npc: this }); if (this.gunM) this.gunM.visible = false; }
+  knockdown() { this.downed = true; this.downT = this.tags.includes('bounty') || this.tags.includes('outlaw') ? 1e9 : 30; /* hideout outlaws stay down */ this.state = 'down'; this.hp = 0; Sfx.burst(250, 0.3, 0.2); Missions.emit('ko', { npc: this }); if (this.gunM) this.gunM.visible = false; }
   setDead(silent) { this.alive = false; this.state = 'dead'; this.lootable = !silent; if (this.key && !this.tags.includes('generic')) { S.chars[this.key] = 'dead'; if (!silent) journal(`${this.name} is dead.`, 'fate'); } if (this.gunM) this.gunM.visible = false; this.anim.expr = 'calm'; }
   lootBody(p) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.looted = true; const cash = Math.round(rand(1, 6) * 100) / 100; Inv.money(cash, 'from the body'); if (this.gun) Inv.add(this.gun === 'rifle' ? 'ammo_rifle' : 'ammo_rev', 4); if (this.loot) this.loot(); if (this.lawful) Law.crime('looting', this.pos, {}); }, 1300); }
   hogtie(p) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.hogtied = true; UI.toast(`${this.name} is hogtied`); Missions.emit('hogtie', { npc: this }); }, 1500); }
@@ -369,8 +375,9 @@ class Person {
   perceive() {
     const P = Game.player; const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z, d = Math.hypot(dx, dz); this.distP = d;
     const facing = Math.cos(angDiff(this.yaw, Math.atan2(dx, dz))); const range = (Sky.night() ? 20 : 34) * this.sense;
-    this.seesPlayer = P.alive && d < range && (facing > -0.1 || d < 5) && Col.los(this.pos.x, this.pos.y + 1.5, this.pos.z, P.pos.x, P.pos.y + 1.2, P.pos.z);
+    this.seesPlayer = P.alive && d < range && (facing > -0.1 || (d < 5 && !P.crouch)) && Col.los(this.pos.x, this.pos.y + 1.5, this.pos.z, P.pos.x, P.pos.y + 1.2, P.pos.z);
     if (this.sleepy) this.seesPlayer = this.seesPlayer && d < 2.2 && !P.crouch;
+    if (this.isAsleep()) this.seesPlayer = P.alive && d < 2.2 && !P.crouch; // eyes closed: only someone standing right beside the bedroll
   }
   moveTo(tx, tz, speed, dt, arrive = 0.6) {
     const dx = tx - this.pos.x, dz = tz - this.pos.z, d = Math.hypot(dx, dz); if (d < arrive) { this.sp = damp(this.sp, 0, 10, dt); return true; }
@@ -383,17 +390,19 @@ class Person {
   go(tx, tz, wild) { this.path = wild ? [{ x: tx, z: tz }] : townPath(this.pos.x, this.pos.z, tx, tz); this.goal = { x: tx, z: tz }; }
   schedEntry() { if (!this.schedule) return null; const h = S.time.hour; const rain = Sky.weather === 'rain'; for (const e of this.schedule) { const [a, b] = e; if (a <= b ? (h >= a && h < b) : (h >= a || h < b)) { if (rain && e[3] && e[3].rain) return Object.assign({}, e, { 2: e[3].rain }); return e; } } return this.schedule[0]; }
   update(dt, far) {
-    this.t += dt; this.say_t -= dt; if (this.say_t <= 0) this.speech = null;
+    this.t += dt; this.say_t -= dt; if (this.say_t <= 0) this.speech = null; this.wakeT = Math.max(0, (this.wakeT || 0) - dt); this.it.r = this.state === 'handsup' ? 7 : 2.4; // hold-ups work at gunpoint range
     if (this.carried) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
     if (!this.alive) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
     if (this.downed) { this.downT -= dt; this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); if (this.downT <= 0 && !this.hogtied) { this.downed = false; this.hp = this.maxHp * 0.5; this.anim.play('standup'); if (this.lawful && !this.lawman) { this.state = 'report'; this.witness = { type: 'assault', value: Law.VALUES.assault, pos: { x: this.pos.x, z: this.pos.z } }; this.say('You\'ll pay for that!'); } else this.fightPlayer(); } return; }
     this.perceiveT -= dt; if (this.perceiveT <= 0) { this.perceiveT = far ? 1 : 0.2; this.perceive(); }
-    if (far && this.state === 'routine' && !this.group) { const e = this.schedEntry(); if (e) { const pl = PLACES[e[2]]; if (pl && Math.hypot(pl.x - this.pos.x, pl.z - this.pos.z) > 2) { this.pos.set(pl.x, Col.ground(pl.x, pl.z, 99), pl.z); this.yaw = pl.yaw || 0; this.path = null; } this.act = pl ? pl.act : 'idle'; } this.place(); return; }
+    if (far && this.state === 'routine' && !this.group) { const e = this.schedEntry(); if (e) { const pl = PLACES[e[2]]; if (pl && Math.hypot(pl.x - this.pos.x, pl.z - this.pos.z) > 2) { this.pos.set(pl.x, Col.ground(pl.x, pl.z, 99), pl.z); this.yaw = pl.yaw || 0; this.path = null; } this.act = pl ? pl.act : 'idle'; this.atPlace = true; } this.place(); return; }
     let animState = 'ground'; this.poseClip = null;
     switch (this.state) {
       case 'routine': { const e = this.schedEntry(); if (!e) { if (this.idleAt) this.moveTo(this.idleAt.x, this.idleAt.z, 1.3, dt); break; } const pl = PLACES[e[2]]; if (!pl) break;
         if (!this.goal || this.goal.x !== pl.x || this.goal.z !== pl.z) this.go(pl.x, pl.z, this.wild);
-        const there = this.followPath(dt, 1.35); if (there) { this.sp = damp(this.sp, 0, 8, dt); this.yaw = dampAngle(this.yaw, pl.yaw || 0, 4, dt); animState = pl.act === 'sit' ? 'sit' : pl.act === 'sleep' ? 'lie' : pl.act === 'work' ? 'work' : pl.act === 'chat' ? 'chat' : 'ground'; this.poseClip = pl.clip || null; if (pl.wander) { this.wT = (this.wT || 0) - dt; if (this.wT <= 0) { this.wT = rand(5, 12); const a = rand(0, TAU), r = rand(0, pl.wander); this.goal = null; this.path = [{ x: pl.x + Math.cos(a) * r, z: pl.z + Math.sin(a) * r }]; } } } this.act = pl.act; break; }
+        const there = this.followPath(dt, 1.35); this.atPlace = there;
+        if (this.isAsleep() && this.distP < 3.2 && !Game.player.crouch && Math.hypot(Game.player.vel.x, Game.player.vel.z) > 0.6) this.wake(); // footsteps right beside a sleeper
+        if (there) { this.sp = damp(this.sp, 0, 8, dt); this.yaw = dampAngle(this.yaw, pl.yaw || 0, 4, dt); animState = pl.act === 'sit' ? 'sit' : pl.act === 'sleep' ? 'lie' : pl.act === 'work' ? 'work' : pl.act === 'chat' ? 'chat' : 'ground'; this.poseClip = pl.clip || null; if (this.wakeT > 0 && pl.act === 'sleep') { animState = 'ground'; this.poseClip = null; this.face(Game.player.pos); } if (pl.wander) { this.wT = (this.wT || 0) - dt; if (this.wT <= 0) { this.wT = rand(5, 12); const a = rand(0, TAU), r = rand(0, pl.wander); this.goal = null; this.path = [{ x: pl.x + Math.cos(a) * r, z: pl.z + Math.sin(a) * r }]; } } } this.act = pl.act; break; }
       case 'talk': this.sp = 0; this.face(Game.player.pos); animState = 'chat'; break;
       case 'handsup': this.sp = 0; animState = 'handsup'; this.handsT += dt; if (!Game.player.aiming || Game.player.lock !== this) { if (this.handsT > 2) { this.state = this.witness ? 'report' : 'flee'; this.fleeFrom = Game.player.pos.clone(); this.fleeT = 6; } } else this.handsT = 0; break;
       case 'flee': { const a = Math.atan2(this.pos.x - this.fleeFrom.x, this.pos.z - this.fleeFrom.z); this.moveTo(this.pos.x + Math.sin(a) * 5, this.pos.z + Math.cos(a) * 5, 5.2, dt); this.fleeT -= dt; if (this.fleeT <= 0) { this.state = this.witness ? 'report' : 'routine'; this.goal = null; this.anim.expr = 'calm'; } break; }
@@ -404,7 +413,7 @@ class Person {
       case 'pursue': { if (!S.wanted) { this.calm(); break; } if (this.seesPlayer && this.distP < 26) { if (!this.warned) { this.warned = true; this.warnT = 3.5; this.say('Hands where I can see \'em! You\'re under arrest!', 4); } this.face(Game.player.pos); this.sp = damp(this.sp, 0, 8, dt); this.anim.layers.aim = 1; this.warnT -= dt; if (this.warnT <= 0) this.fightPlayer(); }
         else { const c = Law.searchC || Game.player.pos; this.moveTo(c.x + Math.sin(this.t * 0.3) * 8, c.z + Math.cos(this.t * 0.3) * 8, 4.5, dt, 2); } break; }
       case 'combat': this.combat(dt); break;
-      case 'patrol': this.patrol(dt); break;
+      case 'patrol': this.patrol(dt); if (this.sitter && this.alert < 0.3) { const s = this.sitter; if (Math.hypot(this.pos.x - s.x, this.pos.z - s.z) < 1.2) { this.pos.x = damp(this.pos.x, s.x, 8, dt); this.pos.z = damp(this.pos.z, s.z, 8, dt); this.yaw = dampAngle(this.yaw, s.yaw, 6, dt); this.sp = 0; animState = 'sit'; this.poseClip = s.clip; } } break; // fireside sitters face the fire
       case 'scripted': if (this.script) this.script(dt, this); break;
       case 'tied': this.sp = 0; animState = 'sit'; break;
     }

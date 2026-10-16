@@ -24,8 +24,8 @@ const Interact = {
 /* ---------- Law: crimes only matter if someone actually witnesses them ---------- */
 const Law = {
   searchC: null, searchR: 70, seenT: 0, recogT: 0, lastCrimeT: -99,
-  VALUES: { theft: 5, trespass: 2, assault: 10, murder: 35, brandish: 3, breakin: 6, looting: 4 },
-  NAMES: { theft: 'Theft', trespass: 'Trespassing', assault: 'Assault', murder: 'Murder', brandish: 'Threatening', breakin: 'Breaking in', looting: 'Looting a body' },
+  VALUES: { theft: 5, trespass: 2, assault: 10, murder: 35, brandish: 3, breakin: 6, looting: 4, robbery: 15 },
+  NAMES: { theft: 'Theft', trespass: 'Trespassing', assault: 'Assault', murder: 'Murder', brandish: 'Threatening', breakin: 'Breaking in', looting: 'Looting a body', robbery: 'Robbery' },
   crime(type, pos, o = {}) {
     if (o.region === 'wild' && !NPC.all.some(n => n.alive && n.lawful && Math.hypot(n.pos.x - pos.x, n.pos.z - pos.z) < 30)) return [];
     S.stats.crimes++; const value = (this.VALUES[type] || 3) + (o.value || 0); const ws = [];
@@ -33,6 +33,7 @@ const Law = {
       if (!n.alive || n.downed || !n.lawful || n === o.victimSkip) continue;
       const dx = Game.player.pos.x - n.pos.x, dz = Game.player.pos.z - n.pos.z, d = Math.hypot(dx, dz);
       if (d > 32) continue;
+      if (n.isAsleep && n.isAsleep()) { if (d < 2.5 && !Game.player.crouch) n.wake(); else continue; } // sleepers only notice you right beside them, standing
       const facing = Math.cos(angDiff(n.yaw, Math.atan2(dx, dz))) > -0.2; const dark = Sky.night() ? 0.6 : 1;
       const sees = (d < 5 || (facing && d < 28 * dark)) && Col.los(n.pos.x, n.pos.y + 1.5, n.pos.z, Game.player.pos.x, Game.player.pos.y + 1.2, Game.player.pos.z);
       const heard = o.noise && d < o.noise;
@@ -41,7 +42,7 @@ const Law = {
     }
     if (o.victim && o.victim.alive && !ws.includes(o.victim)) ws.push(o.victim);
     if (!ws.length) { UI.toast(`${this.NAMES[type]} · unseen`, ''); return ws; }
-    UI.toast(`${this.NAMES[type]} witnessed`, 'bad'); Rep.honor(type === 'murder' ? -15 : type === 'assault' ? -5 : -3);
+    UI.toast(`${this.NAMES[type]} witnessed`, 'bad'); Rep.honor(type === 'murder' ? -15 : type === 'assault' ? -5 : type === 'robbery' ? -8 : -3);
     for (const w of ws) w.witnessed({ type, value, pos: { x: pos.x, z: pos.z }, t: Game.time });
     this.lastCrimeT = Game.time; return ws;
   },

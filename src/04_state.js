@@ -51,7 +51,7 @@ function freshState() {
     factions: { town: 0, crane: -20, railroad: 0, greer: 0 },
     chars: { eli: 'missing', fenwick: 'alive', dutchy: 'alive', rook: 'alive', ezra: 'home', nell: 'home', mae: 'alive', pike: 'alive', brock: 'alive' },
     locations: { farm: 'occupied', mill: 'gang', cabin: 'abandoned' },
-    missions: {}, chapter: 1, stats: { kills: 0, pelts: 0, fish: 0, crimes: 0, distance: 0 }, camp: null, carry: null, horseCarry: null,
+    missions: {}, camps: {}, chapter: 1, stats: { kills: 0, pelts: 0, fish: 0, crimes: 0, distance: 0 }, camp: null, carry: null, horseCarry: null,
   };
 }
 let S = freshState();
