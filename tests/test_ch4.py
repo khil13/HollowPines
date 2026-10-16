@@ -113,8 +113,8 @@ async def main():
         check('[bought] Dutchy spooks their horses and both guns run off east', ok and len(r) == 2 and all(d > 18 for d in r), f'{r} ok={ok} opts={o1} toasts={await ev(pg, "K.toasts()")} st={await ev(pg, "HP.NPC.all.filter(n => n.group === \'rail4\').map(n => n.state)")}')
         await ev(pg, "(()=>{ HP.sim(30); const P = HP.Game.player; P.crouch = true; HP.tp(MEET.x + 1.5, MEET.z + 3.5); P.crouch = true; P.yaw = Math.PI; HP.sim(0.2); })()")
         ok = await ev(pg, "HP.press('Steal Vane')")
-        try: await pg.wait_for_function("HP.S.evidence.ledger === true", timeout=20000)
-        except Exception: pass
+        # the pickup animation runs on game time, so step the game rather than waiting on the wall clock
+        await ev(pg, "(()=>{ for (let i = 0; i < 40 && !HP.S.evidence.ledger; i++) { HP.Game.player.crouch = true; HP.sim(0.1, 1/60); } })()")
         r = await ev(pg, "({ ledger: !!HP.S.evidence.ledger, item: HP.Inv.count('vane_ledger'), stage: K.stage(), spotted: !!K.c().spotted })")
         check('[bought] with their backs to the bank, the ledger is lifted off the crate unseen', ok and r['ledger'] and r['item'] == 1 and not r['spotted'], r)
         await ev(pg, "K.hide(); K.listen()")
