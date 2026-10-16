@@ -215,6 +215,3 @@ Missions.def({ id: 'ch4', type: 'main', chapter: 4, title: 'Night at Willow Brid
 CH4.rewind = ctx => { // a reload mid-tail restarts the night from the jail, like an RDR2 checkpoint
   ctx.rew = 1; ctx.m.stage = 0; ctx.m.c = {}; CH4.cleanup(); UI.toast('Back at the jail. Pike hasn\'t left yet.', '');
 };
-
-Missions.def({ id: 'ch5', type: 'main', chapter: 5, title: 'The Ledger', giver: 'none', summary: 'Coming in the next build: find Eli at Tamarack Pass.',
-  prereq: () => ['done', 'failed', 'unavailable'].includes(Missions.st('ch4').status), stages: [{ id: 'x', objectives: [] }] });

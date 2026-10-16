@@ -12,6 +12,7 @@ const POIS = [
   { id: 'camp_teague', name: "Teague's Camp", x: -170, z: 62, r: 18, icon: 'camp' },
   { id: 'camp_holt', name: 'Holt Hunting Camp', x: 148, z: 14, r: 18, icon: 'camp' },
   { id: 'camp_rattlesnake', name: 'Rattlesnake Hollow', x: 184, z: -112, r: 22, icon: 'camp' },
+  { id: 'tamarack', name: 'Tamarack Pass (Survey Camp 3)', x: 92, z: -166, r: 22, icon: 'camp' },
 ];
 // traveler camps and outlaw hideouts (layouts and behaviour in 07b_camps.js); r keeps trees out of the clearing
 const CAMPS = [{ id: 'camp_teague', x: -170, z: 62, r: 9 }, { id: 'camp_holt', x: 148, z: 14, r: 9 }, { id: 'camp_rattlesnake', x: 184, z: -112, r: 12 }];
@@ -22,6 +23,7 @@ const FLATS = [
   { x: -40, z: 20, r: 44, h: 2 }, { x: -120, z: 95, r: 30, h: 2.5 }, { x: 135, z: -85, r: 24, h: 3 },
   { x: -150, z: -85, r: 13, h: 4 }, { x: -55, z: -146, r: 14, h: 5 }, { x: 150, z: 140, r: 9, h: 15.5 },
   { x: riverX(0) - 15, z: 0, r: 4, h: 0.8 }, { x: riverX(0) + 15, z: 0, r: 4, h: 0.8 },
+  { x: 92, z: -166, r: 20, h: 17 }, // Survey Camp 3, a railroad camp on a shelf above the river
 ];
 const TRAILS = [
   [[-40, 20], [-5, 18], [riverX(0) - 16, 0], [riverX(0) + 16, 0], [95, -30], [120, -70], [135, -85]],
@@ -30,6 +32,7 @@ const TRAILS = [
   [[-100, -20], [-70, -110], [-55, -140]],
   [[-70, -110], [riverX(-120) - 10, -120], [riverX(-120) + 12, -120], [110, -100], [135, -85]],
   [[riverX(0) + 16, 0], [110, 60], [150, 140]],
+  [[110, -100], [101, -126], [95, -146], [92, -158]], // up to Tamarack Pass
 ];
 function segDist(px, pz, ax, az, bx, bz) { const vx = bx - ax, vz = bz - az, wx = px - ax, wz = pz - az; const t = clamp((wx * vx + wz * vz) / (vx * vx + vz * vz), 0, 1); return Math.hypot(px - (ax + vx * t), pz - (az + vz * t)); }
 function trailDist(x, z) { let m = 1e9; for (const tr of TRAILS) for (let i = 0; i < tr.length - 1; i++) m = Math.min(m, segDist(x, z, tr[i][0], tr[i][1], tr[i + 1][0], tr[i + 1][1])); return m; }

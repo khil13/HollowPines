@@ -15,6 +15,7 @@ Stylized frontier open-world game: rounded, expressive characters with procedura
 - `src/07_content.js` — sky, time and weather, world layout, containers, clues, doors
 - `src/08_story.js` — cast, reactive dialogue, missions, encounters
 - `src/08b_ch4.js` — Chapter 4, Night at Willow Bridge (tail, eavesdrop, confrontation)
+- `src/08c_ch5.js` — Chapter 5, The Ledger (Survey Camp 3, allies, four endings)
 - `src/09_ui.js` — HUD, panels, map, shop, camp, fishing
 - `src/10_main.js` — boot, camera (including the two-shot conversation camera), main loop, test hooks (`window.HP`)
 
@@ -31,6 +32,7 @@ python3 test_pwa.py                  # 6 checks: manifest, icons, installability
 python3 test_camps.py                # 15 checks: traveler camps (routine, night theft, waking sleepers, hold-ups) and outlaw hideouts (takedowns, clearing, loot, reoccupation)
 python3 test_gunplay.py              # 10 checks: aim-in speed, camera keeping up with the mouse, soft lock, hit zones, misses, recoil, spread
 python3 test_ch4.py                  # 34 checks: Chapter 4 start, unseen tail, eavesdropping, four endings, failure, retry and reload
+python3 test_ch5.py                  # 23 checks: Chapter 5's four endings, allies fighting, silent takedown, quiet rescue, fail/retry, reload
 ```
 Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
 
@@ -53,6 +55,13 @@ Unlocks after Chapter 3. Ask Cora about the sheriff (Mae, if Cora is dead), then
 - **Eavesdrop.** Silas Vane and two railroad guns wait on the east bank. They only talk while you're within earshot (20 m), so creep in through the brush. What they say depends on earlier choices: whether Pike brings Vane Eli's journal, how Brock Harlan was faced down, whether the Greers kept their farm, and whether Dutchy is riding with you. Vane lets slip that Eli is alive at Tamarack Pass. Halfway through, the two lean on the bridge rail with their backs to the bank, which is your window to lift Vane's ledger off the crate. If you're spotted, the meeting breaks up and Vane calls you over.
 - **Settle it.** Show Vane Eli's journal (Pike turns on him; this needs the journal or Mae's copy, so it's impossible if you gave the journal to Pike), take Vane's $100 to leave the valley, draw on them (his men fight, Pike fights too if he brought the journal, Vane always runs), back away, or slip off with the ledger. If Dutchy is your ally he waits on the west bank and can spook their horses to pull the guards away.
 - A reload mid-mission restarts the night at the jail. The result is recorded in `S.decisions.ch4`, `S.chars.pike` (`turned`, `left`, `dead`), `S.evidence.ledger` and `S.evidence.eli_alive` for Chapter 5.
+
+## Chapter 5: The Ledger
+The finale. Ride into the marker at the foot of the trail north of Coyote Mill and up to Survey Camp 3 at Tamarack Pass, where Vane holds Eli. Who waits at the overlook depends on the whole story:
+- **Marshal Ruth Calder and a deputy** come if you still have evidence (Eli's journal, Mae's copy or Vane's ledger) or if Pike turned in Chapter 4. A turned Pike rides with them. They walk you to the gate and read Vane his warrant. Show the evidence and some of his men walk away, two if Pike is there to testify. The rest fight, Vane surrenders when they're down, and the marshal arrests him. **Ending: law.**
+- **The Cranes** come if Dutchy is your ally, led by Fenwick (or Sal if Fenwick is dead). They open fire from the gate, and once Eli is free they execute Vane. **Ending: cranes.**
+- **Alone:** cut Eli loose from the survey tent at the back of camp. Crouched takedowns from behind are silent, and getting him out with no alarm is an optional objective. Vane steps into the gate on the way out. Draw on him (**ending: gun**), or take his $200 and hand over every paper you carry (**ending: payout**). If you took his money in Chapter 4, he remembers.
+- Allies fight Vane's men on their own: they pick targets, close in and shoot. Eli dying fails the mission, and a reload restarts it on the trail. Afterwards Eli lives in Juniper Gap (unless you took the payout), and an epilogue sums up the valley's fate.
 
 ## Mission framework
 Missions are data: stages, objectives (`O.goto`, `O.talk`, `O.item`, `O.clues`, `O.defeat`, `O.check`), optional objectives, fail rules, branching `next`, `prereq` and `blocked` conditions, and `complete`/`failOutcome` hooks that write to world state. Mission types: main, side, hunt, bounty, plus dynamic encounters. A failed mission offers Retry (restores a checkpoint taken at mission start) or Accept (the failure becomes part of the story).
