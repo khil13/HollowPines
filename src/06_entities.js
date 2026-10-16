@@ -47,8 +47,9 @@ function noiseEvent(x, z, r, src) { for (const a of Animal.all) if (a.alive && M
 /* Gunplay hit tests. People get a standing capsule split into head, body and legs; animals keep their hit sphere. */
 const GUN = { revolver: { dmg: 40, range: 45, cool: 0.38, spread: 0.004, bloom: 0.02, kick: 0.028 }, rifle: { dmg: 75, range: 90, cool: 1.0, spread: 0.0012, bloom: 0.03, kick: 0.05 }, ZONE: { head: 2.5, body: 1, legs: 0.65 } };
 function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground to 1.75 m): distance and which part was hit
+  const by = h.pos.y - (h.state === 'ride' ? 0.6 : 0); // a seated rider's capsule starts below the saddle so head/body zones line up
   const px = o.x - h.pos.x, pz = o.z - h.pos.z, a = d.x * d.x + d.z * d.z; if (a < 1e-8) return null; const b = px * d.x + pz * d.z, c = px * px + pz * pz - 0.36 * 0.36, disc = b * b - a * c; if (disc < 0) return null;
-  const sq = Math.sqrt(disc); for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - h.pos.y; if (y < 0 || y > (h.downed ? 0.5 : 1.75)) continue; return { t, zone: y > 1.42 ? 'head' : y < 0.85 ? 'legs' : 'body' }; } return null;
+  const sq = Math.sqrt(disc); for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - by; if (y < 0 || y > (h.downed ? 0.5 : 1.75)) continue; return { t, zone: y > 1.42 ? 'head' : y < 0.85 ? 'legs' : 'body' }; } return null;
 }
 function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
   let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
@@ -114,7 +115,7 @@ class Player {
     // combat
     if (this.canAct()) this.combat(dt, aiming);
     // stealth: crouched in tall grass/dark is quieter
-    this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8;
+    this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8; if (Sky.raining()) this.noise *= 0.6; // rain muffles footsteps
     let la = null, ld = 7; for (const nn of NPC.all) { if (!nn.alive || nn.downed) continue; const d = Math.hypot(nn.pos.x - this.pos.x, nn.pos.z - this.pos.z); if (d < ld) { ld = d; la = nn.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
     this.feedLoco(dt, hs, I.mag > 0.1);
     this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn: this._turn, tired: S.p.st < 1 && hs > 1, loco: this.loco });
@@ -292,7 +293,7 @@ class Horse {
     this.drive(dt, target);
   }
   drive(dt, gl) {
-    const speeds = [0, 2.1, 4.7, 8.4, 13.2], names = ['walk', 'walk', 'trot', 'canter', 'gallop']; const ts = speeds[gl] * (S.h.st < 5 ? 0.6 : 1);
+    const speeds = [0, 2.1, 4.7, 8.4, 13.2], names = ['walk', 'walk', 'trot', 'canter', 'gallop']; const ts = speeds[gl] * (S.h.st < 5 ? 0.6 : 1) * (1 - Sky.wet * 0.18); // mud slows a horse down
     this.speed = damp(this.speed, ts, ts > this.speed ? 1.6 : 2.6, dt); this.gait = this.speed < 3.2 ? 'walk' : this.speed < 6.4 ? 'trot' : this.speed < 10.5 ? 'canter' : 'gallop';
     if (this.gait === 'gallop') S.h.st -= (S.upgrades.saddle ? 6 : 9) * dt; else if (this.gait === 'canter') S.h.st -= 1.5 * dt; else S.h.st = Math.min(this.maxSt(), S.h.st + (S.upgrades.saddle ? 9 : 6) * dt);
     if (S.h.st <= 0) { S.h.st = 0; if (Math.random() < dt) Sfx.neigh(); }
@@ -433,7 +434,7 @@ class Person {
   asCarry() { const n = this; return { id: 'npc:' + this.key, label: this.name, h: 0.3, stowable: true, mesh: this.rig.root, npc: this, onPick() { n.carried = true; }, onDrop(x, z) { n.carried = false; n.pos.set(x, Col.ground(x, z, 99), z); } }; }
   perceive() {
     const P = Game.player; const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z, d = Math.hypot(dx, dz); this.distP = d;
-    const facing = Math.cos(angDiff(this.yaw, Math.atan2(dx, dz))); const range = (Sky.night() ? 20 : 34) * this.sense;
+    const facing = Math.cos(angDiff(this.yaw, Math.atan2(dx, dz))); const range = (Sky.night() ? 20 : 34) * this.sense * Sky.visMul(); // rain, storms and fog shorten how far anyone sees
     this.seesPlayer = P.alive && d < range && (facing > -0.1 || (d < 5 && !P.crouch)) && Col.los(this.pos.x, this.pos.y + 1.5, this.pos.z, P.pos.x, P.pos.y + 1.2, P.pos.z);
     if (this.sleepy) this.seesPlayer = this.seesPlayer && d < 2.2 && !P.crouch;
     if (this.isAsleep()) this.seesPlayer = P.alive && d < 2.2 && !P.crouch; // eyes closed: only someone standing right beside the bedroll
@@ -447,7 +448,7 @@ class Person {
   }
   followPath(dt, speed) { if (!this.path || !this.path.length) return true; const p = this.path[0]; if (this.moveTo(p.x, p.z, speed, dt, this.path.length > 1 ? 0.9 : 0.5)) { this.path.shift(); if (!this.path.length) return true; } return false; }
   go(tx, tz, wild) { this.path = wild ? [{ x: tx, z: tz }] : townPath(this.pos.x, this.pos.z, tx, tz); this.goal = { x: tx, z: tz }; }
-  schedEntry() { if (!this.schedule) return null; const h = S.time.hour; const rain = Sky.weather === 'rain'; for (const e of this.schedule) { const [a, b] = e; if (a <= b ? (h >= a && h < b) : (h >= a || h < b)) { if (rain && e[3] && e[3].rain) return Object.assign({}, e, { 2: e[3].rain }); return e; } } return this.schedule[0]; }
+  schedEntry() { if (!this.schedule) return null; const h = S.time.hour; const rain = Sky.raining(); for (const e of this.schedule) { const [a, b] = e; if (a <= b ? (h >= a && h < b) : (h >= a || h < b)) { if (rain && e[3] && e[3].rain) return Object.assign({}, e, { 2: e[3].rain }); return e; } } return this.schedule[0]; }
   update(dt, far) {
     this.t += dt; this.say_t -= dt; if (this.say_t <= 0) this.speech = null; this.wakeT = Math.max(0, (this.wakeT || 0) - dt); this.it.r = this.state === 'handsup' ? 7 : 2.4; // hold-ups work at gunpoint range
     if (this.carried) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
@@ -475,9 +476,10 @@ class Person {
       case 'patrol': this.patrol(dt); if (this.sitter && this.alert < 0.3) { const s = this.sitter; if (Math.hypot(this.pos.x - s.x, this.pos.z - s.z) < 1.2) { this.pos.x = damp(this.pos.x, s.x, 8, dt); this.pos.z = damp(this.pos.z, s.z, 8, dt); this.yaw = dampAngle(this.yaw, s.yaw, 6, dt); this.sp = 0; animState = 'sit'; this.poseClip = s.clip; } } break; // fireside sitters face the fire
       case 'scripted': if (this.script) this.script(dt, this); break;
       case 'tied': this.sp = 0; animState = 'sit'; break;
+      case 'ride': Riders.ai(this, dt); animState = 'ride'; break;
     }
     if (this.state !== 'pursue' && this.state !== 'combat' && !this.allyAim) this.anim.layers.aim = 0;
-    const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt);
+    if (this.state !== 'ride') { const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt); }
     this.anim.lookAt = (this.distP < 6 && Game.player.alive && !this.hostileToPlayer && animState !== 'lie') ? Game.player.pos : null;
     this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: (x, z, y) => Col.ground(x, z, y), poseClip: this.poseClip });
     this.place();

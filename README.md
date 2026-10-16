@@ -19,6 +19,7 @@ Stylized frontier open-world game. Three.js (r128), plain JavaScript, no build s
 - `src/08b_ch4.js` — Chapter 4, Night at Willow Bridge (tail, eavesdrop, confrontation)
 - `src/08c_ch5.js` — Chapter 5, The Ledger (Survey Camp 3, allies, four endings)
 - `src/08d_side.js` — bounty board, stranger missions, road encounters, travelers, landmarks
+- `src/08e_riders.js` — NPCs on horseback: posses, fleeing outlaws, mounted ambushers
 - `src/09_ui.js` — HUD, panels, map, shop, camp, fishing
 - `src/10_main.js` — boot, camera (including the two-shot conversation camera), main loop, test hooks (`window.HP`)
 
@@ -35,6 +36,7 @@ python3 test_pwa.py                  # 6 checks: manifest, icons, installability
 python3 test_camps.py                # 15 checks: traveler camps (routine, night theft, waking sleepers, hold-ups) and outlaw hideouts (takedowns, clearing, loot, reoccupation)
 python3 test_gunplay.py              # 10 checks: aim-in speed, camera keeping up with the mouse, soft lock, hit zones, misses, recoil, spread
 python3 test_ch4.py                  # 34 checks: Chapter 4 start, unseen tail, eavesdropping, four endings, failure, retry and reload
+python3 test_riders.py               # 17 checks: posses, riders shooting from the saddle, seated hitboxes, throwing riders, mounted runners and ambushers, weather sight/noise/lightning/mud
 python3 test_gfx.py                  # 11 checks: sun arc and golden hour, dark nights, dawn mist, muzzle smoke, impacts, blood, gallop dust
 python3 test_side.py                 # 27 checks: bounty board (alive, dead, runner), three stranger missions, road encounters, travelers, landmarks
 python3 test_ch5.py                  # 23 checks: Chapter 5's four endings, allies fighting, silent takedown, quiet rescue, fail/retry, reload
@@ -74,6 +76,20 @@ RDR2-inspired, in our own style (`Sky` in `src/07_content.js`, `FX` in `src/06_e
 - Nights are dark: ambient light drops, the moon gives a dim blue light, and lanterns burn brighter so they actually matter.
 - At dawn (and in rain) low mist fills the valleys while hilltops rise out of it, then burns off by mid-morning.
 - Gunfights: every shot (yours, enemies', allies') throws a muzzle flash and a drifting cloud of powder smoke. Misses kick up dirt and debris where they hit the ground, and hits draw a puff of blood. Galloping horses leave a trail of dust (darker mud when it's wet). Particles fade out and clean up, and the low quality setting uses fewer.
+
+## Riders and weather
+- **Mounted enemies** (`src/08e_riders.js`):
+  - **Posses:** wanted out in the country (away from Juniper Gap), two lawmen ride out after you. They gallop in, ride alongside at pistol range and shoot from the saddle. Lose them and they turn back.
+  - **Bounty runners** keep a horse saddled and flee on it.
+  - **Crane ambushers** ride in.
+  - **Shooting riders:** they have seated hitboxes, so head and body zones line up. Shooting the rider drops them out of the saddle while the horse bolts. Shooting the horse throws the rider, who is stunned (a bounty can then be hogtied) and gets up to fight on foot.
+  - **Riderless horses** wander off.
+- **Weather that matters:**
+  - **Weather types:** clear, overcast, rain, thunderstorm and fog (fog in the mornings).
+  - **Sight:** rain, storms and fog cut how far people see (to 75%, 60% and 45%).
+  - **Noise:** rain and storms muffle your footsteps.
+  - **Storms:** lightning lights up the valley, with thunder a moment later.
+  - **Mud:** wet ground slows horses, both yours and NPCs'.
 
 ## Side content
 RDR2-style things to do between (and after) story chapters, in `src/08d_side.js`:
