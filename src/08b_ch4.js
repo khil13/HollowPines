@@ -93,8 +93,9 @@ const CH4 = {
   learnEli() { if (S.evidence.eli_alive) return; S.evidence.eli_alive = true; journal('Eli is alive. Vane is holding him at Survey Camp 3, Tamarack Pass, until the survey is finished.', 'evidence'); UI.toast('Eli is alive', 'good'); },
   listenEnter(ctx) { const c = ctx.m.c; const pk = NPC.byKey('pike'); if (pk) pk.sense = 0.6; // eyes on Vane now, not the road
     c.lineI = c.lineI || 0; c.lineT = 1.2; c.sus = 0; c.heard = c.heard || 0; c.total = this.lines().length; STORY.hint('Crouch and creep within earshot. Vane and Pike stop talking if you\'re too far away to hear.'); },
+  distractTick(dt, c) { if (c.distractT > 0) { c.distractT -= dt; if (c.distractT <= 0 && this._distract) { this._distract(); this._distract = null; } } },
   listenUpdate(dt, ctx) {
-    const c = ctx.m.c, P = Game.player, v = NPC.byKey('vane'), pk = NPC.byKey('pike'); if (!v || c.fight || c.done) return; const L = this.lines();
+    this.distractTick(dt, ctx.m.c); const c = ctx.m.c, P = Game.player, v = NPC.byKey('vane'), pk = NPC.byKey('pike'); if (!v || c.fight || c.done) return; const L = this.lines();
     if (c.lineI < L.length) {
       if (v.distP < this.HEAR) { c.farT = 0; c.lineT -= dt; if (c.lineT <= 0) { const [who, txt, fx] = L[c.lineI]; const sp = who === 'v' ? v : pk; if (sp && sp.alive) sp.say(txt, 4.4); c.heard++; if (fx) fx(); c.lineI++; c.lineT = 4.6; if (c.lineI >= L.length) c.over = 1; } }
       else { c.farT = (c.farT || 0) + dt; if (c.farT > 6 && !c.farHint) { c.farHint = 1; UI.toast('Too far to make out what they\'re saying. Get closer.', ''); } }
@@ -113,9 +114,9 @@ const CH4 = {
   },
   dutchyDistract(d) {
     const c = this.c(); c.dutchyUsed = 1; d.say('Leave it to me.', 3); d.goTo = { x: MEET.x + 30, z: MEET.z + 16 };
-    setTimeout(() => { if (Missions.active !== 'ch4' || c.fight) return; UI.toast('Horses screaming east of the bridge. Vane\'s men run to them.', 'good');
+    c.distractT = 4; this._distract = () => { if (Missions.active !== 'ch4' || c.fight) return; UI.toast('Horses screaming east of the bridge. Vane\'s men run to them.', 'good');
       for (const n of NPC.all) if (n.group === 'rail4' && n.alive && !n.downed && n.state === 'patrol') { n.state = 'scripted'; n.away = 45; n.script = (dt, me) => { me.moveTo(MEET.x + 34, MEET.z + 12, 4.2, dt, 2); me.away -= dt; if (me.away <= 0) { me.state = 'patrol'; me.script = null; } }; }
-      NPC.despawn(d); }, 4000);
+      NPC.despawn(d); }; // runs on game time from the stage updates
   },
 
   /* ---------- stage 4: settle it ---------- */
@@ -169,7 +170,7 @@ const CH4 = {
     else if (v && !c.done) v.say('We\'re done here, Amos.', 2);
   },
   confrontUpdate(dt, ctx) {
-    const c = ctx.m.c; if (c.done) return;
+    const c = ctx.m.c; this.distractTick(dt, c); if (c.done) return;
     if (c.fight) { if (NPC.all.filter(n => n.tags.includes('ch4foe')).every(n => !n.alive || n.downed || n.fled)) this.resolve('fight'); return; }
     if (this.distMeet() > this.LEAVE) this.resolve(S.evidence.ledger ? 'stole' : 'walked');
   },

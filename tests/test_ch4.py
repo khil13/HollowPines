@@ -108,7 +108,7 @@ async def main():
         r = await ev(pg, "K.follow(20)"); check('[bought] tail completes with Dutchy keeping watch on the west bank', r['stage'] == 'listen' and await ev(pg, "!!HP.NPC.byKey('dutchy')"), r)
         await ev(pg, "K.hide(); HP.sim(10)")
         await ev(pg, "(()=>{ const d = HP.NPC.byKey('dutchy'); HP.tp(d.pos.x + 1.2, d.pos.z); HP.Game.player.yaw = -Math.PI / 2; HP.sim(0.1); })()")
-        o1 = await ev(pg, "HP.opts()"); ok = await ev(pg, "HP.press('Have Dutchy spook their horses')"); await pg.wait_for_timeout(4500); await ev(pg, "HP.sim(9)")
+        o1 = await ev(pg, "HP.opts()"); ok = await ev(pg, "HP.press('Have Dutchy spook their horses')"); await ev(pg, "HP.sim(14)")  # the distraction starts 4 s of game time after the order
         r = await ev(pg, "HP.NPC.all.filter(n => n.group === 'rail4').map(n => +Math.hypot(n.pos.x - MEET.x, n.pos.z - MEET.z).toFixed(1))")
         check('[bought] Dutchy spooks their horses and both guns run off east', ok and len(r) == 2 and all(d > 18 for d in r), f'{r} ok={ok} opts={o1} toasts={await ev(pg, "K.toasts()")} st={await ev(pg, "HP.NPC.all.filter(n => n.group === \'rail4\').map(n => n.state)")}')
         await ev(pg, "(()=>{ HP.sim(30); const P = HP.Game.player; P.crouch = true; HP.tp(MEET.x + 1.5, MEET.z + 3.5); P.crouch = true; P.yaw = Math.PI; HP.sim(0.2); })()")

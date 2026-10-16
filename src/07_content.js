@@ -214,7 +214,7 @@ const World = {
     /* --- Rook's hideout at the ford (bounty) --- */
     const fx = riverX(-120) + 22, fz = -128; this.campfire(fx, fz, false); const tt = new THREE.Group(); tt.position.set(fx + 3, Terrain.height(fx + 3, fz - 3), fz - 3); sc.add(tt); const tc = M(GEO.cone, '#a0794f', 1.6, 1.8, 1.6, 0, 0.9, 0); tc.geometry = new THREE.ConeGeometry(1, 1, 4); tt.add(tc); Col.circle(fx + 3, fz - 3, 1.1, Terrain.height(fx + 3, fz - 3) - 1, Terrain.height(fx + 3, fz - 3) + 2, { block: true, cover: true });
     /* --- vegetation, rocks, gatherables --- */
-    this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
+    Interiors.build(); this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
     /* --- graves near the cabin: environmental story --- */
     for (let i = 0; i < 2; i++) { const gx = -158 + i * 1.6, gz = -78; const g = new THREE.Group(); g.position.set(gx, Terrain.height(gx, gz), gz); sc.add(g); g.add(M(GEO.box, '#8b6a47', 0.1, 1.0, 0.1, 0, 0.5, 0)); g.add(M(GEO.box, '#8b6a47', 0.6, 0.1, 0.1, 0, 0.75, 0)); g.add(M(GEO.box, '#7a6a52', 0.7, 0.15, 1.6, 0, 0.07, 0.9)); }
     Interact.add({ pos: () => ({ x: -157.2, y: Terrain.height(-157, -78), z: -78 }), r: 1.8, opts: () => [{ label: 'Read grave markers', fn: () => { UI.banner('Hollow Cabin', 'Two markers', '"T. Ashby, homesteader. Sold to the railroad, never left." The ground is older than Eli\'s visit. Someone else lost this land first.'); if (!S.evidence.graves) { S.evidence.graves = true; journal('Two graves by Hollow Cabin. The Ashbys "sold to the railroad" and never left. Same story as the Greers, years earlier.', 'evidence'); } } }] });

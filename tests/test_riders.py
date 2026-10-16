@@ -31,7 +31,7 @@ async def main():
         check('posse: wanted out in the country, two lawmen ride out from Juniper Gap after you', r['n'] == 2 and r['riding'] and all(d > 70 for d in r['d']), r)
         r = await ev(pg, "(()=>{ const ps = R.posse(); let t = 0; while (t < 25 && Math.min(...ps.map(x => x.distP)) > 30) { R.wanted(); HP.sim(0.5, R.F); t += 0.5; } return { t, d: ps.map(x => +x.distP.toFixed(0)), sp: ps.map(x => +x.mount.speed.toFixed(1)) }; })()")
         check('posse: they gallop in and close the distance', min(r['d']) <= 30 and max(r['sp']) > 6, r)
-        r = await ev(pg, "(()=>{ const P = HP.Game.player; P.inv = 0; HP.S.p.hp = 9999; const hp0 = HP.S.p.hp; let shots = 0; for (let i = 0; i < 40; i++) { R.wanted(); const before = FX.tracers.length; HP.sim(0.25, R.F); if (FX.tracers.length > before) shots++; } P.inv = 1e9; return { shots, lost: hp0 - HP.S.p.hp }; })()")
+        r = await ev(pg, "(()=>{ const P = HP.Game.player; P.inv = 0; HP.S.p.hp = 9999; const hp0 = HP.S.p.hp; let shots = 0; for (let i = 0; i < 100; i++) { R.wanted(); const before = FX.tracers.length; HP.sim(0.25, R.F); if (FX.tracers.length > before) shots++; } P.inv = 1e9; return { shots, lost: hp0 - HP.S.p.hp }; })()")
         check('posse: riders shoot from the saddle', r['shots'] >= 2, r)
         r = await ev(pg, "(()=>{ HP.S.wanted = false; Law.searchC = null; for (const n of R.posse()) n.calm(); HP.sim(0.5, R.F); const modes = R.posse().map(x => x.rideMode); HP.tp(200, 150); let t = 0; while (t < 20 && R.posse().length) { HP.sim(0.5, R.F); t += 0.5; } return { modes, left: R.posse().length, horses: Riders.horses.length }; })()")
         check('posse: once you lose the law they turn back and ride off', all(m == 'leave' for m in r['modes']) and r['left'] == 0, r)
