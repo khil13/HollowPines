@@ -43,7 +43,7 @@ async def main():
         r = await ev(pg, """(()=>{ X.reset(); const P = HP.Game.player; const n = HP.NPC.spawn({ key: 'fxB', name: 'Outlaw', x: P.pos.x, z: P.pos.z + 12, lawful: false, gun: 'revolver', wild: true, hp: 500, maxHp: 500, tags: ['generic'] }); n.fightPlayer(); HP.sim(0.5, X.F); let near = 0;
             for (let i = 0; i < 6 && !near; i++) { n.shootT = 0; n.seesPlayer = true; HP.sim(X.F * 2, X.F); const m = new THREE.Vector3(); n.rig.R.hand.getWorldPosition(m); near = X.sprites(m, 1.8).length; } return { near }; })()""")
         check('gunfire: enemies\' shots smoke at the muzzle too', r['near'] >= 2, r)
-        r = await ev(pg, "(()=>{ HP.sim(3.5, X.F); return { left: X.sprites().length }; })()")
+        r = await ev(pg, "(()=>{ for (const n of HP.NPC.all.slice()) if (n.key && n.key.startsWith('fx')) HP.NPC.despawn(n); HP.sim(3.5, X.F); return { left: X.sprites().length }; })()")  # stop the shooter first, or a late shot leaves fresh smoke
         check('effects: smoke, dust and blood fade and clean up within a few seconds', r['left'] == 0, r)
         r = await ev(pg, """(()=>{ X.reset(); const H = HP.Game.horse; H.pos.set(-90, H.pos.y, -20); H.yaw = 0; const n0 = X.sprites().length; let made = 0; for (let i = 0; i < 40; i++) { H.speed = 12; H.onG = true; HP.sim(X.F, X.F); } const b = fwd(H.yaw);
             return { dust: X.sprites().filter(p => p.m.position.y < H.pos.y + 1.5).length, speed: +H.speed.toFixed(1) }; })()""")
