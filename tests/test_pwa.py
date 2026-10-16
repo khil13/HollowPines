@@ -1,12 +1,21 @@
 """Installable web app checks: manifest, icons, installability, offline cache, and the game running offline.
 Serves site/ from a subfolder (like GitHub Pages serves /HollowPines/). Run python3 build.py first."""
 import asyncio, os, shutil, tempfile
-from run import ROOT, _srv
+from run import ROOT
+import functools, http.server, threading
 from playwright.async_api import async_playwright
 RESULTS = []
 def check(name, ok, info=''):
     RESULTS.append((name, bool(ok), info)); print(('PASS ' if ok else 'FAIL ') + name + (f'  [{info}]' if info else ''))
-BASE = f'http://127.0.0.1:{_srv.server_address[1]}/site/'
+# the test owns this server so it can shut it down: with no server at all, the game can only come from the offline cache
+OFFLINE = threading.Event()
+class _Quiet(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):  # once "offline", refuse everything, even on connections Chrome opened ahead of time
+        if OFFLINE.is_set(): self.send_error(503); return
+        super().do_GET()
+srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(_Quiet, directory=ROOT)); threading.Thread(target=srv.serve_forever, daemon=True).start()
+BASE = f'http://127.0.0.1:{srv.server_address[1]}/site/'
 FONT = ('fonts.googleapis', 'fonts.gstatic', 'Failed to load resource')  # fonts can't load offline; the game falls back to system fonts
 
 async def main():
@@ -30,13 +39,25 @@ async def main():
         check('offline cache: the service worker controls the page and has cached the game', ctl and any(k.startswith('hollowpines-') and n >= 10 for k, n in cached), str(cached))
         cdp = await ctx.new_cdp_session(pg); inst = await cdp.send('Page.getInstallabilityErrors')
         check('installable: Chrome reports no installability errors', not inst.get('installabilityErrors'), str(inst))
-        await ctx.set_offline(True); errs.clear()
-        await pg.reload(); await pg.wait_for_function('document.getElementById("loading").textContent===""')
+        # go fully offline: refuse every request and stop the web server (Playwright's offline switch doesn't cover
+        # service-worker requests, and Chrome may already hold open connections)
+        OFFLINE.set(); srv.shutdown(); srv.server_close(); await ctx.set_offline(True); errs.clear()
+        try:
+            await pg.reload(timeout=60000); await pg.wait_for_function('document.getElementById("loading").textContent===""', timeout=60000)
+        except Exception as e:
+            check('offline: with the web server shut down the game loads, starts a new game and the player moves', False, f'game did not load from the offline cache: {str(e)[:120]}')
+            await ctx.close(); shutil.rmtree(prof, ignore_errors=True); return finish()
         await pg.tap('#bNew'); await pg.wait_for_timeout(800)
-        r = await pg.evaluate("(()=>{ HP.sim(1); const P=HP.Game.player, x=P.pos.x, z=P.pos.z; Input.move.x=0; Input.move.y=1; Input.move.mag=1; HP.sim(1,1/60); Input.move.mag=0; Input.move.y=0; return {model:Assets.ready, extras:Object.keys(window.EXTRA_ANIMS||{}).length, moved:+Math.hypot(P.pos.x-x, P.pos.z-z).toFixed(2), running:HP.Game.running, online:navigator.onLine}; })()")
+        r = await pg.evaluate("(()=>{ HP.sim(1); const P=HP.Game.player, x=P.pos.x, z=P.pos.z; Input.move.x=0; Input.move.y=1; Input.move.mag=1; HP.sim(1,1/60); Input.move.mag=0; Input.move.y=0; return {model:Assets.ready, extras:Object.keys(window.EXTRA_ANIMS||{}).length, moved:+Math.hypot(P.pos.x-x, P.pos.z-z).toFixed(2), running:HP.Game.running}; })()")
+        # prove the network really is off: a file the server has but the offline cache doesn't must fail to load (navigator.onLine
+        # isn't reliable in every headless Chromium build)
+        r['net_blocked'] = await pg.evaluate("fetch('../README.md?' + Date.now(), {cache: 'no-store'}).then(res => !res.ok, () => true)")  # served online, never cached
         bad = [e for e in errs if not any(f in e for f in FONT)]
-        check('offline: with no network the game loads, starts a new game and the player moves', not r['online'] and r['model'] and r['extras'] == 2 and r['running'] and r['moved'] > 1 and not bad, f"{r} errors={bad[:3]}")
+        check('offline: with the web server shut down the game loads, starts a new game and the player moves', r['net_blocked'] and r['model'] and r['extras'] == 2 and r['running'] and r['moved'] > 1 and not bad, f"{r} errors={bad[:3]}")
         await ctx.set_offline(False); await ctx.close(); shutil.rmtree(prof, ignore_errors=True)
+    finish()
+
+def finish():
     n = sum(1 for _, ok, _ in RESULTS if ok); print(f"\n{n}/{len(RESULTS)} pwa checks passed")
     if n != len(RESULTS): raise SystemExit(1)
 
