@@ -7,6 +7,8 @@ Stylized frontier open-world game: rounded, expressive characters with procedura
 - `src/01_core.js` — utilities, noise, input (keyboard/mouse/touch), synthesized audio
 - `src/02_world.js` — terrain heightfield, colliders and line of sight, building generator
 - `src/03_rig.js` — character and quadruped rigs, animator (blending, layered actions, foot IK, squash and stretch), horse gaits
+- `src/03b_gltf.js` — imported character model and `ClipAnimator` (AnimationMixer clips, crossfades, leg IK)
+- `src/03c_animstate.js` — locomotion state machine (`LocoFSM`) shared by the player and NPCs
 - `src/04_state.js` — items, persistent world state `S`, inventory, reputation, save/load
 - `src/05_systems.js` — interaction prompts, law and witnesses, dialogue engine, mission framework
 - `src/06_entities.js` — player, horse, NPC AI (schedules, witnesses, combat, cover), wildlife
@@ -23,8 +25,9 @@ python3 build.py                     # writes game.html (CDN three.js) and test.
 cd tests
 python3 test_mechanics.py            # 50 checks: movement, skeleton and gait, camera, touch UI, climbing, gathering, store, horse, hunting, camp, fishing, law, NPCs, doors, day/night, encounters, save slots
 python3 test_story.py                # 91 checks: two full playthroughs with opposite choices, plus failure and retry
+python3 test_controller.py           # 45 checks: movement, frame-rate independence, animation states and crossfades, camera, collision, real touch input
 ```
-Tests need Playwright with Chromium and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
+Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
 
 ## Mission framework
 Missions are data: stages, objectives (`O.goto`, `O.talk`, `O.item`, `O.clues`, `O.defeat`, `O.check`), optional objectives, fail rules, branching `next`, `prereq` and `blocked` conditions, and `complete`/`failOutcome` hooks that write to world state. Mission types: main, side, hunt, bounty, plus dynamic encounters. A failed mission offers Retry (restores a checkpoint taken at mission start) or Accept (the failure becomes part of the story).
@@ -42,3 +45,30 @@ Settings → Quality: Low (no shadows, sparse grass), Medium (character and buil
 - Aim, carry, hands-up and reins are pose snapshots taken from the clips.
 - Two-bone leg IK re-plants the feet every frame (slopes, crouching, stirrups).
 Materials are recoloured per character and the helmet is replaced by the game's hats. To swap the model, replace `assets/character.glb` with another rig that uses the same bone names, then run `python3 build.py`. If the model fails to load, the game falls back to the procedural characters.
+
+## Character controller
+`Player` (`src/06_entities.js`) reads keyboard, mouse and the touch joystick into one camera-relative input vector (diagonals normalized, opposite keys cancel). Physics runs in fixed 1/120 s sub-steps, so speed, stopping distance and jump height are the same at any frame rate. Tuning lives in `PLAYER`: walk 1.7 m/s (Ctrl or a light stick push), jog 3.9 (default), sprint 6.8 (Shift / Run), crouch 1.5 (C). Acceleration and deceleration are eased, turning is eased with a top turn speed, and jumps have anticipation, coyote time and input buffering. Collision uses the existing `Col` spatial hash; velocity is replaced by the motion that actually happened after collision, so walking into a wall stops the run cycle and leaves only the slide along it. Hard landings slow you briefly.
+
+Input is released when the window loses focus or is hidden, and when a touch is cancelled, so keys, the stick and buttons can't stay stuck. Touches that start on the stick or a button never rotate the camera.
+
+## Animation states
+`LocoFSM` picks one explicit state from measured speed, grounded state, vertical speed, input, crouch and dodge: `idle, startWalk, walk, jog, sprint, jumpStart, rising, falling, landing, crouchIdle, crouchWalk, dodge`. `ClipAnimator` crossfades every clip toward that state's target weights over `LOCO.FADE[state]` (frame-rate independent) and normalizes the weights, so blends never drift toward the bind pose.
+
+| State | Source |
+|---|---|
+| idle | Idle clip |
+| startWalk | Idle→Walk clips blended by speed, plus a procedural forward lean |
+| walk | Walk clip |
+| jog | Walk + Run clips blended by speed (no jog clip in the model) |
+| sprint | Run clip, plus a procedural forward lean |
+| jumpStart / rising / falling / landing | sections of the Jump clip |
+| crouchIdle / crouchWalk | Idle / Walk clips with procedural crouch (hips lowered, spine bent, legs re-solved by IK); no crouch clips in the model |
+| dodge | Roll clip |
+
+Gait phase follows distance travelled using the stride measured from the clips, and two-bone leg IK keeps feet on slopes. Missing assets that would improve this: dedicated jog, crouch-idle/crouch-walk, jump start/land, turn-in-place and start/stop clips for the same 23-bone rig.
+
+## Run locally
+```
+python3 build.py
+python3 -m http.server 8000         # then open http://localhost:8000/game.html
+```

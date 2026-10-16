@@ -87,6 +87,7 @@ const UI = {
     <label class="range">Camera distance<input type="range" id="setZoom" min="2.4" max="9" step="0.1" value="${Game.cam.zoom}"><span>${Game.cam.zoom.toFixed(1)}</span></label>
     <label class="range"><input type="checkbox" id="setInv" ${V.invertY ? 'checked' : ''}> Invert vertical look</label>
     <label class="range"><input type="checkbox" id="setAuto" ${V.autoCam ? 'checked' : ''}> Camera follows behind you while moving</label>
+    <label class="range"><input type="checkbox" id="setLock" ${V.mouseLock !== false ? 'checked' : ''}> Lock the mouse to the game on click (Esc releases it; dragging works either way)</label>
     <div class="sec">Graphics & sound</div>
     <label class="range">Quality <select id="setQ">${['auto', 'low', 'medium', 'high'].map(q => `<option value="${q}" ${V.quality === q ? 'selected' : ''}>${q[0].toUpperCase() + q.slice(1)}${q === 'auto' ? ` (${Game.quality})` : ''}</option>`).join('')}</select></label>
     <label class="range">Volume<input type="range" id="setVol" min="0" max="1" step="0.05" value="${V.sound}"><span>${Math.round(V.sound * 100)}%</span></label>
@@ -97,6 +98,7 @@ const UI = {
     on('setSens', 'input', e => { Settings.set('sens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); });
     on('setZoom', 'input', e => { Game.cam.zoom = +e.target.value; Settings.set('zoom', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(1); });
     on('setInv', 'change', e => Settings.set('invertY', e.target.checked)); on('setAuto', 'change', e => Settings.set('autoCam', e.target.checked));
+    on('setLock', 'change', e => { Settings.set('mouseLock', e.target.checked); if (!e.target.checked && document.pointerLockElement) document.exitPointerLock(); });
     on('setQ', 'change', e => Settings.set('quality', e.target.value)); on('setVol', 'input', e => { Settings.set('sound', +e.target.value); e.target.nextElementSibling.textContent = Math.round(e.target.value * 100) + '%'; });
   },
   renderShop() {

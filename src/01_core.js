@@ -35,10 +35,9 @@ const Input = {
   init(canvas) {
     addEventListener('keydown', e => { if (e.repeat) return; const k = e.key.toLowerCase(); this.keys.add(k); this.pressed.add(k); if (['tab', ' ', 'alt'].includes(k)) e.preventDefault(); });
     addEventListener('keyup', e => this.keys.delete(e.key.toLowerCase()));
-    addEventListener('blur', () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; });
     canvas.addEventListener('mousedown', e => {
       if (this.touch) return;
-      if (!this.locked && !this.uiOpen && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
+      if (!this.locked && !this.uiOpen && Settings.v.mouseLock !== false && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
       if (e.button === 0) { this.mouse.l = true; this.mouse.lp = true; } if (e.button === 2) this.mouse.r = true;
     });
     addEventListener('mouseup', e => { if (e.button === 0) this.mouse.l = false; if (e.button === 2) this.mouse.r = false; });
@@ -53,7 +52,7 @@ const Input = {
     const upd = e => { let dx = e.clientX - sx, dy = e.clientY - sy; const m = Math.hypot(dx, dy), R = 55; if (m > R) { dx *= R / m; dy *= R / m; } knob.style.transform = `translate(${dx}px,${dy}px)`; this.move.x = dx / R; this.move.y = -dy / R; this.move.mag = Math.min(1, m / R); };
     stick.addEventListener('pointermove', e => { if (e.pointerId === stickId) upd(e); });
     const end = e => { if (e.pointerId === stickId) { stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; } };
-    stick.addEventListener('pointerup', end); stick.addEventListener('pointercancel', end);
+    stick.addEventListener('pointerup', end); stick.addEventListener('pointercancel', end); stick.addEventListener('lostpointercapture', end);
     canvas.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') return; this.setTouch(true); lookIds.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
     const pinchD = () => { const a = [...lookIds.values()]; return a.length >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0; };
     canvas.addEventListener('pointermove', e => { const p = lookIds.get(e.pointerId); if (!p) return; const d0 = pinchD(); const nx = e.clientX, ny = e.clientY; if (lookIds.size >= 2) { p.x = nx; p.y = ny; this.pinch += pinchD() - d0; return; } this.look.dx += (nx - p.x); this.look.dy += (ny - p.y); p.x = nx; p.y = ny; });
@@ -68,6 +67,9 @@ const Input = {
       const up = () => { this.btn[n] = false; }; b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
     });
     addEventListener('touchstart', () => this.setTouch(true), { passive: true });
+    // anything held when the page loses focus, is hidden, or a menu opens is released, so nothing stays stuck on
+    this.reset = () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; this.mouse.dx = this.mouse.dy = 0; stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; lookIds.clear(); this.look.dx = this.look.dy = 0; for (const k in this.btn) this.btn[k] = false; };
+    addEventListener('blur', this.reset); document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
   },
   setTouch(v) { this.touch = v; document.body.classList.toggle('touch', v); document.getElementById('touch').hidden = !v || !Game.running; },
   down(k) { return this.keys.has(k); }, hit(k) { return this.pressed.has(k); }, tb(n) { return this.btnP.has(n); },
@@ -111,7 +113,7 @@ const Sfx = {
 
 /* ---------- Player settings (per browser) ---------- */
 const Settings = {
-  KEY: 'hollowpines_settings', v: { sens: 1, invertY: false, zoom: 4.6, quality: 'auto', autoCam: true, sound: 0.6, hints: true },
+  KEY: 'hollowpines_settings', v: { mouseLock: true, sens: 1, invertY: false, zoom: 4.6, quality: 'auto', autoCam: true, sound: 0.6, hints: true },
   load() { try { Object.assign(this.v, JSON.parse(localStorage.getItem(this.KEY) || '{}')); } catch (e) {} },
   save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.v)); } catch (e) {} },
   set(k, val) { this.v[k] = val; this.save(); if (k === 'quality' && window.Game && Game.applyQuality) Game.applyQuality(); if (k === 'sound' && Sfx.master) Sfx.master.gain.value = val; },

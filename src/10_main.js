@@ -85,11 +85,14 @@ const Game = {
 };
 
 class CamRig {
-  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; }
-  dir() { const v = new THREE.Vector3(); this.cam.getWorldDirection(v); return v; }
-  blockers(base) { return WallMeshes.filter(m => { if (!m._wp) { m._wp = new THREE.Vector3(); m.getWorldPosition(m._wp); } return m._wp.distanceToSquared(base) < 500; }); }
+  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; this.groundY = 0;
+    this.v = [...Array(6)].map(() => new THREE.Vector3()); this._dir = new THREE.Vector3(); this._bl = []; this._cn = []; }
+  dir() { return this.cam.getWorldDirection(this._dir); }
+  blockers(base) { const out = this._bl; out.length = 0; for (const m of WallMeshes) { if (!m._wp) { m._wp = new THREE.Vector3(); m.getWorldPosition(m._wp); } if (m._wp.distanceToSquared(base) < 500) out.push(m); } return out; }
+  // solid world colliders (buildings, rocks, wagons, wide trunks) block the camera; thin posts and trunks are ignored so the view doesn't pop
+  solidAt(x, y, z) { for (const c of Col.near(x, z, 0.2, this._cn)) { if (!c.block || y < c.y0 || y > c.y1) continue; if (c.type === 'circle') { if (c.r >= 0.6 && Math.hypot(x - c.x, z - c.z) < c.r + 0.2) return true; } else if (x > c.minX - 0.2 && x < c.maxX + 0.2 && z > c.minZ - 0.2 && z < c.maxZ + 0.2 && Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.5) return true; } return false; }
   update(dt) {
-    const P = Game.player, sens = Settings.v.sens; let dx = (Input.mouse.dx * 0.0025 + Input.look.dx * 0.0065) * sens, dy = (Input.mouse.dy * 0.0025 + Input.look.dy * 0.0055) * sens * (Settings.v.invertY ? -1 : 1);
+    const P = Game.player, sens = Settings.v.sens, V = this.v; let dx = (Input.mouse.dx * 0.0025 + Input.look.dx * 0.0065) * sens, dy = (Input.mouse.dy * 0.0025 + Input.look.dy * 0.0055) * sens * (Settings.v.invertY ? -1 : 1);
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) Settings.v.zoom = this.zoom; }
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
@@ -105,22 +108,25 @@ class CamRig {
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
     const want = aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, 6, dt);
-    const ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0); const tgt = new THREE.Vector3(P.pos.x, ty, P.pos.z);
-    if (this.snap) this.tgt.copy(tgt); else { this.tgt.x = damp(this.tgt.x, tgt.x, 12, dt); this.tgt.z = damp(this.tgt.z, tgt.z, 12, dt); this.tgt.y = damp(this.tgt.y, tgt.y, 7, dt); }
-    const lo = foe && !aim ? new THREE.Vector3((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4) : new THREE.Vector3(); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
-    const f = fwd(this.yaw), r = { x: -Math.cos(this.yaw), z: Math.sin(this.yaw) }; const sh = aim ? 0.7 : 0.35;
-    const base = this.tgt.clone().add(new THREE.Vector3(r.x * sh, 0, r.z * sh));
-    const desired = base.clone().add(new THREE.Vector3(-f.x * Math.cos(this.pitch) * this.dist, Math.sin(this.pitch) * this.dist, -f.z * Math.cos(this.pitch) * this.dist));
-    // spring-arm collision against walls and terrain; pull in fast, ease back out slowly
-    const toC = desired.clone().sub(base); const len = toC.length(); toC.normalize(); this.ray.set(base, toC); this.ray.far = len;
+    let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
+    // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
+    if (P.state === 'air') ty = Math.min(ty, this.groundY + 0.35); else this.groundY = ty;
+    const tgt = V[0].set(P.pos.x, ty, P.pos.z);
+    if (this.snap) this.tgt.copy(tgt); else { this.tgt.x = damp(this.tgt.x, tgt.x, 12, dt); this.tgt.z = damp(this.tgt.z, tgt.z, 12, dt); this.tgt.y = damp(this.tgt.y, tgt.y, P.state === 'air' ? 5 : 8, dt); }
+    const lo = V[1].set(0, 0, 0); if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
+    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35;
+    const base = V[2].set(this.tgt.x + rx * sh, this.tgt.y, this.tgt.z + rz * sh);
+    const cp = Math.cos(this.pitch), toC = V[3].set(-f.x * cp, Math.sin(this.pitch), -f.z * cp); const len = this.dist; // unit vector from the target out to the camera
+    // spring arm: walls (raycast), solid colliders and terrain (sampled along the arm); pull in fast, ease back out slowly
+    this.ray.set(base, toC); this.ray.far = len;
     const hit = this.ray.intersectObjects(this.blockers(base), false)[0]; let d = hit ? Math.max(0.5, hit.distance - 0.3) : len;
-    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y) { d = Math.max(0.5, t - d / 8); break; } }
-    this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = base.clone().addScaledVector(toC, Math.min(this.collD, len));
+    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && this.solidAt(x, y, z))) { d = Math.max(0.5, t - d / 8); break; } }
+    this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = V[4].copy(base).addScaledVector(toC, Math.min(this.collD, len));
     const gh = Terrain.height(p.x, p.z) + 0.35; if (p.y < gh) p.y = gh;
     if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-18 * dt));
-    this.cam.position.copy(this.pos); const look = base.clone().add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
+    this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
-    this.cam.fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), 6, dt); this.cam.updateProjectionMatrix();
+    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), 6, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }
   convo(dt) { // two-shot conversation framing
     const P = Game.player, N = Dialog.npc.pos, dxx = N.x - P.pos.x, dzz = N.z - P.pos.z, L = Math.hypot(dxx, dzz) || 1, ux = dxx / L, uz = dzz / L; const mid = new THREE.Vector3((N.x + P.pos.x) / 2, Math.max(N.y, P.pos.y) + 1.45, (N.z + P.pos.z) / 2);
@@ -132,7 +138,7 @@ class CamRig {
 
 /* ---------- Debug/test surface (used by automated tests) ---------- */
 window.HP = { get S() { return S; }, Game, Missions, NPC, Inv, Save, Law, Interact, Dialog, UI, STORY, Animal, Sky, Col,
-  sim(sec) { const n = Math.round(sec / 0.05); for (let i = 0; i < n; i++) { Game.time += 0.05; Game.update(0.05); Input.endFrame(); } },
+  sim(sec, dt = 0.05) { const n = Math.round(sec / dt); for (let i = 0; i < n; i++) { Game.time += dt; Game.update(dt); Input.endFrame(); } },
   tp(x, z) { Game.player.teleport(x, z); Game.cam.snap = true; }, opts() { return Interact.opts.map(o => o.label); }, press(label) { const i = Interact.opts.findIndex(o => o.label.startsWith(label)); if (i < 0) return false; Interact.trigger(i); return true; },
   choices() { return UI.choices.map(c => c.text + (c.disabled ? ' [x]' : '')); }, choose(prefix) { const i = UI.choices.findIndex(c => c.text.replace(/^\d+\.\s*/, '').startsWith(prefix)); if (i < 0) return false; UI.pickChoice(i); return true; } };
 

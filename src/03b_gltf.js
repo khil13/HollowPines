@@ -80,12 +80,19 @@ const GESTURES = {
   skid: u => { const k = Math.sin(u * Math.PI); return [['Torso', 'p', -0.3 * k]]; },
 };
 
+// scratch objects reused every frame (no per-frame allocation in the animator hot path)
+const _AX = { p: new THREE.Vector3(-1, 0, 0), r: new THREE.Vector3(0, 0, 1), y: new THREE.Vector3(0, 1, 0) };
+const _cv = [...Array(10)].map(() => new THREE.Vector3()), _cq = [...Array(5)].map(() => new THREE.Quaternion());
+const BASE_CLIPS = ['Idle', 'Walk', 'Run', 'Walk_Carry', 'Run_Carry', 'Jump', 'SitDown', 'Death', 'PickUp'];
+
 class ClipAnimator {
   constructor(rig, owner) {
     this.rig = rig; this.owner = owner; this.mixer = new THREE.AnimationMixer(rig.model); this.acts = {}; this.phase = 0; this.t = 0; this.actions = []; this.layers = { aim: 0, carry: 0, block: 0, rifle: 0 }; this.lw = { aim: 0, carry: 0, block: 0, rifle: 0, handsup: 0, crouch: 0, ride: 0 };
-    this.sq = 1; this.sqv = 0; this.expr = 'calm'; this.look = 0; this.lookPitch = 0; this.lookAt = null; this.idleT = 0; this.moveW = 0; this.runW = 0; this.lastSpeed = 0; this.accel = 0; this.turnRate = 0; this.prevYaw = owner.yaw || 0; this.base = {}; this.cur = zeroPose(); this.hatS = new Spring(90, 9); this.hatZ = new Spring(90, 9); this.stateW = {}; this.drop = 0;
-    for (const n of ['Idle', 'Walk', 'Run', 'Walk_Carry', 'Run_Carry', 'Jump', 'SitDown', 'Death', 'PickUp', 'Defeat']) { const a = this.mixer.clipAction(Assets.clips[n]); a.play(); a.paused = true; a.setEffectiveWeight(0); this.acts[n] = a; }
-    this.q = new THREE.Quaternion(); this.v = new THREE.Vector3();
+    this.sq = 1; this.sqv = 0; this.expr = 'calm'; this.look = 0; this.lookPitch = 0; this.lookAt = null; this.idleT = 0; this.runW = 0; this.lastSpeed = 0; this.accel = 0; this.turnRate = 0; this.prevYaw = owner.yaw || 0; this.base = {}; this.cur = zeroPose(); this.hatS = new Spring(90, 9); this.hatZ = new Spring(90, 9); this.drop = 0;
+    this.fsm = new LocoFSM(); this.bw = {}; this.W = {}; this.clipT = {}; // base-layer weights (smoothed), final weights, clip times
+    this.bone = {}; rig.model.traverse(o => { if (o.isBone) this.bone[o.name] = o; }); // name -> bone, built once
+    for (const n of BASE_CLIPS.concat('Defeat')) this.act(n);
+    this.tg = [new THREE.Vector3(), new THREE.Vector3()]; this.rq = new THREE.Quaternion(); this.feet = [[rig.LL, 1], [rig.RL, -1]];
   }
   act(name) { if (!this.acts[name]) { const a = this.mixer.clipAction(Assets.clips[name]); a.play(); a.paused = true; a.setEffectiveWeight(0); this.acts[name] = a; } return this.acts[name]; }
   play(name, o = {}) { const def = ACTIONS[name]; if (!def) return null; if (o.replace !== false) this.actions = this.actions.filter(a => a.def.mask !== def.mask && !(def.mask === 'full')); const a = { name, def, t: 0, age: 0, dur: o.dur || def.dur, cb: o.on || {}, fired: new Set(), loop: o.loop || def.loop, done: false, speed: o.speed || 1, k: o.k ?? 1 }; this.actions.push(a); return a; }
@@ -94,86 +101,103 @@ class ClipAnimator {
   busy() { return this.actions.some(a => a.def.mask === 'full' && !a.done && !a.def.nobusy); }
   squash(v) { this.sqv += v; }
   setW(name, w, time) { const a = this.act(name); a.setEffectiveWeight(w); if (time !== undefined) a.time = time; }
+  dispose() { this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.rig.model); this.acts = {}; this.actions = []; this.disposed = true; }
+  get state() { return this.fsm.state; }
+  // target clip weights for the base layer; clip times are written to this.clipT
+  baseTargets(st, T) {
+    const R = this.rig, state = st.state, carry = this.lw.carry > 0.5, walkN = carry ? 'Walk_Carry' : 'Walk', runN = carry ? 'Run_Carry' : 'Run', CT = this.clipT, dur = n => Assets.clips[n].duration;
+    const idleT = (this.t % dur('Idle')) / dur('Idle');
+    if (state === 'ground' || state === 'chat' || state === 'work' || state === 'handsup') {
+      const L = st.loco || this.fsm, ls = state === 'ground' ? L.state : 'idle', sp = state === 'ground' ? st.speed : 0, crouch = ls === 'crouchIdle' || ls === 'crouchWalk';
+      // gait phase follows distance travelled; stride from the clips (measured at load), shortened when crouched
+      const rw = this.runW = ls === 'sprint' ? 1 : ls === 'jog' ? clamp((sp - 1.7) / 3.7, 0.25, 0.85) : ls === 'walk' || ls === 'startWalk' || ls === 'crouchWalk' ? 0 : this.runW;
+      const sw = Assets.speeds[walkN], sr = Assets.speeds[runN], sc = R.scale; let stride = lerp(sw.stride * sc * (crouch ? 0.75 : 1), sr.stride * sc, rw); stride = Math.max(stride, sp / (rw > 0.5 ? 2.3 : 1.7));
+      const turnStep = Math.abs(this.turnRate) > 1.2 && sp < 0.6 ? Math.abs(this.turnRate) * 0.12 : 0, prev = this.phase; this.phase += (sp / Math.max(0.3, stride) + turnStep) * this.dt;
+      if (Math.floor(prev * 2) !== Math.floor(this.phase * 2) && state === 'ground' && this.owner.onStep && (sp > 0.3 || turnStep)) this.owner.onStep();
+      const ph = ((this.phase % 1) + 1) % 1; CT[walkN] = CT[runN] = ph; CT.Idle = idleT;
+      if (state === 'work') { T.PickUp = 1; CT.PickUp = 0.35 + 0.08 * Math.sin(this.t * 3); }
+      else if (ls === 'jumpStart') { T.Jump = 1; CT.Jump = lerp(0, 0.16, clamp(L.t / 0.1, 0, 1)); }
+      else if (ls === 'landing') { T.Jump = 1; CT.Jump = lerp(0.78, 1, clamp(L.t / 0.25, 0, 1)); }
+      else if (ls === 'idle' || ls === 'crouchIdle') { if (turnStep) { T.Idle = 0.5; T[walkN] = 0.5; } else T.Idle = 1; }
+      else if (ls === 'startWalk') { const k = clamp(sp / 1.2, 0, 1); T.Idle = 1 - k; T[walkN] = k; }
+      else if (ls === 'dodge') T[runN] = 1; // the Roll clip plays on the action layer on top of this
+      else { T[walkN] = 1 - rw; T[runN] = rw; } // walk / jog / sprint / crouchWalk
+      this.lw.crouch = damp(this.lw.crouch, crouch ? 1 : 0, 10, this.dt); this.lw.handsup = damp(this.lw.handsup, state === 'handsup' ? 1 : 0, 10, this.dt);
+    } else if (state === 'air') { T.Jump = 1; CT.Jump = st.vy > 0 ? lerp(0.42, 0.3, clamp(st.vy / 7, 0, 1)) : lerp(0.48, 0.62, clamp(-st.vy / 10, 0, 1)); this.lw.crouch = damp(this.lw.crouch, 0, 10, this.dt); }
+    else if (state === 'swim') { this.phase += this.dt * (st.speed > 0.3 ? 1.4 : 0.5); T[runN] = 1; CT[runN] = (this.phase % 1 + 1) % 1; }
+    else if (state === 'ride' || state === 'sit') { T.SitDown = 1; CT.SitDown = 1; }
+    else if (state === 'lie' || state === 'down') { T.Death = 1; CT.Death = 1; }
+  }
   update(dt, st) {
-    const r = this.owner, R = this.rig; this.t += dt;
+    const r = this.owner, R = this.rig; this.t += dt; this.dt = dt; if (this.disposed) return;
     if (r.pos && !r.carried) { R.root.position.copy(r.pos); R.root.rotation.set(0, r.yaw || 0, 0); } R.root.updateMatrixWorld(true);
     this.turnRate = damp(this.turnRate, angDiff(this.prevYaw, r.yaw) / Math.max(dt, 1e-4), 10, dt); this.prevYaw = r.yaw;
     this.accel = damp(this.accel, (st.speed - this.lastSpeed) / Math.max(dt, 1e-4), 8, dt); this.lastSpeed = st.speed;
     for (const k in this.layers) this.lw[k] = damp(this.lw[k], this.layers[k], 12, dt);
-    const state = st.state; const W = {}; const add = (n, w, f) => { W[n] = (W[n] || 0) + w; if (f !== undefined) this.act(n).time = f * Assets.clips[n].duration; };
-    // ---- base layer
-    const carry = this.lw.carry > 0.5, walkN = carry ? 'Walk_Carry' : 'Walk', runN = carry ? 'Run_Carry' : 'Run';
-    if (state === 'ground' || state === 'chat' || state === 'work' || state === 'handsup') {
-      const sp = state === 'ground' ? st.speed : 0; const crouch = !!st.crouch && state === 'ground';
-      const mw = this.moveW = damp(this.moveW, clamp(sp / 0.9, 0, 1), 9, dt); const rw = this.runW = damp(this.runW, clamp((sp - 2.2) / 2.6, 0, 1), 6, dt);
-      const sw = Assets.speeds[walkN], sr = Assets.speeds[runN], sc = R.scale;
-      let stride = lerp(sw.stride * sc * (crouch ? 0.75 : 1), sr.stride * sc, rw); stride = Math.max(stride, sp / (rw > 0.5 ? 2.3 : 1.7));
-      const turnStep = Math.abs(this.turnRate) > 1.2 && sp < 0.6 ? Math.abs(this.turnRate) * 0.12 : 0; const prev = this.phase; this.phase += (sp / Math.max(0.3, stride) + turnStep) * dt;
-      if (Math.floor(prev * 2) !== Math.floor(this.phase * 2) && state === 'ground' && r.onStep && (sp > 0.3 || turnStep)) r.onStep();
-      const ph = ((this.phase % 1) + 1) % 1, mwT = Math.max(mw, turnStep ? 0.5 : 0);
-      if (state === 'work') { add('PickUp', 1, 0.35 + 0.08 * Math.sin(this.t * 3)); }
-      else { add('Idle', 1 - mwT, (this.t % Assets.clips.Idle.duration) / Assets.clips.Idle.duration); add(walkN, mwT * (1 - rw), ph); add(runN, mwT * rw, ph); }
-      this.lw.crouch = damp(this.lw.crouch, crouch ? 1 : 0, 10, dt); this.lw.handsup = damp(this.lw.handsup, state === 'handsup' ? 1 : 0, 10, dt);
-    } else if (state === 'air') { const f = st.vy > 0 ? lerp(0.42, 0.3, clamp(st.vy / 7, 0, 1)) : lerp(0.48, 0.62, clamp(-st.vy / 10, 0, 1)); add('Jump', 1, f); this.lw.crouch = damp(this.lw.crouch, 0, 10, dt); }
-    else if (state === 'swim') { this.phase += dt * (st.speed > 0.3 ? 1.4 : 0.5); add(runN, 1, (this.phase % 1 + 1) % 1); }
-    else if (state === 'ride' || state === 'sit') add('SitDown', 1, 1);
-    else if (state === 'lie' || state === 'down') add('Death', 1, 1);
-    this.lw.ride = damp(this.lw.ride, state === 'ride' ? 1 : 0, 12, dt);
+    const state = st.state;
+    // characters without their own controller (NPCs) get a state machine fed from what they report
+    if (!st.loco) this.fsm.update(dt, { grounded: state !== 'air', vy: st.vy || 0, speed: state === 'ground' ? st.speed : 0, moving: st.speed > 0.3, crouch: !!st.crouch && state === 'ground', jumpPrep: false, dodge: false });
+    else { this.fsm.state = st.loco.state; this.fsm.t = st.loco.t; }
+    // ---- base layer: crossfade every clip toward the current state's target weights over LOCO.FADE[state]
+    const T = this._T || (this._T = {}); for (const n in T) T[n] = 0; this.baseTargets(st, T);
+    const fade = state === 'ground' ? (LOCO.FADE[this.fsm.state] || 0.2) : state === 'air' ? 0.1 : 0.2, k = 1 - Math.exp(-dt * 3 / fade);
+    const bw = this.bw; let sum = 0; for (const n of BASE_CLIPS) { bw[n] = (bw[n] || 0) + ((T[n] || 0) - (bw[n] || 0)) * k; if (bw[n] < 1e-3 && !T[n]) bw[n] = 0; sum += bw[n]; }
+    const W = this.W; for (const n in W) W[n] = 0; for (const n of BASE_CLIPS) W[n] = sum > 0 ? bw[n] / sum : 0; // normalized: no blend toward the bind pose
+    for (const n of BASE_CLIPS) if (W[n] > 0 && this.clipT[n] !== undefined) this.act(n).time = this.clipT[n] * Assets.clips[n].duration;
     // ---- one-shot actions (clip-mapped ones take over the whole body while they play)
-    let actW = 0; const gestures = [];
+    let actW = 0, actClip = null; const gestures = this._gest || (this._gest = []); gestures.length = 0;
     for (const a of this.actions) {
       if (a.done) continue; a.t += dt * a.speed; a.age += dt * a.speed; let u = a.t / a.dur;
       if (u >= 1) { if (a.loop) { a.t -= a.dur; a.fired.clear(); u = a.t / a.dur; } else { a.done = true; if (a.cb.end) a.cb.end(); continue; } }
       for (const ev in a.def.ev || {}) if (!a.fired.has(ev) && u >= a.def.ev[ev]) { a.fired.add(ev); if (a.cb[ev]) a.cb[ev](); }
       const bi = a.def.bi ?? 0.12, bo = a.def.bo ?? 0.15; const w = ease(clamp(a.loop ? Math.min(1, a.age / bi) : Math.min(1, a.age / bi, (a.dur - a.t) / bo), 0, 1));
-      const cm = CLIPMAP[a.name]; if (cm && (state === 'ground' || state === 'air')) { const f = lerp(cm[1], cm[2], a.loop && cm[0] === 'PickUp' ? 0.5 + 0.5 * Math.sin(u * TAU) : u); const ww = a.name === 'hit' || a.name === 'hitB' ? w * 0.7 : w; add(cm[0], 0, f); W[cm[0]] = Math.max(W[cm[0]] || 0, ww); actW = Math.max(actW, ww); }
+      const cm = CLIPMAP[a.name]; if (cm && (state === 'ground' || state === 'air')) { const f = lerp(cm[1], cm[2], a.loop && cm[0] === 'PickUp' ? 0.5 + 0.5 * Math.sin(u * TAU) : u); const ww = a.name === 'hit' || a.name === 'hitB' ? w * 0.7 : w; this.act(cm[0]).time = f * Assets.clips[cm[0]].duration; if (ww > actW) { actW = ww; actClip = cm[0]; } W[cm[0]] = Math.max(W[cm[0]] || 0, ww); }
       else if (GESTURES[a.name]) gestures.push([GESTURES[a.name](u), w]);
     }
-    // normalize: actions push the base layer down
-    const names = Object.keys(this.acts); for (const n of names) { let w = W[n] || 0; if (actW > 0 && !this.actions.some(a => a.def && CLIPMAP[a.name] && CLIPMAP[a.name][0] === n)) w *= 1 - actW; this.acts[n].setEffectiveWeight(w); }
+    this.actions = this.actions.filter(a => !a.done);
+    for (const n in this.acts) { let w = W[n] || 0; if (actW > 0 && n !== actClip) w *= 1 - actW; this.acts[n].setEffectiveWeight(w); }
     if (this.base.q) this.rig.skBones.forEach((b, i) => { b.quaternion.copy(this.base.q[i]); b.position.copy(this.base.p[i]); });
     this.mixer.update(0);
     if (!this.base.q) { this.base.q = this.rig.skBones.map(b => b.quaternion.clone()); this.base.p = this.rig.skBones.map(b => b.position.clone()); } else this.rig.skBones.forEach((b, i) => { this.base.q[i].copy(b.quaternion); this.base.p[i].copy(b.position); });
     // ---- post-process: posture, overrides, gestures, look-at, IK
     R.model.updateMatrixWorld(true);
-    const rq = new THREE.Quaternion(); R.root.getWorldQuaternion(rq);
-    const axis = { p: new THREE.Vector3(-1, 0, 0), r: new THREE.Vector3(0, 0, 1), y: new THREE.Vector3(0, 1, 0) };
-    const rot = (bone, ax, ang) => { if (!bone || !ang) return; const wa = axis[ax].clone().applyQuaternion(rq); const pq = new THREE.Quaternion(); bone.parent.getWorldQuaternion(pq); const qr = new THREE.Quaternion().setFromAxisAngle(wa, ang); const inv = pq.clone().invert(); bone.quaternion.premultiply(inv.multiply(qr).multiply(pq)); bone.updateMatrixWorld(true); };
-    const B = n => R.model.getObjectByName(n), snapTo = (name, w) => { if (w < 0.01) return; const s = Assets.snaps[name]; for (const b in s) { const o = B(b); if (o) o.quaternion.slerp(s[b], w); } R.model.updateMatrixWorld(true); };
-    // crouch & ride lower the hips; landing/hit squash lowers too
+    const rq = this.rq; R.root.getWorldQuaternion(rq); const BN = this.bone;
+    const rot = (bone, ax, ang) => { if (!bone || !ang) return; const wa = _cv[0].copy(_AX[ax]).applyQuaternion(rq), pq = bone.parent.getWorldQuaternion(_cq[0]); const q = _cq[1].copy(pq).invert().multiply(_cq[2].setFromAxisAngle(wa, ang)).multiply(pq); bone.quaternion.premultiply(q); bone.updateMatrixWorld(true); };
+    const snapTo = (name, w) => { if (w < 0.01) return; const s = Assets.snaps[name]; for (const b in s) { const o = BN[b]; if (o) o.quaternion.slerp(s[b], w); } R.model.updateMatrixWorld(true); };
     this.lowerHips(0.24 * this.lw.crouch * R.scale + 0.05 * this.lw.ride); rot(R.spine, 'p', 0.35 * this.lw.crouch);
     snapTo('carry', this.lw.carry * (1 - actW)); snapTo('handsup', this.lw.handsup); snapTo('reins', this.lw.ride * (1 - this.lw.aim)); snapTo('aim', this.lw.aim);
-    if (this.lw.aim > 0.01) { rot(R.chest, 'p', -this.lookPitch * 0.8 * this.lw.aim); if (this.lw.rifle > 0.5) { rot(B('UpperArmL'), 'p', 1.2 * this.lw.aim); rot(B('LowerArmL'), 'r', 0.6 * this.lw.aim); } }
-    if (this.lw.block > 0.01) { const w = this.lw.block; rot(B('UpperArmL'), 'p', 1.6 * w); rot(B('UpperArmR'), 'p', 1.6 * w); rot(B('LowerArmL'), 'p', 1.4 * w); rot(B('LowerArmR'), 'p', 1.4 * w); }
-    for (const [list, w] of gestures) for (const [b, ax, ang] of list) rot(B(b), ax, ang * w);
-    if (state === 'chat') { rot(B('UpperArmR'), 'p', 0.5 + 0.3 * Math.sin(this.t * 3)); rot(B('LowerArmR'), 'p', 0.8); rot(B('Head'), 'y', 0.1 * Math.sin(this.t * 1.7)); }
-    if (state === 'ground' && !st.crouch) rot(R.spine, 'p', clamp(this.accel * 0.02, -0.2, 0.2));
-    if (this.lookAt && state !== 'swim' && state !== 'down' && state !== 'lie') { const a = angDiff(r.yaw, Math.atan2(this.lookAt.x - r.pos.x, this.lookAt.z - r.pos.z)); if (Math.abs(a) < 1.9) { const k = clamp(a, -1.0, 1.0); rot(R.neck, 'y', k * 0.35); rot(R.headBone, 'y', k * 0.5); } }
+    if (this.lw.aim > 0.01) { rot(R.chest, 'p', -this.lookPitch * 0.8 * this.lw.aim); if (this.lw.rifle > 0.5) { rot(BN.UpperArmL, 'p', 1.2 * this.lw.aim); rot(BN.LowerArmL, 'r', 0.6 * this.lw.aim); } }
+    if (this.lw.block > 0.01) { const w = this.lw.block; rot(BN.UpperArmL, 'p', 1.6 * w); rot(BN.UpperArmR, 'p', 1.6 * w); rot(BN.LowerArmL, 'p', 1.4 * w); rot(BN.LowerArmR, 'p', 1.4 * w); }
+    for (const [list, w] of gestures) for (const [b, ax, ang] of list) rot(BN[b], ax, ang * w);
+    if (state === 'chat') { rot(BN.UpperArmR, 'p', 0.5 + 0.3 * Math.sin(this.t * 3)); rot(BN.LowerArmR, 'p', 0.8); rot(BN.Head, 'y', 0.1 * Math.sin(this.t * 1.7)); }
+    // lean into acceleration (start-walk and sprint starts lean further forward)
+    if (state === 'ground' && !st.crouch) rot(R.spine, 'p', clamp(this.accel * 0.02, -0.2, 0.2) + (this.fsm.state === 'startWalk' ? 0.06 : this.fsm.state === 'sprint' ? 0.08 : 0));
+    if (this.lookAt && state !== 'swim' && state !== 'down' && state !== 'lie') { const a = angDiff(r.yaw, Math.atan2(this.lookAt.x - r.pos.x, this.lookAt.z - r.pos.z)); if (Math.abs(a) < 1.9) { const k2 = clamp(a, -1.0, 1.0); rot(R.neck, 'y', k2 * 0.35); rot(R.headBone, 'y', k2 * 0.5); } }
     // ---- legs: two-bone IK to the (animated) feet, re-planted on the ground; stirrups when riding
-    if ((state === 'ground' || state === 'ride' || state === 'chat' || state === 'work' || state === 'handsup') && actW < 0.6) this.legIK(st, state);
+    if ((state === 'ground' || state === 'ride' || state === 'chat' || state === 'work' || state === 'handsup') && actW < 0.6) this.legIK(st, state, dt);
     // ---- squash & stretch, secondary motion
     const acc = -160 * (this.sq - 1) - 14 * this.sqv; this.sqv += acc * dt; this.sq += this.sqv * dt; this.sq = clamp(this.sq, 0.75, 1.25);
     R.vis.scale.set(R.scale / Math.sqrt(this.sq), R.scale * this.sq, R.scale / Math.sqrt(this.sq)); R.vis.rotation.z = clamp(-this.turnRate * 0.03 * st.speed, -0.2, 0.2); R.vis.rotation.x = state === 'swim' ? 1.1 : 0; R.vis.position.y = state === 'swim' ? -0.4 : 0;
     R.hat.rotation.x = this.hatS.step(clamp(-this.accel * 0.012 + (st.vy || 0) * -0.01, -0.3, 0.3), dt); R.hat.rotation.z = R.baseHatZ + this.hatZ.step(clamp(this.turnRate * 0.03, -0.2, 0.2), dt);
   }
-  lowerHips(m) { if (!m) return; const b = this.rig.hips, p = b.getWorldPosition(new THREE.Vector3()); p.y -= m; b.position.copy(b.parent.worldToLocal(p)); this.rig.model.updateMatrixWorld(true); }
-  legIK(st, state) {
-    const R = this.rig, r = this.owner, root = R.root; const solve = (A, Bn, E, target, pole) => {
-      const pa = A.getWorldPosition(new THREE.Vector3()), pb = Bn.getWorldPosition(new THREE.Vector3()), pe = E.getWorldPosition(new THREE.Vector3());
-      const a = pa.distanceTo(pb), b = pb.distanceTo(pe), toT = target.clone().sub(pa); const c = clamp(toT.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3); toT.normalize();
-      const cosA = clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1), ang = Math.acos(cosA); let n = new THREE.Vector3().crossVectors(toT, pole); if (n.lengthSq() < 1e-6) return; n.normalize();
-      const knee = pa.clone().add(toT.clone().applyAxisAngle(n, -ang).multiplyScalar(a)); if (knee.clone().sub(pa).dot(pole) < 0) knee.copy(pa.clone().add(toT.clone().applyAxisAngle(n, ang).multiplyScalar(a)));
-      const aim = (bone, from, to) => { const cur = to.clone(); const q = new THREE.Quaternion().setFromUnitVectors(from.normalize(), cur.normalize()); const wq = bone.getWorldQuaternion(new THREE.Quaternion()); const pq = bone.parent.getWorldQuaternion(new THREE.Quaternion()); bone.quaternion.copy(pq.invert().multiply(q.multiply(wq))); bone.updateMatrixWorld(true); };
-      aim(A, pb.clone().sub(pa), knee.clone().sub(pa)); const pb2 = Bn.getWorldPosition(new THREE.Vector3()), pe2 = E.getWorldPosition(new THREE.Vector3()); aim(Bn, pe2.clone().sub(pb2), target.clone().sub(pb2));
+  lowerHips(m) { if (!m) return; const b = this.rig.hips, p = b.getWorldPosition(_cv[1]); p.y -= m; b.position.copy(b.parent.worldToLocal(p)); this.rig.model.updateMatrixWorld(true); }
+  legIK(st, state, dt) {
+    const R = this.rig, r = this.owner, root = R.root;
+    const aim = (bone, from, to) => { const q = _cq[2].setFromUnitVectors(from.normalize(), to.normalize()); const wq = bone.getWorldQuaternion(_cq[3]); const pq = bone.parent.getWorldQuaternion(_cq[4]); bone.quaternion.copy(pq.invert().multiply(q.multiply(wq))); bone.updateMatrixWorld(true); };
+    const solve = (A, Bn, E, target, pole) => {
+      const pa = A.getWorldPosition(_cv[2]), pb = Bn.getWorldPosition(_cv[3]), pe = E.getWorldPosition(_cv[4]);
+      const a = pa.distanceTo(pb), b = pb.distanceTo(pe), toT = _cv[5].copy(target).sub(pa); const c = clamp(toT.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3); toT.normalize();
+      const ang = Math.acos(clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1)); const n = _cv[6].crossVectors(toT, pole); if (n.lengthSq() < 1e-6) return; n.normalize();
+      const kd = _cv[7].copy(toT).applyAxisAngle(n, -ang).multiplyScalar(a); if (kd.dot(pole) < 0) kd.copy(toT).applyAxisAngle(n, ang).multiplyScalar(a);
+      aim(A, _cv[8].copy(pb).sub(pa), _cv[9].copy(kd)); const pb2 = Bn.getWorldPosition(_cv[3]), pe2 = E.getWorldPosition(_cv[4]); aim(Bn, _cv[8].copy(pe2).sub(pb2), _cv[9].copy(target).sub(pb2));
     };
-    const fwdW = new THREE.Vector3(0, 0, 1).applyQuaternion(root.getWorldQuaternion(new THREE.Quaternion())), right = new THREE.Vector3(-fwdW.z, 0, fwdW.x);
-    const feet = [[R.LL, 1], [R.RL, -1]]; const tgts = [];
-    for (const [L, side] of feet) { const p = L.ft.getWorldPosition(new THREE.Vector3());
-      if (state === 'ride') { const hp = R.hips.getWorldPosition(new THREE.Vector3()); p.copy(hp).addScaledVector(right, -side * 0.42 * R.scale).addScaledVector(fwdW, 0.1).add(new THREE.Vector3(0, -0.55 * R.scale, 0)); }
-      else if (st.ground) { const lift = p.y - r.pos.y; const g = st.ground(p.x, p.z, r.pos.y + 0.6); p.y = g + Math.max(0, lift); }
-      tgts.push(p); }
-    if (state !== 'ride' && st.ground) { const dl = tgts[0].y - r.pos.y, dr = tgts[1].y - r.pos.y; const drop = clamp(-Math.min(dl, dr, 0), 0, 0.3); this.drop = damp(this.drop, drop, 12, 1 / 60); this.lowerHips(this.drop); }
-    feet.forEach(([L], i) => { L.ft.position.copy(L.ft.parent.worldToLocal(tgts[i].clone())); L.ft.updateMatrixWorld(true); solve(L.hp, L.kn, L.ft, tgts[i], fwdW); });
+    root.getWorldQuaternion(_cq[0]); const fwdW = this._fw || (this._fw = new THREE.Vector3()), right = this._rt || (this._rt = new THREE.Vector3()); fwdW.set(0, 0, 1).applyQuaternion(_cq[0]); right.set(-fwdW.z, 0, fwdW.x);
+    const tgts = this.tg;
+    this.feet.forEach(([L, side], i) => { const p = L.ft.getWorldPosition(tgts[i]);
+      if (state === 'ride') { R.hips.getWorldPosition(p).addScaledVector(right, -side * 0.42 * R.scale).addScaledVector(fwdW, 0.1); p.y -= 0.55 * R.scale; }
+      else if (st.ground) { const lift = p.y - r.pos.y; const g = st.ground(p.x, p.z, r.pos.y + 0.6); p.y = g + Math.max(0, lift); } });
+    if (state !== 'ride' && st.ground) { const dl = tgts[0].y - r.pos.y, dr = tgts[1].y - r.pos.y; const drop = clamp(-Math.min(dl, dr, 0), 0, 0.3); this.drop = damp(this.drop, drop, 12, dt); this.lowerHips(this.drop); }
+    this.feet.forEach(([L], i) => { L.ft.position.copy(L.ft.parent.worldToLocal(_cv[1].copy(tgts[i]))); L.ft.updateMatrixWorld(true); solve(L.hp, L.kn, L.ft, tgts[i], fwdW); });
   }
 }
 const _makeHumanoidProc = makeHumanoid, _AnimatorProc = Animator;

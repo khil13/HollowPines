@@ -201,10 +201,9 @@ const Input = {
   init(canvas) {
     addEventListener('keydown', e => { if (e.repeat) return; const k = e.key.toLowerCase(); this.keys.add(k); this.pressed.add(k); if (['tab', ' ', 'alt'].includes(k)) e.preventDefault(); });
     addEventListener('keyup', e => this.keys.delete(e.key.toLowerCase()));
-    addEventListener('blur', () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; });
     canvas.addEventListener('mousedown', e => {
       if (this.touch) return;
-      if (!this.locked && !this.uiOpen && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
+      if (!this.locked && !this.uiOpen && Settings.v.mouseLock !== false && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
       if (e.button === 0) { this.mouse.l = true; this.mouse.lp = true; } if (e.button === 2) this.mouse.r = true;
     });
     addEventListener('mouseup', e => { if (e.button === 0) this.mouse.l = false; if (e.button === 2) this.mouse.r = false; });
@@ -219,7 +218,7 @@ const Input = {
     const upd = e => { let dx = e.clientX - sx, dy = e.clientY - sy; const m = Math.hypot(dx, dy), R = 55; if (m > R) { dx *= R / m; dy *= R / m; } knob.style.transform = `translate(${dx}px,${dy}px)`; this.move.x = dx / R; this.move.y = -dy / R; this.move.mag = Math.min(1, m / R); };
     stick.addEventListener('pointermove', e => { if (e.pointerId === stickId) upd(e); });
     const end = e => { if (e.pointerId === stickId) { stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; } };
-    stick.addEventListener('pointerup', end); stick.addEventListener('pointercancel', end);
+    stick.addEventListener('pointerup', end); stick.addEventListener('pointercancel', end); stick.addEventListener('lostpointercapture', end);
     canvas.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') return; this.setTouch(true); lookIds.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
     const pinchD = () => { const a = [...lookIds.values()]; return a.length >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0; };
     canvas.addEventListener('pointermove', e => { const p = lookIds.get(e.pointerId); if (!p) return; const d0 = pinchD(); const nx = e.clientX, ny = e.clientY; if (lookIds.size >= 2) { p.x = nx; p.y = ny; this.pinch += pinchD() - d0; return; } this.look.dx += (nx - p.x); this.look.dy += (ny - p.y); p.x = nx; p.y = ny; });
@@ -234,6 +233,9 @@ const Input = {
       const up = () => { this.btn[n] = false; }; b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
     });
     addEventListener('touchstart', () => this.setTouch(true), { passive: true });
+    // anything held when the page loses focus, is hidden, or a menu opens is released, so nothing stays stuck on
+    this.reset = () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; this.mouse.dx = this.mouse.dy = 0; stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; lookIds.clear(); this.look.dx = this.look.dy = 0; for (const k in this.btn) this.btn[k] = false; };
+    addEventListener('blur', this.reset); document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
   },
   setTouch(v) { this.touch = v; document.body.classList.toggle('touch', v); document.getElementById('touch').hidden = !v || !Game.running; },
   down(k) { return this.keys.has(k); }, hit(k) { return this.pressed.has(k); }, tb(n) { return this.btnP.has(n); },
@@ -277,7 +279,7 @@ const Sfx = {
 
 /* ---------- Player settings (per browser) ---------- */
 const Settings = {
-  KEY: 'hollowpines_settings', v: { sens: 1, invertY: false, zoom: 4.6, quality: 'auto', autoCam: true, sound: 0.6, hints: true },
+  KEY: 'hollowpines_settings', v: { mouseLock: true, sens: 1, invertY: false, zoom: 4.6, quality: 'auto', autoCam: true, sound: 0.6, hints: true },
   load() { try { Object.assign(this.v, JSON.parse(localStorage.getItem(this.KEY) || '{}')); } catch (e) {} },
   save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.v)); } catch (e) {} },
   set(k, val) { this.v[k] = val; this.save(); if (k === 'quality' && window.Game && Game.applyQuality) Game.applyQuality(); if (k === 'sound' && Sfx.master) Sfx.master.gain.value = val; },
@@ -931,12 +933,19 @@ const GESTURES = {
   skid: u => { const k = Math.sin(u * Math.PI); return [['Torso', 'p', -0.3 * k]]; },
 };
 
+// scratch objects reused every frame (no per-frame allocation in the animator hot path)
+const _AX = { p: new THREE.Vector3(-1, 0, 0), r: new THREE.Vector3(0, 0, 1), y: new THREE.Vector3(0, 1, 0) };
+const _cv = [...Array(10)].map(() => new THREE.Vector3()), _cq = [...Array(5)].map(() => new THREE.Quaternion());
+const BASE_CLIPS = ['Idle', 'Walk', 'Run', 'Walk_Carry', 'Run_Carry', 'Jump', 'SitDown', 'Death', 'PickUp'];
+
 class ClipAnimator {
   constructor(rig, owner) {
     this.rig = rig; this.owner = owner; this.mixer = new THREE.AnimationMixer(rig.model); this.acts = {}; this.phase = 0; this.t = 0; this.actions = []; this.layers = { aim: 0, carry: 0, block: 0, rifle: 0 }; this.lw = { aim: 0, carry: 0, block: 0, rifle: 0, handsup: 0, crouch: 0, ride: 0 };
-    this.sq = 1; this.sqv = 0; this.expr = 'calm'; this.look = 0; this.lookPitch = 0; this.lookAt = null; this.idleT = 0; this.moveW = 0; this.runW = 0; this.lastSpeed = 0; this.accel = 0; this.turnRate = 0; this.prevYaw = owner.yaw || 0; this.base = {}; this.cur = zeroPose(); this.hatS = new Spring(90, 9); this.hatZ = new Spring(90, 9); this.stateW = {}; this.drop = 0;
-    for (const n of ['Idle', 'Walk', 'Run', 'Walk_Carry', 'Run_Carry', 'Jump', 'SitDown', 'Death', 'PickUp', 'Defeat']) { const a = this.mixer.clipAction(Assets.clips[n]); a.play(); a.paused = true; a.setEffectiveWeight(0); this.acts[n] = a; }
-    this.q = new THREE.Quaternion(); this.v = new THREE.Vector3();
+    this.sq = 1; this.sqv = 0; this.expr = 'calm'; this.look = 0; this.lookPitch = 0; this.lookAt = null; this.idleT = 0; this.runW = 0; this.lastSpeed = 0; this.accel = 0; this.turnRate = 0; this.prevYaw = owner.yaw || 0; this.base = {}; this.cur = zeroPose(); this.hatS = new Spring(90, 9); this.hatZ = new Spring(90, 9); this.drop = 0;
+    this.fsm = new LocoFSM(); this.bw = {}; this.W = {}; this.clipT = {}; // base-layer weights (smoothed), final weights, clip times
+    this.bone = {}; rig.model.traverse(o => { if (o.isBone) this.bone[o.name] = o; }); // name -> bone, built once
+    for (const n of BASE_CLIPS.concat('Defeat')) this.act(n);
+    this.tg = [new THREE.Vector3(), new THREE.Vector3()]; this.rq = new THREE.Quaternion(); this.feet = [[rig.LL, 1], [rig.RL, -1]];
   }
   act(name) { if (!this.acts[name]) { const a = this.mixer.clipAction(Assets.clips[name]); a.play(); a.paused = true; a.setEffectiveWeight(0); this.acts[name] = a; } return this.acts[name]; }
   play(name, o = {}) { const def = ACTIONS[name]; if (!def) return null; if (o.replace !== false) this.actions = this.actions.filter(a => a.def.mask !== def.mask && !(def.mask === 'full')); const a = { name, def, t: 0, age: 0, dur: o.dur || def.dur, cb: o.on || {}, fired: new Set(), loop: o.loop || def.loop, done: false, speed: o.speed || 1, k: o.k ?? 1 }; this.actions.push(a); return a; }
@@ -945,91 +954,144 @@ class ClipAnimator {
   busy() { return this.actions.some(a => a.def.mask === 'full' && !a.done && !a.def.nobusy); }
   squash(v) { this.sqv += v; }
   setW(name, w, time) { const a = this.act(name); a.setEffectiveWeight(w); if (time !== undefined) a.time = time; }
+  dispose() { this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.rig.model); this.acts = {}; this.actions = []; this.disposed = true; }
+  get state() { return this.fsm.state; }
+  // target clip weights for the base layer; clip times are written to this.clipT
+  baseTargets(st, T) {
+    const R = this.rig, state = st.state, carry = this.lw.carry > 0.5, walkN = carry ? 'Walk_Carry' : 'Walk', runN = carry ? 'Run_Carry' : 'Run', CT = this.clipT, dur = n => Assets.clips[n].duration;
+    const idleT = (this.t % dur('Idle')) / dur('Idle');
+    if (state === 'ground' || state === 'chat' || state === 'work' || state === 'handsup') {
+      const L = st.loco || this.fsm, ls = state === 'ground' ? L.state : 'idle', sp = state === 'ground' ? st.speed : 0, crouch = ls === 'crouchIdle' || ls === 'crouchWalk';
+      // gait phase follows distance travelled; stride from the clips (measured at load), shortened when crouched
+      const rw = this.runW = ls === 'sprint' ? 1 : ls === 'jog' ? clamp((sp - 1.7) / 3.7, 0.25, 0.85) : ls === 'walk' || ls === 'startWalk' || ls === 'crouchWalk' ? 0 : this.runW;
+      const sw = Assets.speeds[walkN], sr = Assets.speeds[runN], sc = R.scale; let stride = lerp(sw.stride * sc * (crouch ? 0.75 : 1), sr.stride * sc, rw); stride = Math.max(stride, sp / (rw > 0.5 ? 2.3 : 1.7));
+      const turnStep = Math.abs(this.turnRate) > 1.2 && sp < 0.6 ? Math.abs(this.turnRate) * 0.12 : 0, prev = this.phase; this.phase += (sp / Math.max(0.3, stride) + turnStep) * this.dt;
+      if (Math.floor(prev * 2) !== Math.floor(this.phase * 2) && state === 'ground' && this.owner.onStep && (sp > 0.3 || turnStep)) this.owner.onStep();
+      const ph = ((this.phase % 1) + 1) % 1; CT[walkN] = CT[runN] = ph; CT.Idle = idleT;
+      if (state === 'work') { T.PickUp = 1; CT.PickUp = 0.35 + 0.08 * Math.sin(this.t * 3); }
+      else if (ls === 'jumpStart') { T.Jump = 1; CT.Jump = lerp(0, 0.16, clamp(L.t / 0.1, 0, 1)); }
+      else if (ls === 'landing') { T.Jump = 1; CT.Jump = lerp(0.78, 1, clamp(L.t / 0.25, 0, 1)); }
+      else if (ls === 'idle' || ls === 'crouchIdle') { if (turnStep) { T.Idle = 0.5; T[walkN] = 0.5; } else T.Idle = 1; }
+      else if (ls === 'startWalk') { const k = clamp(sp / 1.2, 0, 1); T.Idle = 1 - k; T[walkN] = k; }
+      else if (ls === 'dodge') T[runN] = 1; // the Roll clip plays on the action layer on top of this
+      else { T[walkN] = 1 - rw; T[runN] = rw; } // walk / jog / sprint / crouchWalk
+      this.lw.crouch = damp(this.lw.crouch, crouch ? 1 : 0, 10, this.dt); this.lw.handsup = damp(this.lw.handsup, state === 'handsup' ? 1 : 0, 10, this.dt);
+    } else if (state === 'air') { T.Jump = 1; CT.Jump = st.vy > 0 ? lerp(0.42, 0.3, clamp(st.vy / 7, 0, 1)) : lerp(0.48, 0.62, clamp(-st.vy / 10, 0, 1)); this.lw.crouch = damp(this.lw.crouch, 0, 10, this.dt); }
+    else if (state === 'swim') { this.phase += this.dt * (st.speed > 0.3 ? 1.4 : 0.5); T[runN] = 1; CT[runN] = (this.phase % 1 + 1) % 1; }
+    else if (state === 'ride' || state === 'sit') { T.SitDown = 1; CT.SitDown = 1; }
+    else if (state === 'lie' || state === 'down') { T.Death = 1; CT.Death = 1; }
+  }
   update(dt, st) {
-    const r = this.owner, R = this.rig; this.t += dt;
+    const r = this.owner, R = this.rig; this.t += dt; this.dt = dt; if (this.disposed) return;
     if (r.pos && !r.carried) { R.root.position.copy(r.pos); R.root.rotation.set(0, r.yaw || 0, 0); } R.root.updateMatrixWorld(true);
     this.turnRate = damp(this.turnRate, angDiff(this.prevYaw, r.yaw) / Math.max(dt, 1e-4), 10, dt); this.prevYaw = r.yaw;
     this.accel = damp(this.accel, (st.speed - this.lastSpeed) / Math.max(dt, 1e-4), 8, dt); this.lastSpeed = st.speed;
     for (const k in this.layers) this.lw[k] = damp(this.lw[k], this.layers[k], 12, dt);
-    const state = st.state; const W = {}; const add = (n, w, f) => { W[n] = (W[n] || 0) + w; if (f !== undefined) this.act(n).time = f * Assets.clips[n].duration; };
-    // ---- base layer
-    const carry = this.lw.carry > 0.5, walkN = carry ? 'Walk_Carry' : 'Walk', runN = carry ? 'Run_Carry' : 'Run';
-    if (state === 'ground' || state === 'chat' || state === 'work' || state === 'handsup') {
-      const sp = state === 'ground' ? st.speed : 0; const crouch = !!st.crouch && state === 'ground';
-      const mw = this.moveW = damp(this.moveW, clamp(sp / 0.9, 0, 1), 9, dt); const rw = this.runW = damp(this.runW, clamp((sp - 2.2) / 2.6, 0, 1), 6, dt);
-      const sw = Assets.speeds[walkN], sr = Assets.speeds[runN], sc = R.scale;
-      let stride = lerp(sw.stride * sc * (crouch ? 0.75 : 1), sr.stride * sc, rw); stride = Math.max(stride, sp / (rw > 0.5 ? 2.3 : 1.7));
-      const turnStep = Math.abs(this.turnRate) > 1.2 && sp < 0.6 ? Math.abs(this.turnRate) * 0.12 : 0; const prev = this.phase; this.phase += (sp / Math.max(0.3, stride) + turnStep) * dt;
-      if (Math.floor(prev * 2) !== Math.floor(this.phase * 2) && state === 'ground' && r.onStep && (sp > 0.3 || turnStep)) r.onStep();
-      const ph = ((this.phase % 1) + 1) % 1, mwT = Math.max(mw, turnStep ? 0.5 : 0);
-      if (state === 'work') { add('PickUp', 1, 0.35 + 0.08 * Math.sin(this.t * 3)); }
-      else { add('Idle', 1 - mwT, (this.t % Assets.clips.Idle.duration) / Assets.clips.Idle.duration); add(walkN, mwT * (1 - rw), ph); add(runN, mwT * rw, ph); }
-      this.lw.crouch = damp(this.lw.crouch, crouch ? 1 : 0, 10, dt); this.lw.handsup = damp(this.lw.handsup, state === 'handsup' ? 1 : 0, 10, dt);
-    } else if (state === 'air') { const f = st.vy > 0 ? lerp(0.42, 0.3, clamp(st.vy / 7, 0, 1)) : lerp(0.48, 0.62, clamp(-st.vy / 10, 0, 1)); add('Jump', 1, f); this.lw.crouch = damp(this.lw.crouch, 0, 10, dt); }
-    else if (state === 'swim') { this.phase += dt * (st.speed > 0.3 ? 1.4 : 0.5); add(runN, 1, (this.phase % 1 + 1) % 1); }
-    else if (state === 'ride' || state === 'sit') add('SitDown', 1, 1);
-    else if (state === 'lie' || state === 'down') add('Death', 1, 1);
-    this.lw.ride = damp(this.lw.ride, state === 'ride' ? 1 : 0, 12, dt);
+    const state = st.state;
+    // characters without their own controller (NPCs) get a state machine fed from what they report
+    if (!st.loco) this.fsm.update(dt, { grounded: state !== 'air', vy: st.vy || 0, speed: state === 'ground' ? st.speed : 0, moving: st.speed > 0.3, crouch: !!st.crouch && state === 'ground', jumpPrep: false, dodge: false });
+    else { this.fsm.state = st.loco.state; this.fsm.t = st.loco.t; }
+    // ---- base layer: crossfade every clip toward the current state's target weights over LOCO.FADE[state]
+    const T = this._T || (this._T = {}); for (const n in T) T[n] = 0; this.baseTargets(st, T);
+    const fade = state === 'ground' ? (LOCO.FADE[this.fsm.state] || 0.2) : state === 'air' ? 0.1 : 0.2, k = 1 - Math.exp(-dt * 3 / fade);
+    const bw = this.bw; let sum = 0; for (const n of BASE_CLIPS) { bw[n] = (bw[n] || 0) + ((T[n] || 0) - (bw[n] || 0)) * k; if (bw[n] < 1e-3 && !T[n]) bw[n] = 0; sum += bw[n]; }
+    const W = this.W; for (const n in W) W[n] = 0; for (const n of BASE_CLIPS) W[n] = sum > 0 ? bw[n] / sum : 0; // normalized: no blend toward the bind pose
+    for (const n of BASE_CLIPS) if (W[n] > 0 && this.clipT[n] !== undefined) this.act(n).time = this.clipT[n] * Assets.clips[n].duration;
     // ---- one-shot actions (clip-mapped ones take over the whole body while they play)
-    let actW = 0; const gestures = [];
+    let actW = 0, actClip = null; const gestures = this._gest || (this._gest = []); gestures.length = 0;
     for (const a of this.actions) {
       if (a.done) continue; a.t += dt * a.speed; a.age += dt * a.speed; let u = a.t / a.dur;
       if (u >= 1) { if (a.loop) { a.t -= a.dur; a.fired.clear(); u = a.t / a.dur; } else { a.done = true; if (a.cb.end) a.cb.end(); continue; } }
       for (const ev in a.def.ev || {}) if (!a.fired.has(ev) && u >= a.def.ev[ev]) { a.fired.add(ev); if (a.cb[ev]) a.cb[ev](); }
       const bi = a.def.bi ?? 0.12, bo = a.def.bo ?? 0.15; const w = ease(clamp(a.loop ? Math.min(1, a.age / bi) : Math.min(1, a.age / bi, (a.dur - a.t) / bo), 0, 1));
-      const cm = CLIPMAP[a.name]; if (cm && (state === 'ground' || state === 'air')) { const f = lerp(cm[1], cm[2], a.loop && cm[0] === 'PickUp' ? 0.5 + 0.5 * Math.sin(u * TAU) : u); const ww = a.name === 'hit' || a.name === 'hitB' ? w * 0.7 : w; add(cm[0], 0, f); W[cm[0]] = Math.max(W[cm[0]] || 0, ww); actW = Math.max(actW, ww); }
+      const cm = CLIPMAP[a.name]; if (cm && (state === 'ground' || state === 'air')) { const f = lerp(cm[1], cm[2], a.loop && cm[0] === 'PickUp' ? 0.5 + 0.5 * Math.sin(u * TAU) : u); const ww = a.name === 'hit' || a.name === 'hitB' ? w * 0.7 : w; this.act(cm[0]).time = f * Assets.clips[cm[0]].duration; if (ww > actW) { actW = ww; actClip = cm[0]; } W[cm[0]] = Math.max(W[cm[0]] || 0, ww); }
       else if (GESTURES[a.name]) gestures.push([GESTURES[a.name](u), w]);
     }
-    // normalize: actions push the base layer down
-    const names = Object.keys(this.acts); for (const n of names) { let w = W[n] || 0; if (actW > 0 && !this.actions.some(a => a.def && CLIPMAP[a.name] && CLIPMAP[a.name][0] === n)) w *= 1 - actW; this.acts[n].setEffectiveWeight(w); }
+    this.actions = this.actions.filter(a => !a.done);
+    for (const n in this.acts) { let w = W[n] || 0; if (actW > 0 && n !== actClip) w *= 1 - actW; this.acts[n].setEffectiveWeight(w); }
     if (this.base.q) this.rig.skBones.forEach((b, i) => { b.quaternion.copy(this.base.q[i]); b.position.copy(this.base.p[i]); });
     this.mixer.update(0);
     if (!this.base.q) { this.base.q = this.rig.skBones.map(b => b.quaternion.clone()); this.base.p = this.rig.skBones.map(b => b.position.clone()); } else this.rig.skBones.forEach((b, i) => { this.base.q[i].copy(b.quaternion); this.base.p[i].copy(b.position); });
     // ---- post-process: posture, overrides, gestures, look-at, IK
     R.model.updateMatrixWorld(true);
-    const rq = new THREE.Quaternion(); R.root.getWorldQuaternion(rq);
-    const axis = { p: new THREE.Vector3(-1, 0, 0), r: new THREE.Vector3(0, 0, 1), y: new THREE.Vector3(0, 1, 0) };
-    const rot = (bone, ax, ang) => { if (!bone || !ang) return; const wa = axis[ax].clone().applyQuaternion(rq); const pq = new THREE.Quaternion(); bone.parent.getWorldQuaternion(pq); const qr = new THREE.Quaternion().setFromAxisAngle(wa, ang); const inv = pq.clone().invert(); bone.quaternion.premultiply(inv.multiply(qr).multiply(pq)); bone.updateMatrixWorld(true); };
-    const B = n => R.model.getObjectByName(n), snapTo = (name, w) => { if (w < 0.01) return; const s = Assets.snaps[name]; for (const b in s) { const o = B(b); if (o) o.quaternion.slerp(s[b], w); } R.model.updateMatrixWorld(true); };
-    // crouch & ride lower the hips; landing/hit squash lowers too
+    const rq = this.rq; R.root.getWorldQuaternion(rq); const BN = this.bone;
+    const rot = (bone, ax, ang) => { if (!bone || !ang) return; const wa = _cv[0].copy(_AX[ax]).applyQuaternion(rq), pq = bone.parent.getWorldQuaternion(_cq[0]); const q = _cq[1].copy(pq).invert().multiply(_cq[2].setFromAxisAngle(wa, ang)).multiply(pq); bone.quaternion.premultiply(q); bone.updateMatrixWorld(true); };
+    const snapTo = (name, w) => { if (w < 0.01) return; const s = Assets.snaps[name]; for (const b in s) { const o = BN[b]; if (o) o.quaternion.slerp(s[b], w); } R.model.updateMatrixWorld(true); };
     this.lowerHips(0.24 * this.lw.crouch * R.scale + 0.05 * this.lw.ride); rot(R.spine, 'p', 0.35 * this.lw.crouch);
     snapTo('carry', this.lw.carry * (1 - actW)); snapTo('handsup', this.lw.handsup); snapTo('reins', this.lw.ride * (1 - this.lw.aim)); snapTo('aim', this.lw.aim);
-    if (this.lw.aim > 0.01) { rot(R.chest, 'p', -this.lookPitch * 0.8 * this.lw.aim); if (this.lw.rifle > 0.5) { rot(B('UpperArmL'), 'p', 1.2 * this.lw.aim); rot(B('LowerArmL'), 'r', 0.6 * this.lw.aim); } }
-    if (this.lw.block > 0.01) { const w = this.lw.block; rot(B('UpperArmL'), 'p', 1.6 * w); rot(B('UpperArmR'), 'p', 1.6 * w); rot(B('LowerArmL'), 'p', 1.4 * w); rot(B('LowerArmR'), 'p', 1.4 * w); }
-    for (const [list, w] of gestures) for (const [b, ax, ang] of list) rot(B(b), ax, ang * w);
-    if (state === 'chat') { rot(B('UpperArmR'), 'p', 0.5 + 0.3 * Math.sin(this.t * 3)); rot(B('LowerArmR'), 'p', 0.8); rot(B('Head'), 'y', 0.1 * Math.sin(this.t * 1.7)); }
-    if (state === 'ground' && !st.crouch) rot(R.spine, 'p', clamp(this.accel * 0.02, -0.2, 0.2));
-    if (this.lookAt && state !== 'swim' && state !== 'down' && state !== 'lie') { const a = angDiff(r.yaw, Math.atan2(this.lookAt.x - r.pos.x, this.lookAt.z - r.pos.z)); if (Math.abs(a) < 1.9) { const k = clamp(a, -1.0, 1.0); rot(R.neck, 'y', k * 0.35); rot(R.headBone, 'y', k * 0.5); } }
+    if (this.lw.aim > 0.01) { rot(R.chest, 'p', -this.lookPitch * 0.8 * this.lw.aim); if (this.lw.rifle > 0.5) { rot(BN.UpperArmL, 'p', 1.2 * this.lw.aim); rot(BN.LowerArmL, 'r', 0.6 * this.lw.aim); } }
+    if (this.lw.block > 0.01) { const w = this.lw.block; rot(BN.UpperArmL, 'p', 1.6 * w); rot(BN.UpperArmR, 'p', 1.6 * w); rot(BN.LowerArmL, 'p', 1.4 * w); rot(BN.LowerArmR, 'p', 1.4 * w); }
+    for (const [list, w] of gestures) for (const [b, ax, ang] of list) rot(BN[b], ax, ang * w);
+    if (state === 'chat') { rot(BN.UpperArmR, 'p', 0.5 + 0.3 * Math.sin(this.t * 3)); rot(BN.LowerArmR, 'p', 0.8); rot(BN.Head, 'y', 0.1 * Math.sin(this.t * 1.7)); }
+    // lean into acceleration (start-walk and sprint starts lean further forward)
+    if (state === 'ground' && !st.crouch) rot(R.spine, 'p', clamp(this.accel * 0.02, -0.2, 0.2) + (this.fsm.state === 'startWalk' ? 0.06 : this.fsm.state === 'sprint' ? 0.08 : 0));
+    if (this.lookAt && state !== 'swim' && state !== 'down' && state !== 'lie') { const a = angDiff(r.yaw, Math.atan2(this.lookAt.x - r.pos.x, this.lookAt.z - r.pos.z)); if (Math.abs(a) < 1.9) { const k2 = clamp(a, -1.0, 1.0); rot(R.neck, 'y', k2 * 0.35); rot(R.headBone, 'y', k2 * 0.5); } }
     // ---- legs: two-bone IK to the (animated) feet, re-planted on the ground; stirrups when riding
-    if ((state === 'ground' || state === 'ride' || state === 'chat' || state === 'work' || state === 'handsup') && actW < 0.6) this.legIK(st, state);
+    if ((state === 'ground' || state === 'ride' || state === 'chat' || state === 'work' || state === 'handsup') && actW < 0.6) this.legIK(st, state, dt);
     // ---- squash & stretch, secondary motion
     const acc = -160 * (this.sq - 1) - 14 * this.sqv; this.sqv += acc * dt; this.sq += this.sqv * dt; this.sq = clamp(this.sq, 0.75, 1.25);
     R.vis.scale.set(R.scale / Math.sqrt(this.sq), R.scale * this.sq, R.scale / Math.sqrt(this.sq)); R.vis.rotation.z = clamp(-this.turnRate * 0.03 * st.speed, -0.2, 0.2); R.vis.rotation.x = state === 'swim' ? 1.1 : 0; R.vis.position.y = state === 'swim' ? -0.4 : 0;
     R.hat.rotation.x = this.hatS.step(clamp(-this.accel * 0.012 + (st.vy || 0) * -0.01, -0.3, 0.3), dt); R.hat.rotation.z = R.baseHatZ + this.hatZ.step(clamp(this.turnRate * 0.03, -0.2, 0.2), dt);
   }
-  lowerHips(m) { if (!m) return; const b = this.rig.hips, p = b.getWorldPosition(new THREE.Vector3()); p.y -= m; b.position.copy(b.parent.worldToLocal(p)); this.rig.model.updateMatrixWorld(true); }
-  legIK(st, state) {
-    const R = this.rig, r = this.owner, root = R.root; const solve = (A, Bn, E, target, pole) => {
-      const pa = A.getWorldPosition(new THREE.Vector3()), pb = Bn.getWorldPosition(new THREE.Vector3()), pe = E.getWorldPosition(new THREE.Vector3());
-      const a = pa.distanceTo(pb), b = pb.distanceTo(pe), toT = target.clone().sub(pa); const c = clamp(toT.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3); toT.normalize();
-      const cosA = clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1), ang = Math.acos(cosA); let n = new THREE.Vector3().crossVectors(toT, pole); if (n.lengthSq() < 1e-6) return; n.normalize();
-      const knee = pa.clone().add(toT.clone().applyAxisAngle(n, -ang).multiplyScalar(a)); if (knee.clone().sub(pa).dot(pole) < 0) knee.copy(pa.clone().add(toT.clone().applyAxisAngle(n, ang).multiplyScalar(a)));
-      const aim = (bone, from, to) => { const cur = to.clone(); const q = new THREE.Quaternion().setFromUnitVectors(from.normalize(), cur.normalize()); const wq = bone.getWorldQuaternion(new THREE.Quaternion()); const pq = bone.parent.getWorldQuaternion(new THREE.Quaternion()); bone.quaternion.copy(pq.invert().multiply(q.multiply(wq))); bone.updateMatrixWorld(true); };
-      aim(A, pb.clone().sub(pa), knee.clone().sub(pa)); const pb2 = Bn.getWorldPosition(new THREE.Vector3()), pe2 = E.getWorldPosition(new THREE.Vector3()); aim(Bn, pe2.clone().sub(pb2), target.clone().sub(pb2));
+  lowerHips(m) { if (!m) return; const b = this.rig.hips, p = b.getWorldPosition(_cv[1]); p.y -= m; b.position.copy(b.parent.worldToLocal(p)); this.rig.model.updateMatrixWorld(true); }
+  legIK(st, state, dt) {
+    const R = this.rig, r = this.owner, root = R.root;
+    const aim = (bone, from, to) => { const q = _cq[2].setFromUnitVectors(from.normalize(), to.normalize()); const wq = bone.getWorldQuaternion(_cq[3]); const pq = bone.parent.getWorldQuaternion(_cq[4]); bone.quaternion.copy(pq.invert().multiply(q.multiply(wq))); bone.updateMatrixWorld(true); };
+    const solve = (A, Bn, E, target, pole) => {
+      const pa = A.getWorldPosition(_cv[2]), pb = Bn.getWorldPosition(_cv[3]), pe = E.getWorldPosition(_cv[4]);
+      const a = pa.distanceTo(pb), b = pb.distanceTo(pe), toT = _cv[5].copy(target).sub(pa); const c = clamp(toT.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3); toT.normalize();
+      const ang = Math.acos(clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1)); const n = _cv[6].crossVectors(toT, pole); if (n.lengthSq() < 1e-6) return; n.normalize();
+      const kd = _cv[7].copy(toT).applyAxisAngle(n, -ang).multiplyScalar(a); if (kd.dot(pole) < 0) kd.copy(toT).applyAxisAngle(n, ang).multiplyScalar(a);
+      aim(A, _cv[8].copy(pb).sub(pa), _cv[9].copy(kd)); const pb2 = Bn.getWorldPosition(_cv[3]), pe2 = E.getWorldPosition(_cv[4]); aim(Bn, _cv[8].copy(pe2).sub(pb2), _cv[9].copy(target).sub(pb2));
     };
-    const fwdW = new THREE.Vector3(0, 0, 1).applyQuaternion(root.getWorldQuaternion(new THREE.Quaternion())), right = new THREE.Vector3(-fwdW.z, 0, fwdW.x);
-    const feet = [[R.LL, 1], [R.RL, -1]]; const tgts = [];
-    for (const [L, side] of feet) { const p = L.ft.getWorldPosition(new THREE.Vector3());
-      if (state === 'ride') { const hp = R.hips.getWorldPosition(new THREE.Vector3()); p.copy(hp).addScaledVector(right, -side * 0.42 * R.scale).addScaledVector(fwdW, 0.1).add(new THREE.Vector3(0, -0.55 * R.scale, 0)); }
-      else if (st.ground) { const lift = p.y - r.pos.y; const g = st.ground(p.x, p.z, r.pos.y + 0.6); p.y = g + Math.max(0, lift); }
-      tgts.push(p); }
-    if (state !== 'ride' && st.ground) { const dl = tgts[0].y - r.pos.y, dr = tgts[1].y - r.pos.y; const drop = clamp(-Math.min(dl, dr, 0), 0, 0.3); this.drop = damp(this.drop, drop, 12, 1 / 60); this.lowerHips(this.drop); }
-    feet.forEach(([L], i) => { L.ft.position.copy(L.ft.parent.worldToLocal(tgts[i].clone())); L.ft.updateMatrixWorld(true); solve(L.hp, L.kn, L.ft, tgts[i], fwdW); });
+    root.getWorldQuaternion(_cq[0]); const fwdW = this._fw || (this._fw = new THREE.Vector3()), right = this._rt || (this._rt = new THREE.Vector3()); fwdW.set(0, 0, 1).applyQuaternion(_cq[0]); right.set(-fwdW.z, 0, fwdW.x);
+    const tgts = this.tg;
+    this.feet.forEach(([L, side], i) => { const p = L.ft.getWorldPosition(tgts[i]);
+      if (state === 'ride') { R.hips.getWorldPosition(p).addScaledVector(right, -side * 0.42 * R.scale).addScaledVector(fwdW, 0.1); p.y -= 0.55 * R.scale; }
+      else if (st.ground) { const lift = p.y - r.pos.y; const g = st.ground(p.x, p.z, r.pos.y + 0.6); p.y = g + Math.max(0, lift); } });
+    if (state !== 'ride' && st.ground) { const dl = tgts[0].y - r.pos.y, dr = tgts[1].y - r.pos.y; const drop = clamp(-Math.min(dl, dr, 0), 0, 0.3); this.drop = damp(this.drop, drop, 12, dt); this.lowerHips(this.drop); }
+    this.feet.forEach(([L], i) => { L.ft.position.copy(L.ft.parent.worldToLocal(_cv[1].copy(tgts[i]))); L.ft.updateMatrixWorld(true); solve(L.hp, L.kn, L.ft, tgts[i], fwdW); });
   }
 }
 const _makeHumanoidProc = makeHumanoid, _AnimatorProc = Animator;
 function makeCharacter(o) { return Assets.ready && Settings.v.models !== false ? makeModelHumanoid(o) : _makeHumanoidProc(o); }
 function makeAnimator(rig, owner) { return rig.isModel ? new ClipAnimator(rig, owner) : new _AnimatorProc(rig, owner); }
+
+/* ===== Locomotion state machine =====
+   One explicit state per movement phase, chosen from what the body is actually doing: grounded or not, vertical
+   speed, measured horizontal speed, input, crouch and dodge. Animators read `state` and `t` (seconds in state) and
+   blend toward that state's clips over LOCO.FADE[state]. Pure logic: no Three.js, no DOM, no gameplay side effects. */
+const LOCO = {
+  STILL: 0.25,              // below this horizontal speed (m/s) the body counts as standing
+  WALK_MAX: 2.6, JOG_MAX: 5.4, HYST: 0.25, // speed bands with hysteresis so a speed on a boundary doesn't flicker
+  START_T: 0.3,             // longest a start-walk lasts before settling into the walk cycle
+  LAND_T: 0.2, LAND_T_MOVING: 0.1,
+  FADE: { idle: 0.25, startWalk: 0.12, walk: 0.18, jog: 0.2, sprint: 0.22, jumpStart: 0.05, rising: 0.1, falling: 0.2, landing: 0.06, crouchIdle: 0.2, crouchWalk: 0.18, dodge: 0.06 },
+  STATES: ['idle', 'startWalk', 'walk', 'jog', 'sprint', 'jumpStart', 'rising', 'falling', 'landing', 'crouchIdle', 'crouchWalk', 'dodge'],
+};
+class LocoFSM {
+  constructor() { this.state = 'idle'; this.prev = 'idle'; this.t = 0; this.log = null; }
+  set(s) { if (s === this.state) return; this.prev = this.state; this.state = s; this.t = 0; if (this.log) { this.log.push(s); if (this.log.length > 200) this.log.shift(); } }
+  // i: { grounded, vy, speed, moving, crouch, jumpPrep, dodge }
+  update(dt, i) {
+    this.t += dt; const s = this.state, sp = i.speed;
+    if (i.dodge) return this.set('dodge');
+    if (i.jumpPrep) return this.set('jumpStart');
+    if (!i.grounded) { // apex hysteresis: once falling, only a new upward push (another jump) counts as rising again
+      if (s === 'falling') { if (i.vy > 2) this.set('rising'); return; }
+      return this.set(i.vy > 0 ? 'rising' : 'falling');
+    }
+    if (s === 'rising' || s === 'falling') return this.set('landing');
+    if (s === 'landing' && this.t < (i.moving ? LOCO.LAND_T_MOVING : LOCO.LAND_T)) return;
+    if (i.crouch) return this.set(sp > LOCO.STILL ? 'crouchWalk' : 'crouchIdle');
+    if (sp < LOCO.STILL) return this.set('idle');
+    if ((s === 'idle' || s === 'crouchIdle' || s === 'landing' || s === 'dodge') && sp < LOCO.WALK_MAX) return this.set('startWalk');
+    if (s === 'startWalk' && this.t < LOCO.START_T && i.moving && sp < LOCO.WALK_MAX) return;
+    const h = LOCO.HYST, cur = s === 'jog' ? 1 : s === 'sprint' ? 2 : 0;
+    const band = sp > LOCO.JOG_MAX + (cur === 2 ? -h : h) ? 2 : sp > LOCO.WALK_MAX + (cur >= 1 ? -h : h) ? 1 : 0;
+    this.set(['walk', 'jog', 'sprint'][band]);
+  }
+}
 
 /* ===== Items, persistent world state, inventory, save/load ===== */
 const ITEMS = {
@@ -1292,9 +1354,11 @@ function noiseEvent(x, z, r, src) { for (const a of Animal.all) if (a.alive && M
 function raySphere(o, d, c, r) { const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z; const b = ox * d.x + oy * d.y + oz * d.z, cc = ox * ox + oy * oy + oz * oz - r * r, h = b * b - cc; if (h < 0) return -1; const t = -b - Math.sqrt(h); return t > 0 ? t : -1; }
 
 /* ---------- Player ---------- */
+// controller tuning (m/s, m/s², seconds); STEP is the fixed physics sub-step
+const PLAYER = { WALK: 1.7, JOG: 3.9, SPRINT: 6.8, CROUCH: 1.5, ACCEL: 7.5, DECEL: 9.5, AIR_ACCEL: 2.2, TURN: 11, MAX_TURN: 12, GRAVITY: 23, JUMP_V: 7.4, JUMP_PREP: 0.09, COYOTE: 0.12, JUMP_BUFFER: 0.15, STEP: 1 / 120 };
 class Player {
-  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
-  buildRig() { if (this.rig) Game.scene.remove(this.rig.root); const o = OUTFITS[S.outfit] || OUTFITS.duster; this.rig = makeCharacter({ skin: '#e2a57c', shirt: o.shirt, sleeve: o.coat || o.shirt, coat: o.coat, vest: o.vest, pants: '#3e3a4a', hat: true, hatColor: o.hat, hair: '#7a3b1e', longHair: true, scarf: '#e8833a', scale: 1.05 }); Game.scene.add(this.rig.root); const old = this.anim; this.anim = makeAnimator(this.rig, this); if (old) this.anim.cur = old.cur;
+  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.loco = new LocoFSM(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
+  buildRig() { if (this.rig) Game.scene.remove(this.rig.root); const o = OUTFITS[S.outfit] || OUTFITS.duster; this.rig = makeCharacter({ skin: '#e2a57c', shirt: o.shirt, sleeve: o.coat || o.shirt, coat: o.coat, vest: o.vest, pants: '#3e3a4a', hat: true, hatColor: o.hat, hair: '#7a3b1e', longHair: true, scarf: '#e8833a', scale: 1.05 }); Game.scene.add(this.rig.root); const old = this.anim; this.anim = makeAnimator(this.rig, this); if (old) { this.anim.cur = old.cur; if (old.dispose) old.dispose(); }
     this.gun = new THREE.Group(); this.gun.add(M(GEO.box, '#2b2b2b', 0.05, 0.08, 0.26, 0, 0, 0.1)); this.gun.add(M(GEO.box, '#6b4226', 0.05, 0.12, 0.06, 0, -0.07, -0.02)); this.gun.position.set(0, -0.08, 0.05); this.rig.R.hand.add(this.gun);
     this.rifle = new THREE.Group(); this.rifle.add(M(GEO.box, '#2b2b2b', 0.05, 0.06, 0.8, 0, 0, 0.3)); this.rifle.add(M(GEO.box, '#7a4a26', 0.07, 0.1, 0.4, 0, -0.04, -0.12)); this.rifle.position.set(0, -0.06, 0.05); this.rig.R.hand.add(this.rifle);
     this.held = new THREE.Group(); this.rig.R.hand.add(this.held); }
@@ -1314,9 +1378,10 @@ class Player {
   }
   update(dt) {
     const I = this.input(); this.cool -= dt; this.comboT -= dt; this.inv -= dt; this.hurtT -= dt; this.stDelay -= dt; this.dodgeT -= dt;
-    if (this.state === 'down') return this.updDown(dt);
-    if (this.state === 'ride' || this.state === 'mount' || this.state === 'dismount') return this.updRide(dt, I);
-    if (this.state === 'climb') { this.climbT += dt; const u = clamp(this.climbT / 0.75, 0, 1), e = ease(u); this.pos.lerpVectors(this.climbA, this.climbB, e); this.pos.y = lerp(this.climbA.y, this.climbB.y, ease(clamp(u * 1.6, 0, 1))); if (u >= 1) { this.state = 'ground'; this.vel.set(0, 0, 0); } this.anim.update(dt, { state: 'ground', speed: 0, k: 0 }); this.place(); return; }
+    this.jumpBuf = I.jump ? PLAYER.JUMP_BUFFER : Math.max(0, (this.jumpBuf || 0) - dt); // a press shortly before landing still jumps
+    if (this.state === 'down') { this.feedLoco(dt, 0, false); return this.updDown(dt); }
+    if (this.state === 'ride' || this.state === 'mount' || this.state === 'dismount') { this.feedLoco(dt, 0, false); return this.updRide(dt, I); }
+    if (this.state === 'climb') { this.climbT += dt; const u = clamp(this.climbT / 0.75, 0, 1), e = ease(u); this.pos.lerpVectors(this.climbA, this.climbB, e); this.pos.y = lerp(this.climbA.y, this.climbB.y, ease(clamp(u * 1.6, 0, 1))); if (u >= 1) { this.state = 'ground'; this.vel.set(0, 0, 0); } this.feedLoco(dt, 0, false); this.anim.update(dt, { state: 'ground', speed: 0, k: 0, loco: this.loco }); this.place(); return; }
     // toggles
     if (this.canAct()) {
       if (Input.hit('c') || Input.tb('crouch')) { this.crouch = !this.crouch; Input.setBtnState('crouch', this.crouch); }
@@ -1327,37 +1392,15 @@ class Player {
       if (Input.hit('b') || Input.tb('camp')) Camp.make();
       if ((Input.hit('x') || Input.tb('dodge')) && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
-    const swimming = this.state === 'swim';
-    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && !swimming && (Input.mouse.r || Input.aimToggle);
+    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !aiming && this.state === 'ground';
     this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
     this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0;
-    // speed
-    const tired = S.p.st < 1; let spd = this.crouch ? 1.5 : I.walk ? 1.7 : 3.9; let k = I.walk ? 0 : 0.35;
-    if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = 6.8 * (1 + S.p.xpSt * 0.0004); k = 1; S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
-    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.anim.busy() || !this.canAct()) spd = 0;
-    if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
-    const onG = this.state === 'ground'; const wantSp = Math.hypot(I.x, I.z) * spd, curSp = Math.hypot(this.vel.x, this.vel.z); const accel = swimming ? 6 : onG ? (wantSp > curSp ? 7.5 : 9.5) : 2.2;
-    if (onG && curSp > 5.2 && I.mag < 0.1 && !this.anim.playing('skid') && !this.anim.busy()) this.anim.play('skid');
-    if (this.dodgeT <= 0) { this.vel.x = damp(this.vel.x, I.x * spd, accel, dt); this.vel.z = damp(this.vel.z, I.z * spd, accel, dt); }
-    const hs = Math.hypot(this.vel.x, this.vel.z);
-    // facing
-    let ty = this.yaw; if (aiming || this.blocking) ty = Game.cam.yaw; else if (I.mag > 0.1 && spd > 0) ty = Math.atan2(I.x, I.z);
-    const turn = angDiff(this.yaw, ty); this.yaw = dampAngle(this.yaw, ty, aiming ? 20 : 11, dt);
-    // vertical
-    const g = Col.ground(this.pos.x, this.pos.z, this.pos.y);
-    const depth = WORLD.waterY - Terrain.height(this.pos.x, this.pos.z);
-    if (depth > 1.15 && this.pos.y < WORLD.waterY - 0.4) { if (!swimming) { Sfx.splash(); FX.splash(this.pos.x, WORLD.waterY, this.pos.z); if (this.carry && this.carry.kind === 'item') this.dropCarry(); } this.state = 'swim'; this.vel.y = 0; this.pos.y = damp(this.pos.y, WORLD.waterY - 1.0, 6, dt); this.crouch = false; }
-    else if (swimming && depth <= 1.15) { this.state = 'ground'; }
-    else if (this.state !== 'swim') {
-      if (onG && this.pos.y - g > 0.6) { this.state = 'air'; this.coyote = 0.12; }
-      if (this.state === 'air') { this.vel.y -= 23 * dt; this.coyote -= dt; this.pos.y += this.vel.y * dt; if (this.pos.y <= g) { this.land(g); } }
-      else { this.pos.y = g; this.vel.y = 0; }
-    }
-    if (I.jump && (this.state === 'ground' || this.coyote > 0) && !this.anim.busy() && !this.carry && !(this.jumpT > 0)) { if (!this.tryClimb()) { this.jumpT = 0.09; this.anim.play('jumpPrep'); if (this.crouch) { this.crouch = false; Input.setBtnState('crouch', false); } } }
-    if (this.jumpT > 0) { this.jumpT -= dt; if (this.jumpT <= 0) { this.state = 'air'; this.vel.y = 7.4; this.coyote = 0; this.anim.squash(-1.4); Sfx.burst(400, 0.1, 0.05); } }
-    this.pos.x += this.vel.x * dt; this.pos.z += this.vel.z * dt;
-    Col.resolve(this.pos, 0.36, this.pos.y, 1.6); this.pos.x = clamp(this.pos.x, -WORLD.half + 6, WORLD.half - 6); this.pos.z = clamp(this.pos.z, -WORLD.half + 6, WORLD.half - 6);
+    // physics in fixed sub-steps: speed, jump height and stopping distance are the same at 30, 60 or 144 fps
+    if (this.state === 'ground' && Math.hypot(this.vel.x, this.vel.z) > 5.2 && I.mag < 0.1 && !(this.jumpT > 0) && !this.anim.playing('skid') && !this.anim.busy()) this.anim.play('skid'); // once per frame, never over a jump start
+    const n = Math.max(1, Math.ceil(dt / PLAYER.STEP - 1e-6)), h = dt / n; this._turn = 0;
+    for (let i = 0; i < n && (this.state === 'ground' || this.state === 'air' || this.state === 'swim'); i++) this.step(h, I, aiming);
+    const hs = Math.hypot(this.vel.x, this.vel.z), g = Col.ground(this.pos.x, this.pos.z, this.pos.y), swimming = this.state === 'swim';
     // stamina / health regen with cores
     if (this.stDelay <= 0) S.p.st = Math.min(S.p.maxSt, S.p.st + (8 + S.p.stCore * 0.2) * dt); S.p.st = Math.max(0, S.p.st);
     if (this.hurtT < -4 && S.p.hpCore > 0) S.p.hp = Math.min(S.p.maxHp, S.p.hp + S.p.hpCore * 0.03 * dt);
@@ -1366,13 +1409,46 @@ class Player {
     if (this.canAct()) this.combat(dt, aiming);
     // stealth: crouched in tall grass/dark is quieter
     this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8;
-    let la = null, ld = 7; for (const n of NPC.all) { if (!n.alive || n.downed) continue; const d = Math.hypot(n.pos.x - this.pos.x, n.pos.z - this.pos.z); if (d < ld) { ld = d; la = n.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
-    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn, tired: tired && hs > 1 });
+    let la = null, ld = 7; for (const nn of NPC.all) { if (!nn.alive || nn.downed) continue; const d = Math.hypot(nn.pos.x - this.pos.x, nn.pos.z - this.pos.z); if (d < ld) { ld = d; la = nn.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
+    this.feedLoco(dt, hs, I.mag > 0.1);
+    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn: this._turn, tired: S.p.st < 1 && hs > 1, loco: this.loco });
     this.place();
     S.p.x = this.pos.x; S.p.z = this.pos.z; S.p.yaw = this.yaw;
   }
+  feedLoco(dt, hs, moving) { this.loco.update(dt, { grounded: this.state !== 'air', vy: this.vel.y, speed: this.state === 'ground' ? hs : 0, moving, crouch: this.crouch && this.state === 'ground', jumpPrep: this.jumpT > 0, dodge: this.dodgeT > 0 && this.state === 'ground' }); }
+  step(dt, I, aiming) { // one fixed physics step: speed, facing, gravity, jumping, collision
+    const swimming = this.state === 'swim', tired = S.p.st < 1; let spd = this.crouch ? PLAYER.CROUCH : I.walk ? PLAYER.WALK : PLAYER.JOG;
+    if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = PLAYER.SPRINT * (1 + S.p.xpSt * 0.0004); S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
+    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.anim.busy() || !this.canAct()) spd = 0;
+    if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
+    this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45; // brief recovery after a hard landing
+    const onG = this.state === 'ground'; const wantSp = Math.hypot(I.x, I.z) * spd, curSp = Math.hypot(this.vel.x, this.vel.z); const accel = swimming ? 6 : onG ? (wantSp > curSp ? PLAYER.ACCEL : PLAYER.DECEL) : PLAYER.AIR_ACCEL;
+    if (this.dodgeT <= 0) { this.vel.x = damp(this.vel.x, I.x * spd, accel, dt); this.vel.z = damp(this.vel.z, I.z * spd, accel, dt); }
+    // facing: toward the movement direction (camera direction while aiming or blocking)
+    let ty = this.yaw; if (aiming || this.blocking) ty = Game.cam.yaw; else if (I.mag > 0.1 && spd > 0) ty = Math.atan2(I.x, I.z);
+    this._turn = angDiff(this.yaw, ty); const rate = aiming ? 20 : onG ? PLAYER.TURN : PLAYER.TURN * 0.5, maxT = (aiming ? 30 : PLAYER.MAX_TURN) * dt; this.yaw += clamp(this._turn * (1 - Math.exp(-rate * dt)), -maxT, maxT); // eased, with a top turn speed so reversing sweeps around instead of flipping
+    // vertical
+    const g = Col.ground(this.pos.x, this.pos.z, this.pos.y);
+    const depth = WORLD.waterY - Terrain.height(this.pos.x, this.pos.z);
+    if (depth > 1.15 && this.pos.y < WORLD.waterY - 0.4) { if (!swimming) { Sfx.splash(); FX.splash(this.pos.x, WORLD.waterY, this.pos.z); if (this.carry && this.carry.kind === 'item') this.dropCarry(); } this.state = 'swim'; this.vel.y = 0; this.pos.y = damp(this.pos.y, WORLD.waterY - 1.0, 6, dt); this.crouch = false; }
+    else if (swimming && depth <= 1.15) { this.state = 'ground'; }
+    else if (this.state !== 'swim') {
+      if (onG && this.pos.y - g > 0.6) { this.state = 'air'; this.coyote = PLAYER.COYOTE; }
+      if (this.state === 'air') { this.vel.y -= PLAYER.GRAVITY * dt; this.coyote -= dt; this.pos.y += this.vel.y * dt; if (this.pos.y <= g) { this.land(g); } }
+      else { this.pos.y = g; this.vel.y = 0; }
+    }
+    if (this.jumpBuf > 0 && (this.state === 'ground' || this.coyote > 0) && !this.anim.busy() && !this.carry && !(this.jumpT > 0) && this.canAct()) { this.jumpBuf = 0; if (!this.tryClimb()) { this.jumpT = PLAYER.JUMP_PREP; this.anim.play('jumpPrep'); if (this.crouch) { this.crouch = false; Input.setBtnState('crouch', false); } } }
+    if (this.jumpT > 0) { this.jumpT -= dt; if (this.jumpT <= 0) { this.state = 'air'; this.vel.y = PLAYER.JUMP_V; this.coyote = 0; this.anim.squash(-1.4); Sfx.burst(400, 0.1, 0.05); } }
+    if (this.state === 'climb') return;
+    const px = this.pos.x, pz = this.pos.z; this.pos.x += this.vel.x * dt; this.pos.z += this.vel.z * dt;
+    Col.resolve(this.pos, 0.36, this.pos.y, 1.6); this.pos.x = clamp(this.pos.x, -WORLD.half + 6, WORLD.half - 6); this.pos.z = clamp(this.pos.z, -WORLD.half + 6, WORLD.half - 6);
+    // keep only the velocity that actually happened (pushing into a wall leaves just the slide along it),
+    // but never more than was intended, so being pushed out of an overlap can't fling the player
+    const ax = (this.pos.x - px) / dt, az = (this.pos.z - pz) / dt, m0 = Math.hypot(this.vel.x, this.vel.z), m1 = Math.hypot(ax, az), k = m1 > m0 ? (m1 > 0 ? m0 / m1 : 0) : 1;
+    this.vel.x = ax * k; this.vel.z = az * k;
+  }
   place() { const r = this.rig.root; r.position.copy(this.pos); r.rotation.y = this.yaw; if (this.state === 'swim') r.position.y = this.pos.y + 0.55; this.gun.visible = this.weapon === 'revolver' && !this.carry; this.rifle.visible = this.weapon === 'rifle' && !this.carry; if (this.carry && this.carry.npc) { this.carry.npc.place(); } else if (this.carry && this.carry.mesh) { const fw = fwd(this.yaw); this.carry.mesh.position.set(this.pos.x + fw.x * 0.5, this.pos.y + 1.0, this.pos.z + fw.z * 0.5); this.carry.mesh.rotation.y = this.yaw; } }
-  land(g) { const v = this.vel.y; this.pos.y = g; this.state = 'ground'; this.vel.y = 0; this.anim.squash(clamp(v * 0.12, -1.8, 0)); this.anim.play('land', { k: clamp(-v / 11, 0.25, 1) }); FX.dust(this.pos.x, g, this.pos.z, 4); Sfx.step(0.1); if (v < -13) this.hurt(Math.round((-v - 12) * 9), null, 'fall'); }
+  land(g) { const v = this.vel.y; this.pos.y = g; this.state = 'ground'; this.vel.y = 0; this.anim.squash(clamp(v * 0.12, -1.8, 0)); this.anim.play('land', { k: clamp(-v / 11, 0.25, 1) }); FX.dust(this.pos.x, g, this.pos.z, 4); Sfx.step(0.1); if (v < -10) this.landSlow = 0.25; if (v < -13) this.hurt(Math.round((-v - 12) * 9), null, 'fall'); }
   tryClimb() {
     const f = fwd(this.yaw), px = this.pos.x + f.x * 0.9, pz = this.pos.z + f.z * 0.9; let best = null;
     for (const c of Col.near(px, pz, 0.6, [])) { if (!c.walk) continue; const h = c.y1 - this.pos.y; if (h < 0.6 || h > 2.3) continue; if (px > c.minX - 0.45 && px < c.maxX + 0.45 && pz > c.minZ - 0.45 && pz < c.maxZ + 0.45) best = c; }
@@ -1540,7 +1616,7 @@ const TOWN_NODES = {}; const PLACES = {};
 const NPC = {
   all: [], byKey(k) { return this.all.find(n => n.key === k); },
   spawn(cfg) { const n = new Person(cfg); this.all.push(n); return n; },
-  despawn(n) { Game.scene.remove(n.rig.root); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
+  despawn(n) { Game.scene.remove(n.rig.root); if (n.anim.dispose) n.anim.dispose(); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
 };
 function townPath(fx, fz, tx, tz) {
   // BFS over town graph from nearest node to node nearest target
@@ -2657,6 +2733,7 @@ const UI = {
     <label class="range">Camera distance<input type="range" id="setZoom" min="2.4" max="9" step="0.1" value="${Game.cam.zoom}"><span>${Game.cam.zoom.toFixed(1)}</span></label>
     <label class="range"><input type="checkbox" id="setInv" ${V.invertY ? 'checked' : ''}> Invert vertical look</label>
     <label class="range"><input type="checkbox" id="setAuto" ${V.autoCam ? 'checked' : ''}> Camera follows behind you while moving</label>
+    <label class="range"><input type="checkbox" id="setLock" ${V.mouseLock !== false ? 'checked' : ''}> Lock the mouse to the game on click (Esc releases it; dragging works either way)</label>
     <div class="sec">Graphics & sound</div>
     <label class="range">Quality <select id="setQ">${['auto', 'low', 'medium', 'high'].map(q => `<option value="${q}" ${V.quality === q ? 'selected' : ''}>${q[0].toUpperCase() + q.slice(1)}${q === 'auto' ? ` (${Game.quality})` : ''}</option>`).join('')}</select></label>
     <label class="range">Volume<input type="range" id="setVol" min="0" max="1" step="0.05" value="${V.sound}"><span>${Math.round(V.sound * 100)}%</span></label>
@@ -2667,6 +2744,7 @@ const UI = {
     on('setSens', 'input', e => { Settings.set('sens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); });
     on('setZoom', 'input', e => { Game.cam.zoom = +e.target.value; Settings.set('zoom', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(1); });
     on('setInv', 'change', e => Settings.set('invertY', e.target.checked)); on('setAuto', 'change', e => Settings.set('autoCam', e.target.checked));
+    on('setLock', 'change', e => { Settings.set('mouseLock', e.target.checked); if (!e.target.checked && document.pointerLockElement) document.exitPointerLock(); });
     on('setQ', 'change', e => Settings.set('quality', e.target.value)); on('setVol', 'input', e => { Settings.set('sound', +e.target.value); e.target.nextElementSibling.textContent = Math.round(e.target.value * 100) + '%'; });
   },
   renderShop() {
@@ -2872,11 +2950,14 @@ const Game = {
 };
 
 class CamRig {
-  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; }
-  dir() { const v = new THREE.Vector3(); this.cam.getWorldDirection(v); return v; }
-  blockers(base) { return WallMeshes.filter(m => { if (!m._wp) { m._wp = new THREE.Vector3(); m.getWorldPosition(m._wp); } return m._wp.distanceToSquared(base) < 500; }); }
+  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; this.groundY = 0;
+    this.v = [...Array(6)].map(() => new THREE.Vector3()); this._dir = new THREE.Vector3(); this._bl = []; this._cn = []; }
+  dir() { return this.cam.getWorldDirection(this._dir); }
+  blockers(base) { const out = this._bl; out.length = 0; for (const m of WallMeshes) { if (!m._wp) { m._wp = new THREE.Vector3(); m.getWorldPosition(m._wp); } if (m._wp.distanceToSquared(base) < 500) out.push(m); } return out; }
+  // solid world colliders (buildings, rocks, wagons, wide trunks) block the camera; thin posts and trunks are ignored so the view doesn't pop
+  solidAt(x, y, z) { for (const c of Col.near(x, z, 0.2, this._cn)) { if (!c.block || y < c.y0 || y > c.y1) continue; if (c.type === 'circle') { if (c.r >= 0.6 && Math.hypot(x - c.x, z - c.z) < c.r + 0.2) return true; } else if (x > c.minX - 0.2 && x < c.maxX + 0.2 && z > c.minZ - 0.2 && z < c.maxZ + 0.2 && Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.5) return true; } return false; }
   update(dt) {
-    const P = Game.player, sens = Settings.v.sens; let dx = (Input.mouse.dx * 0.0025 + Input.look.dx * 0.0065) * sens, dy = (Input.mouse.dy * 0.0025 + Input.look.dy * 0.0055) * sens * (Settings.v.invertY ? -1 : 1);
+    const P = Game.player, sens = Settings.v.sens, V = this.v; let dx = (Input.mouse.dx * 0.0025 + Input.look.dx * 0.0065) * sens, dy = (Input.mouse.dy * 0.0025 + Input.look.dy * 0.0055) * sens * (Settings.v.invertY ? -1 : 1);
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) Settings.v.zoom = this.zoom; }
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
@@ -2892,22 +2973,25 @@ class CamRig {
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
     const want = aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, 6, dt);
-    const ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0); const tgt = new THREE.Vector3(P.pos.x, ty, P.pos.z);
-    if (this.snap) this.tgt.copy(tgt); else { this.tgt.x = damp(this.tgt.x, tgt.x, 12, dt); this.tgt.z = damp(this.tgt.z, tgt.z, 12, dt); this.tgt.y = damp(this.tgt.y, tgt.y, 7, dt); }
-    const lo = foe && !aim ? new THREE.Vector3((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4) : new THREE.Vector3(); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
-    const f = fwd(this.yaw), r = { x: -Math.cos(this.yaw), z: Math.sin(this.yaw) }; const sh = aim ? 0.7 : 0.35;
-    const base = this.tgt.clone().add(new THREE.Vector3(r.x * sh, 0, r.z * sh));
-    const desired = base.clone().add(new THREE.Vector3(-f.x * Math.cos(this.pitch) * this.dist, Math.sin(this.pitch) * this.dist, -f.z * Math.cos(this.pitch) * this.dist));
-    // spring-arm collision against walls and terrain; pull in fast, ease back out slowly
-    const toC = desired.clone().sub(base); const len = toC.length(); toC.normalize(); this.ray.set(base, toC); this.ray.far = len;
+    let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
+    // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
+    if (P.state === 'air') ty = Math.min(ty, this.groundY + 0.35); else this.groundY = ty;
+    const tgt = V[0].set(P.pos.x, ty, P.pos.z);
+    if (this.snap) this.tgt.copy(tgt); else { this.tgt.x = damp(this.tgt.x, tgt.x, 12, dt); this.tgt.z = damp(this.tgt.z, tgt.z, 12, dt); this.tgt.y = damp(this.tgt.y, tgt.y, P.state === 'air' ? 5 : 8, dt); }
+    const lo = V[1].set(0, 0, 0); if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
+    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35;
+    const base = V[2].set(this.tgt.x + rx * sh, this.tgt.y, this.tgt.z + rz * sh);
+    const cp = Math.cos(this.pitch), toC = V[3].set(-f.x * cp, Math.sin(this.pitch), -f.z * cp); const len = this.dist; // unit vector from the target out to the camera
+    // spring arm: walls (raycast), solid colliders and terrain (sampled along the arm); pull in fast, ease back out slowly
+    this.ray.set(base, toC); this.ray.far = len;
     const hit = this.ray.intersectObjects(this.blockers(base), false)[0]; let d = hit ? Math.max(0.5, hit.distance - 0.3) : len;
-    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y) { d = Math.max(0.5, t - d / 8); break; } }
-    this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = base.clone().addScaledVector(toC, Math.min(this.collD, len));
+    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && this.solidAt(x, y, z))) { d = Math.max(0.5, t - d / 8); break; } }
+    this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = V[4].copy(base).addScaledVector(toC, Math.min(this.collD, len));
     const gh = Terrain.height(p.x, p.z) + 0.35; if (p.y < gh) p.y = gh;
     if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-18 * dt));
-    this.cam.position.copy(this.pos); const look = base.clone().add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
+    this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
-    this.cam.fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), 6, dt); this.cam.updateProjectionMatrix();
+    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), 6, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }
   convo(dt) { // two-shot conversation framing
     const P = Game.player, N = Dialog.npc.pos, dxx = N.x - P.pos.x, dzz = N.z - P.pos.z, L = Math.hypot(dxx, dzz) || 1, ux = dxx / L, uz = dzz / L; const mid = new THREE.Vector3((N.x + P.pos.x) / 2, Math.max(N.y, P.pos.y) + 1.45, (N.z + P.pos.z) / 2);
@@ -2919,7 +3003,7 @@ class CamRig {
 
 /* ---------- Debug/test surface (used by automated tests) ---------- */
 window.HP = { get S() { return S; }, Game, Missions, NPC, Inv, Save, Law, Interact, Dialog, UI, STORY, Animal, Sky, Col,
-  sim(sec) { const n = Math.round(sec / 0.05); for (let i = 0; i < n; i++) { Game.time += 0.05; Game.update(0.05); Input.endFrame(); } },
+  sim(sec, dt = 0.05) { const n = Math.round(sec / dt); for (let i = 0; i < n; i++) { Game.time += dt; Game.update(dt); Input.endFrame(); } },
   tp(x, z) { Game.player.teleport(x, z); Game.cam.snap = true; }, opts() { return Interact.opts.map(o => o.label); }, press(label) { const i = Interact.opts.findIndex(o => o.label.startsWith(label)); if (i < 0) return false; Interact.trigger(i); return true; },
   choices() { return UI.choices.map(c => c.text + (c.disabled ? ' [x]' : '')); }, choose(prefix) { const i = UI.choices.findIndex(c => c.text.replace(/^\d+\.\s*/, '').startsWith(prefix)); if (i < 0) return false; UI.pickChoice(i); return true; } };
 

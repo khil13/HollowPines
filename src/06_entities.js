@@ -25,9 +25,11 @@ function noiseEvent(x, z, r, src) { for (const a of Animal.all) if (a.alive && M
 function raySphere(o, d, c, r) { const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z; const b = ox * d.x + oy * d.y + oz * d.z, cc = ox * ox + oy * oy + oz * oz - r * r, h = b * b - cc; if (h < 0) return -1; const t = -b - Math.sqrt(h); return t > 0 ? t : -1; }
 
 /* ---------- Player ---------- */
+// controller tuning (m/s, m/s², seconds); STEP is the fixed physics sub-step
+const PLAYER = { WALK: 1.7, JOG: 3.9, SPRINT: 6.8, CROUCH: 1.5, ACCEL: 7.5, DECEL: 9.5, AIR_ACCEL: 2.2, TURN: 11, MAX_TURN: 12, GRAVITY: 23, JUMP_V: 7.4, JUMP_PREP: 0.09, COYOTE: 0.12, JUMP_BUFFER: 0.15, STEP: 1 / 120 };
 class Player {
-  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
-  buildRig() { if (this.rig) Game.scene.remove(this.rig.root); const o = OUTFITS[S.outfit] || OUTFITS.duster; this.rig = makeCharacter({ skin: '#e2a57c', shirt: o.shirt, sleeve: o.coat || o.shirt, coat: o.coat, vest: o.vest, pants: '#3e3a4a', hat: true, hatColor: o.hat, hair: '#7a3b1e', longHair: true, scarf: '#e8833a', scale: 1.05 }); Game.scene.add(this.rig.root); const old = this.anim; this.anim = makeAnimator(this.rig, this); if (old) this.anim.cur = old.cur;
+  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.loco = new LocoFSM(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
+  buildRig() { if (this.rig) Game.scene.remove(this.rig.root); const o = OUTFITS[S.outfit] || OUTFITS.duster; this.rig = makeCharacter({ skin: '#e2a57c', shirt: o.shirt, sleeve: o.coat || o.shirt, coat: o.coat, vest: o.vest, pants: '#3e3a4a', hat: true, hatColor: o.hat, hair: '#7a3b1e', longHair: true, scarf: '#e8833a', scale: 1.05 }); Game.scene.add(this.rig.root); const old = this.anim; this.anim = makeAnimator(this.rig, this); if (old) { this.anim.cur = old.cur; if (old.dispose) old.dispose(); }
     this.gun = new THREE.Group(); this.gun.add(M(GEO.box, '#2b2b2b', 0.05, 0.08, 0.26, 0, 0, 0.1)); this.gun.add(M(GEO.box, '#6b4226', 0.05, 0.12, 0.06, 0, -0.07, -0.02)); this.gun.position.set(0, -0.08, 0.05); this.rig.R.hand.add(this.gun);
     this.rifle = new THREE.Group(); this.rifle.add(M(GEO.box, '#2b2b2b', 0.05, 0.06, 0.8, 0, 0, 0.3)); this.rifle.add(M(GEO.box, '#7a4a26', 0.07, 0.1, 0.4, 0, -0.04, -0.12)); this.rifle.position.set(0, -0.06, 0.05); this.rig.R.hand.add(this.rifle);
     this.held = new THREE.Group(); this.rig.R.hand.add(this.held); }
@@ -47,9 +49,10 @@ class Player {
   }
   update(dt) {
     const I = this.input(); this.cool -= dt; this.comboT -= dt; this.inv -= dt; this.hurtT -= dt; this.stDelay -= dt; this.dodgeT -= dt;
-    if (this.state === 'down') return this.updDown(dt);
-    if (this.state === 'ride' || this.state === 'mount' || this.state === 'dismount') return this.updRide(dt, I);
-    if (this.state === 'climb') { this.climbT += dt; const u = clamp(this.climbT / 0.75, 0, 1), e = ease(u); this.pos.lerpVectors(this.climbA, this.climbB, e); this.pos.y = lerp(this.climbA.y, this.climbB.y, ease(clamp(u * 1.6, 0, 1))); if (u >= 1) { this.state = 'ground'; this.vel.set(0, 0, 0); } this.anim.update(dt, { state: 'ground', speed: 0, k: 0 }); this.place(); return; }
+    this.jumpBuf = I.jump ? PLAYER.JUMP_BUFFER : Math.max(0, (this.jumpBuf || 0) - dt); // a press shortly before landing still jumps
+    if (this.state === 'down') { this.feedLoco(dt, 0, false); return this.updDown(dt); }
+    if (this.state === 'ride' || this.state === 'mount' || this.state === 'dismount') { this.feedLoco(dt, 0, false); return this.updRide(dt, I); }
+    if (this.state === 'climb') { this.climbT += dt; const u = clamp(this.climbT / 0.75, 0, 1), e = ease(u); this.pos.lerpVectors(this.climbA, this.climbB, e); this.pos.y = lerp(this.climbA.y, this.climbB.y, ease(clamp(u * 1.6, 0, 1))); if (u >= 1) { this.state = 'ground'; this.vel.set(0, 0, 0); } this.feedLoco(dt, 0, false); this.anim.update(dt, { state: 'ground', speed: 0, k: 0, loco: this.loco }); this.place(); return; }
     // toggles
     if (this.canAct()) {
       if (Input.hit('c') || Input.tb('crouch')) { this.crouch = !this.crouch; Input.setBtnState('crouch', this.crouch); }
@@ -60,37 +63,15 @@ class Player {
       if (Input.hit('b') || Input.tb('camp')) Camp.make();
       if ((Input.hit('x') || Input.tb('dodge')) && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
-    const swimming = this.state === 'swim';
-    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && !swimming && (Input.mouse.r || Input.aimToggle);
+    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !aiming && this.state === 'ground';
     this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
     this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0;
-    // speed
-    const tired = S.p.st < 1; let spd = this.crouch ? 1.5 : I.walk ? 1.7 : 3.9; let k = I.walk ? 0 : 0.35;
-    if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = 6.8 * (1 + S.p.xpSt * 0.0004); k = 1; S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
-    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.anim.busy() || !this.canAct()) spd = 0;
-    if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
-    const onG = this.state === 'ground'; const wantSp = Math.hypot(I.x, I.z) * spd, curSp = Math.hypot(this.vel.x, this.vel.z); const accel = swimming ? 6 : onG ? (wantSp > curSp ? 7.5 : 9.5) : 2.2;
-    if (onG && curSp > 5.2 && I.mag < 0.1 && !this.anim.playing('skid') && !this.anim.busy()) this.anim.play('skid');
-    if (this.dodgeT <= 0) { this.vel.x = damp(this.vel.x, I.x * spd, accel, dt); this.vel.z = damp(this.vel.z, I.z * spd, accel, dt); }
-    const hs = Math.hypot(this.vel.x, this.vel.z);
-    // facing
-    let ty = this.yaw; if (aiming || this.blocking) ty = Game.cam.yaw; else if (I.mag > 0.1 && spd > 0) ty = Math.atan2(I.x, I.z);
-    const turn = angDiff(this.yaw, ty); this.yaw = dampAngle(this.yaw, ty, aiming ? 20 : 11, dt);
-    // vertical
-    const g = Col.ground(this.pos.x, this.pos.z, this.pos.y);
-    const depth = WORLD.waterY - Terrain.height(this.pos.x, this.pos.z);
-    if (depth > 1.15 && this.pos.y < WORLD.waterY - 0.4) { if (!swimming) { Sfx.splash(); FX.splash(this.pos.x, WORLD.waterY, this.pos.z); if (this.carry && this.carry.kind === 'item') this.dropCarry(); } this.state = 'swim'; this.vel.y = 0; this.pos.y = damp(this.pos.y, WORLD.waterY - 1.0, 6, dt); this.crouch = false; }
-    else if (swimming && depth <= 1.15) { this.state = 'ground'; }
-    else if (this.state !== 'swim') {
-      if (onG && this.pos.y - g > 0.6) { this.state = 'air'; this.coyote = 0.12; }
-      if (this.state === 'air') { this.vel.y -= 23 * dt; this.coyote -= dt; this.pos.y += this.vel.y * dt; if (this.pos.y <= g) { this.land(g); } }
-      else { this.pos.y = g; this.vel.y = 0; }
-    }
-    if (I.jump && (this.state === 'ground' || this.coyote > 0) && !this.anim.busy() && !this.carry && !(this.jumpT > 0)) { if (!this.tryClimb()) { this.jumpT = 0.09; this.anim.play('jumpPrep'); if (this.crouch) { this.crouch = false; Input.setBtnState('crouch', false); } } }
-    if (this.jumpT > 0) { this.jumpT -= dt; if (this.jumpT <= 0) { this.state = 'air'; this.vel.y = 7.4; this.coyote = 0; this.anim.squash(-1.4); Sfx.burst(400, 0.1, 0.05); } }
-    this.pos.x += this.vel.x * dt; this.pos.z += this.vel.z * dt;
-    Col.resolve(this.pos, 0.36, this.pos.y, 1.6); this.pos.x = clamp(this.pos.x, -WORLD.half + 6, WORLD.half - 6); this.pos.z = clamp(this.pos.z, -WORLD.half + 6, WORLD.half - 6);
+    // physics in fixed sub-steps: speed, jump height and stopping distance are the same at 30, 60 or 144 fps
+    if (this.state === 'ground' && Math.hypot(this.vel.x, this.vel.z) > 5.2 && I.mag < 0.1 && !(this.jumpT > 0) && !this.anim.playing('skid') && !this.anim.busy()) this.anim.play('skid'); // once per frame, never over a jump start
+    const n = Math.max(1, Math.ceil(dt / PLAYER.STEP - 1e-6)), h = dt / n; this._turn = 0;
+    for (let i = 0; i < n && (this.state === 'ground' || this.state === 'air' || this.state === 'swim'); i++) this.step(h, I, aiming);
+    const hs = Math.hypot(this.vel.x, this.vel.z), g = Col.ground(this.pos.x, this.pos.z, this.pos.y), swimming = this.state === 'swim';
     // stamina / health regen with cores
     if (this.stDelay <= 0) S.p.st = Math.min(S.p.maxSt, S.p.st + (8 + S.p.stCore * 0.2) * dt); S.p.st = Math.max(0, S.p.st);
     if (this.hurtT < -4 && S.p.hpCore > 0) S.p.hp = Math.min(S.p.maxHp, S.p.hp + S.p.hpCore * 0.03 * dt);
@@ -99,13 +80,46 @@ class Player {
     if (this.canAct()) this.combat(dt, aiming);
     // stealth: crouched in tall grass/dark is quieter
     this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8;
-    let la = null, ld = 7; for (const n of NPC.all) { if (!n.alive || n.downed) continue; const d = Math.hypot(n.pos.x - this.pos.x, n.pos.z - this.pos.z); if (d < ld) { ld = d; la = n.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
-    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn, tired: tired && hs > 1 });
+    let la = null, ld = 7; for (const nn of NPC.all) { if (!nn.alive || nn.downed) continue; const d = Math.hypot(nn.pos.x - this.pos.x, nn.pos.z - this.pos.z); if (d < ld) { ld = d; la = nn.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
+    this.feedLoco(dt, hs, I.mag > 0.1);
+    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn: this._turn, tired: S.p.st < 1 && hs > 1, loco: this.loco });
     this.place();
     S.p.x = this.pos.x; S.p.z = this.pos.z; S.p.yaw = this.yaw;
   }
+  feedLoco(dt, hs, moving) { this.loco.update(dt, { grounded: this.state !== 'air', vy: this.vel.y, speed: this.state === 'ground' ? hs : 0, moving, crouch: this.crouch && this.state === 'ground', jumpPrep: this.jumpT > 0, dodge: this.dodgeT > 0 && this.state === 'ground' }); }
+  step(dt, I, aiming) { // one fixed physics step: speed, facing, gravity, jumping, collision
+    const swimming = this.state === 'swim', tired = S.p.st < 1; let spd = this.crouch ? PLAYER.CROUCH : I.walk ? PLAYER.WALK : PLAYER.JOG;
+    if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = PLAYER.SPRINT * (1 + S.p.xpSt * 0.0004); S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
+    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.anim.busy() || !this.canAct()) spd = 0;
+    if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
+    this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45; // brief recovery after a hard landing
+    const onG = this.state === 'ground'; const wantSp = Math.hypot(I.x, I.z) * spd, curSp = Math.hypot(this.vel.x, this.vel.z); const accel = swimming ? 6 : onG ? (wantSp > curSp ? PLAYER.ACCEL : PLAYER.DECEL) : PLAYER.AIR_ACCEL;
+    if (this.dodgeT <= 0) { this.vel.x = damp(this.vel.x, I.x * spd, accel, dt); this.vel.z = damp(this.vel.z, I.z * spd, accel, dt); }
+    // facing: toward the movement direction (camera direction while aiming or blocking)
+    let ty = this.yaw; if (aiming || this.blocking) ty = Game.cam.yaw; else if (I.mag > 0.1 && spd > 0) ty = Math.atan2(I.x, I.z);
+    this._turn = angDiff(this.yaw, ty); const rate = aiming ? 20 : onG ? PLAYER.TURN : PLAYER.TURN * 0.5, maxT = (aiming ? 30 : PLAYER.MAX_TURN) * dt; this.yaw += clamp(this._turn * (1 - Math.exp(-rate * dt)), -maxT, maxT); // eased, with a top turn speed so reversing sweeps around instead of flipping
+    // vertical
+    const g = Col.ground(this.pos.x, this.pos.z, this.pos.y);
+    const depth = WORLD.waterY - Terrain.height(this.pos.x, this.pos.z);
+    if (depth > 1.15 && this.pos.y < WORLD.waterY - 0.4) { if (!swimming) { Sfx.splash(); FX.splash(this.pos.x, WORLD.waterY, this.pos.z); if (this.carry && this.carry.kind === 'item') this.dropCarry(); } this.state = 'swim'; this.vel.y = 0; this.pos.y = damp(this.pos.y, WORLD.waterY - 1.0, 6, dt); this.crouch = false; }
+    else if (swimming && depth <= 1.15) { this.state = 'ground'; }
+    else if (this.state !== 'swim') {
+      if (onG && this.pos.y - g > 0.6) { this.state = 'air'; this.coyote = PLAYER.COYOTE; }
+      if (this.state === 'air') { this.vel.y -= PLAYER.GRAVITY * dt; this.coyote -= dt; this.pos.y += this.vel.y * dt; if (this.pos.y <= g) { this.land(g); } }
+      else { this.pos.y = g; this.vel.y = 0; }
+    }
+    if (this.jumpBuf > 0 && (this.state === 'ground' || this.coyote > 0) && !this.anim.busy() && !this.carry && !(this.jumpT > 0) && this.canAct()) { this.jumpBuf = 0; if (!this.tryClimb()) { this.jumpT = PLAYER.JUMP_PREP; this.anim.play('jumpPrep'); if (this.crouch) { this.crouch = false; Input.setBtnState('crouch', false); } } }
+    if (this.jumpT > 0) { this.jumpT -= dt; if (this.jumpT <= 0) { this.state = 'air'; this.vel.y = PLAYER.JUMP_V; this.coyote = 0; this.anim.squash(-1.4); Sfx.burst(400, 0.1, 0.05); } }
+    if (this.state === 'climb') return;
+    const px = this.pos.x, pz = this.pos.z; this.pos.x += this.vel.x * dt; this.pos.z += this.vel.z * dt;
+    Col.resolve(this.pos, 0.36, this.pos.y, 1.6); this.pos.x = clamp(this.pos.x, -WORLD.half + 6, WORLD.half - 6); this.pos.z = clamp(this.pos.z, -WORLD.half + 6, WORLD.half - 6);
+    // keep only the velocity that actually happened (pushing into a wall leaves just the slide along it),
+    // but never more than was intended, so being pushed out of an overlap can't fling the player
+    const ax = (this.pos.x - px) / dt, az = (this.pos.z - pz) / dt, m0 = Math.hypot(this.vel.x, this.vel.z), m1 = Math.hypot(ax, az), k = m1 > m0 ? (m1 > 0 ? m0 / m1 : 0) : 1;
+    this.vel.x = ax * k; this.vel.z = az * k;
+  }
   place() { const r = this.rig.root; r.position.copy(this.pos); r.rotation.y = this.yaw; if (this.state === 'swim') r.position.y = this.pos.y + 0.55; this.gun.visible = this.weapon === 'revolver' && !this.carry; this.rifle.visible = this.weapon === 'rifle' && !this.carry; if (this.carry && this.carry.npc) { this.carry.npc.place(); } else if (this.carry && this.carry.mesh) { const fw = fwd(this.yaw); this.carry.mesh.position.set(this.pos.x + fw.x * 0.5, this.pos.y + 1.0, this.pos.z + fw.z * 0.5); this.carry.mesh.rotation.y = this.yaw; } }
-  land(g) { const v = this.vel.y; this.pos.y = g; this.state = 'ground'; this.vel.y = 0; this.anim.squash(clamp(v * 0.12, -1.8, 0)); this.anim.play('land', { k: clamp(-v / 11, 0.25, 1) }); FX.dust(this.pos.x, g, this.pos.z, 4); Sfx.step(0.1); if (v < -13) this.hurt(Math.round((-v - 12) * 9), null, 'fall'); }
+  land(g) { const v = this.vel.y; this.pos.y = g; this.state = 'ground'; this.vel.y = 0; this.anim.squash(clamp(v * 0.12, -1.8, 0)); this.anim.play('land', { k: clamp(-v / 11, 0.25, 1) }); FX.dust(this.pos.x, g, this.pos.z, 4); Sfx.step(0.1); if (v < -10) this.landSlow = 0.25; if (v < -13) this.hurt(Math.round((-v - 12) * 9), null, 'fall'); }
   tryClimb() {
     const f = fwd(this.yaw), px = this.pos.x + f.x * 0.9, pz = this.pos.z + f.z * 0.9; let best = null;
     for (const c of Col.near(px, pz, 0.6, [])) { if (!c.walk) continue; const h = c.y1 - this.pos.y; if (h < 0.6 || h > 2.3) continue; if (px > c.minX - 0.45 && px < c.maxX + 0.45 && pz > c.minZ - 0.45 && pz < c.maxZ + 0.45) best = c; }
@@ -273,7 +287,7 @@ const TOWN_NODES = {}; const PLACES = {};
 const NPC = {
   all: [], byKey(k) { return this.all.find(n => n.key === k); },
   spawn(cfg) { const n = new Person(cfg); this.all.push(n); return n; },
-  despawn(n) { Game.scene.remove(n.rig.root); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
+  despawn(n) { Game.scene.remove(n.rig.root); if (n.anim.dispose) n.anim.dispose(); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
 };
 function townPath(fx, fz, tx, tz) {
   // BFS over town graph from nearest node to node nearest target
