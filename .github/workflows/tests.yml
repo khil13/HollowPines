@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [mechanics, story, controller, pwa, camps, ch4, ch5, gunplay]
+        suite: [mechanics, story, controller, pwa, camps, ch4, ch5, gunplay, side]
     steps:
       - uses: actions/checkout@v4
 

@@ -309,7 +309,7 @@ class Horse {
 const Carry = {
   list: [],
   make(id, x, z) {
-    const def = { strongbox: { label: 'strongbox', h: 0.2, mesh: () => { const g = new THREE.Group(); g.add(M(GEO.box, '#5a4a3a', 0.6, 0.4, 0.45)); g.add(M(GEO.box, '#c9a227', 0.62, 0.06, 0.47, 0, 0.12, 0)); g.add(M(GEO.box, '#2b2b2b', 0.1, 0.12, 0.05, 0, 0, 0.24)); return g; } } }[id];
+    const def = { medcrate: { label: 'medicine crate', h: 0.3, mesh: () => { const g = new THREE.Group(); g.add(M(GEO.box, '#e6dcc5', 0.7, 0.5, 0.5)); g.add(M(GEO.box, '#c8443a', 0.3, 0.08, 0.52, 0, 0, 0)); g.add(M(GEO.box, '#c8443a', 0.08, 0.3, 0.52, 0, 0, 0)); return g; } }, strongbox: { label: 'strongbox', h: 0.2, mesh: () => { const g = new THREE.Group(); g.add(M(GEO.box, '#5a4a3a', 0.6, 0.4, 0.45)); g.add(M(GEO.box, '#c9a227', 0.62, 0.06, 0.47, 0, 0.12, 0)); g.add(M(GEO.box, '#2b2b2b', 0.1, 0.12, 0.05, 0, 0, 0.24)); return g; } } }[id];
     const o = { id, label: def.label, h: def.h, mesh: def.mesh(), stowable: true, carried: false };
     Game.scene.add(o.mesh); if (x !== undefined) o.mesh.position.set(x, Col.ground(x, z, 99) + def.h, z);
     o.it = Interact.add({ pos: () => o.mesh.position, r: 1.8, pri: 0.5, opts: p => o.carried || !o.mesh.visible ? [] : [{ label: `Pick up ${o.label}`, fn: () => p.pickCarry(o) }] });
