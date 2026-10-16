@@ -1,0 +1,5 @@
+node_modules/
+test.html
+tests/*.png
+tests/*.json
+tests/story_out.txt
