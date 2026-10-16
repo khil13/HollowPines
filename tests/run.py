@@ -1,6 +1,6 @@
 import asyncio, sys, json, os
 from playwright.async_api import async_playwright
-os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH','/opt/pw-browsers')
+if os.path.isdir('/opt/pw-browsers'): os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH','/opt/pw-browsers')  # preinstalled browsers in the cloud dev container; elsewhere use Playwright's default
 ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 URL='file://'+os.path.join(ROOT,'test.html')
 OUT=os.path.join(ROOT,'tests')+os.sep
