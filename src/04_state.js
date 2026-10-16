@@ -72,7 +72,7 @@ const Rep = {
   faction(f, d) { S.factions[f] = clamp(S.factions[f] + d, -100, 100); },
   mood(who) { const r = S.rel[who] || 0; return r >= 40 ? 'friend' : r >= 10 ? 'warm' : r > -20 ? 'neutral' : r > -50 ? 'cold' : 'hostile'; },
 };
-const NPCNAMES = { mae: 'Mae Holloway', pike: 'Sheriff Pike', ezra: 'Ezra Greer', nell: 'Nell Greer', dutchy: 'Dutchy Moss', fenwick: 'Fenwick Crane', hank: 'Hank Dorsey', cora: 'Cora Vance', doc: 'Doc Pell', lyle: 'Deputy Bramble', brock: 'Brock Harlan', rook: 'Rook Malloy', ida: 'Ida Fairweather', sal: 'Sal', vane: 'Silas Vane' };
+const NPCNAMES = { mae: 'Mae Holloway', pike: 'Sheriff Pike', ezra: 'Ezra Greer', nell: 'Nell Greer', dutchy: 'Dutchy Moss', fenwick: 'Fenwick Crane', hank: 'Hank Dorsey', cora: 'Cora Vance', doc: 'Doc Pell', lyle: 'Deputy Bramble', brock: 'Brock Harlan', rook: 'Rook Malloy', ida: 'Ida Fairweather', sal: 'Sal', vane: 'Silas Vane', eli: 'Eli Calloway', marshal: 'Marshal Calder' };
 
 function journal(text, kind = 'note') { S.log.unshift({ d: S.time.day, h: Math.floor(S.time.hour), text, kind }); if (S.log.length > 80) S.log.length = 80; }
 

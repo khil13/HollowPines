@@ -453,7 +453,7 @@ class Person {
       case 'scripted': if (this.script) this.script(dt, this); break;
       case 'tied': this.sp = 0; animState = 'sit'; break;
     }
-    if (this.state !== 'pursue' && this.state !== 'combat') this.anim.layers.aim = 0;
+    if (this.state !== 'pursue' && this.state !== 'combat' && !this.allyAim) this.anim.layers.aim = 0;
     const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt);
     this.anim.lookAt = (this.distP < 6 && Game.player.alive && !this.hostileToPlayer && animState !== 'lie') ? Game.player.pos : null;
     this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: (x, z, y) => Col.ground(x, z, y), poseClip: this.poseClip });

@@ -2,7 +2,7 @@
    Hollow Pines — five chapters. Wren Calloway comes home to Juniper Gap because her brother Eli, a railroad
    surveyor, stopped writing. Eli found out the Halvorsen Railroad's land agent, Silas Vane, is using the Crane
    gang to scare homesteaders off land the new line will cross, and that someone in town is helping.
-   Chapters 1–4 are playable (Chapter 4 lives in 08b_ch4.js). Chapter 5 is designed and gated on the same world state. */
+   All five chapters are playable (Chapter 4 lives in 08b_ch4.js, Chapter 5 in 08c_ch5.js). */
 const CAST = {
   wren: { name: 'Wren Calloway', role: 'Protagonist', bio: 'Former railroad survey hand, eight years gone from the valley. Steady, dry, and too proud to ask for help. Wants her brother home, and wants to know who sold him out.' },
   eli: { name: 'Eli Calloway', role: 'The missing brother', bio: 'Wren\'s younger brother, surveying for the Halvorsen line. Stubborn and honest to a fault. He wrote everything down.' },
@@ -23,7 +23,7 @@ const CHAPTERS = [
   { n: 2, title: 'Cold Trail', playable: true, text: 'Eli\'s survey page points to Hollow Cabin. His tracks lead to Bluecap Cave and his field journal, and the Cranes want it too.' },
   { n: 3, title: "Greer's Stand", playable: true, text: 'Eli\'s journal lists the Greers as Vane\'s next mark. Railroad men arrive at their farm with a "debt" to collect.' },
   { n: 4, title: 'Night at Willow Bridge', playable: true, text: 'Sheriff Pike walks out of town at midnight. Follow him unseen to Willow Bridge and hear what he and Silas Vane have to say. What you gave Pike in Chapter 2 decides what he brings to it.' },
-  { n: 5, title: 'The Ledger', playable: false, text: 'Planned: find Eli in Vane\'s railroad camp. Expose Vane to the territorial marshal (needs the journal or Mae\'s copy and the Greers on their land), ride with the Cranes against him (needs Dutchy as an ally), or take Vane\'s payout and leave the valley.' },
+  { n: 5, title: 'The Ledger', playable: true, text: 'Eli is held at Survey Camp 3, Tamarack Pass. Ride in with the territorial marshal (if you kept evidence, or Pike turned), with the Cranes (if Dutchy is your ally), or alone. Vane can be arrested, shot, or paid off.' },
 ];
 
 const STORY = {
@@ -40,6 +40,7 @@ const STORY = {
       town('hank', { x: -38, z: 21, look: { skin: '#d9a07a', shirt: '#8a6a4a', hair: '#bbb', beard: '#ccc', hatColor: '#8b7d6b', hatTilt: 0.25, stout: 1.1 }, brave: 0.4, schedule: [[6, 11, 'well2'], [11, 16, 'storePorch'], [16, 24, 'saloonStand2'], [0, 6, 'boardBedB']], talk: n => STORY.talkHank(n) }),
       town('abe', { name: 'Abe Tull', x: -50, z: 21, look: { skin: '#8d5a3c', shirt: '#c8443a', pants: '#3b3b5b', hair: '#1b1b1b', hatColor: '#d9c58f' }, brave: 0.6, tags: ['generic'], schedule: [[7, 12, 'street'], [12, 14, 'well'], [14, 19, 'streetE'], [19, 23, 'saloonSeatB'], [23, 7, 'boardBedA']] }),
       town('lou', { name: 'Lou Haskins', x: -30, z: 19, look: { skin: '#f0c4a0', shirt: '#9dbf8a', apron: '#d9c58f', hair: '#a0522d', longHair: true, hat: false }, brave: 0.25, tags: ['generic'], schedule: [[7, 11, 'well'], [11, 17, 'streetE'], [17, 21, 'street'], [21, 7, 'docBed']] }),
+      town('eli', { name: 'Eli Calloway', x: -50, z: 8, look: { skin: '#f0c4a0', shirt: '#4a6a8a', pants: '#5a4a3a', hair: '#c97b3a', hatColor: '#4a6a8a', beard: '#b5763a' }, brave: 0.6, schedule: [[7, 12, 'storePorch'], [12, 18, 'well'], [18, 23, 'saloonSeatB'], [23, 7, 'boardBedB']], talk: n => STORY.talkEli(n), cond: () => S.chars.eli === 'home' }),
       { key: 'ezra', name: 'Ezra Greer', x: -135, z: 106, wild: true, region: 'farm', look: { skin: '#e2a57c', shirt: '#4f7ca8', pants: '#5a4a3a', hair: '#8b5a2b', beard: '#8b5a2b', hatColor: '#c9a46b' }, brave: 0.75, schedule: [[6, 12, 'field'], [12, 13, 'farmPorch'], [13, 19, 'field'], [19, 21, 'farmPorch'], [21, 6, 'farmBed']], talk: n => STORY.talkEzra(n), cond: () => S.locations.farm === 'occupied' && S.chars.ezra !== 'dead' },
       { key: 'nell', name: 'Nell Greer', x: -115, z: 95, wild: true, region: 'farm', look: { skin: '#f0c4a0', shirt: '#c97b5a', apron: '#f4ead3', hair: '#d9a441', longHair: true, hat: false }, brave: 0.5, schedule: [[6, 9, 'farmYard'], [9, 18, 'barnWork'], [18, 21, 'farmPorch'], [21, 6, 'farmBed2']], talk: n => STORY.talkNell(n), cond: () => S.locations.farm === 'occupied' && S.chars.nell !== 'dead' },
     ];
@@ -156,6 +157,7 @@ const STORY = {
       thanks: { text: 'You\'re a good shot. Here\'s for your trouble. And Wren, if you ever need anything, you come here first.' },
     };
   },
+  talkEli(n) { return { start: { text: () => STORY.smalltalk(n, S.decisions.ending === 'law' ? ['They want me in Cheyenne for the trial. I\'ve never worn a tie.', 'Calder says my maps were the best evidence she\'d ever seen. Vane would hate that.'] : S.decisions.ending === 'cranes' ? ['Fenwick Crane bought me a drink yesterday. I didn\'t know what to say.', 'I keep thinking about Vane at that gate.'] : ['You came for me, Wren. Eight years, and you still came.', 'I\'m surveying the Greer line again. Properly, this time.']), choices: [{ text: 'Goodbye', next: null }] } }; },
   talkNell(n) { return { start: { text: () => S.flags.nell_hurt ? 'I\'m alright. Bruised. Ezra won\'t stop fussing.' : Missions.st('m3').status === 'done' ? 'Thank you, Wren. Truly.' : 'Ezra worries about the books. I worry about Ezra.', choices: [{ text: 'Goodbye', next: null }] } }; },
   talkIda(n) { return { start: { text: 'Wren! The woman who saved me on the east trail. Sit, I owe you a story. Saw the sheriff\'s horse tied outside the railroad survey tent two nights ago. Thought you\'d want to know.', on: () => { if (!S.evidence.ida_tip) { S.evidence.ida_tip = true; journal('Ida saw Sheriff Pike\'s horse at the railroad survey tent at night.', 'evidence'); } }, choices: [{ text: 'Thanks, Ida.', next: null }] } }; },
   posterRook() { return { start: { who: 'Wanted poster', text: 'WANTED: ROOK MALLOY. Crane gang. Horse theft, robbery. $40 ALIVE, $15 DEAD. Last seen camped by the Shallow Ford.', choices: [{ text: 'Take the bounty', do: () => Missions.start('bounty_rook'), next: null }, { text: 'Leave it', next: null }] } }; },
