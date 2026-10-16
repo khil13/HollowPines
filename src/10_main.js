@@ -30,7 +30,7 @@ const Game = {
   },
   restoreFromState(silent) {
     // rebuild dynamic world from S (used for new game, load, mission retry)
-    for (const n of NPC.all.slice()) NPC.despawn(n); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
+    Brawl.clear(); for (const n of NPC.all.slice()) NPC.despawn(n); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
     STORY._cab = STORY._cave = false; if (STORY._trail) { for (const m of STORY._trail) this.scene.remove(m); STORY._trail = null; }
     const P = this.player; P.state = 'ground'; P.carry = null; P.alive = true; P.weapon = 'fists'; P.teleport(S.p.x, S.p.z, S.p.yaw); P.buildRig();
     const H = this.horse; H.pos.set(S.h.x, Col.ground(S.h.x, S.h.z, 99), S.h.z); H.yaw = S.h.yaw; H.rider = null; H.speed = 0; H.state = 'idle'; H.box.visible = !!S.horseCarry; H.cargoMesh = null;
@@ -62,7 +62,7 @@ const Game = {
     try { if (this.paused) {} else if (this.running) this.update(dt); else this.titleUpdate(dt); } catch (e) { console.error(e); if (!this._errShown) { this._errShown = true; UI.toast('Something went wrong: ' + e.message, 'bad'); } }
     Post.render(this.scene, this.camera); Input.endFrame(); requestAnimationFrame(tt => this.frame(tt));
   },
-  titleUpdate(dt) { this.tT = (this.tT || 0) + dt; World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); const a = this.tT * 0.05; this.camera.position.set(-40 + Math.cos(a) * 42, 16, 20 + Math.sin(a) * 42); this.camera.lookAt(-40, 3, 20); this.cam.pos.copy(this.camera.position); S.time.hour = 17.2; Sky.update(0); for (const n of NPC.all) n.update(dt, false); FX.update(dt); this.fireFlicker(); },
+  titleUpdate(dt) { this.tT = (this.tT || 0) + dt; World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time); const a = this.tT * 0.05; this.camera.position.set(-40 + Math.cos(a) * 42, 16, 20 + Math.sin(a) * 42); this.camera.lookAt(-40, 3, 20); this.cam.pos.copy(this.camera.position); S.time.hour = 17.2; Sky.update(0); for (const n of NPC.all) n.update(dt, false); FX.update(dt); this.fireFlicker(); },
   fireFlicker() { for (const f of this.fires) { const k = 0.85 + Math.sin(this.time * 13 + f.x) * 0.1 + Math.random() * 0.08; f.fl.scale.set(0.3 * k, 0.7 * k * 1.1, 0.3 * k); f.light.intensity = 1.2 * k; } },
   update(dt) {
     const P = this.player, H = this.horse;
@@ -72,9 +72,9 @@ const Game = {
     Sky.update(dt); P.update(dt); H.update(dt); Fishing.update(dt);
     for (const n of NPC.all) { const d = Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.update(dt, d > 110 && !n.tags.includes('story')); }
     for (const a of Animal.all) a.update(dt, a.distP > 150);
-    DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); Riders.update(dt); this.wildlifeTick(dt); Dialog.update();
+    DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); Riders.update(dt); Brawl.update(dt); Tactics.update(dt); this.wildlifeTick(dt); Dialog.update();
     if (!Dialog.open && !UI.panelOpen) Interact.update(P); else UI.prompts([]);
-    FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time);
+    FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time);
     // discovery
     for (const p of POIS) if (!S.discovered[p.id] && Math.hypot(P.pos.x - p.x, P.pos.z - p.z) < p.r) { S.discovered[p.id] = true; UI.banner('Discovered', p.name); journal(`Found ${p.name}.`); Missions.emit('discover', { id: p.id }); }
     // ambience

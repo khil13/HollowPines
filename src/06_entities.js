@@ -10,6 +10,11 @@ const FX = {
   dust(x, y, z, n = 3, s = 0.12) { for (let i = 0; i < n; i++) { const m = new THREE.Mesh(GEO.sphLo, this.dustMat); m.scale.setScalar(s); m.position.set(x + rand(-.2, .2), y + 0.05, z + rand(-.2, .2)); this.scene.add(m); this.parts.push({ m, v: new THREE.Vector3(rand(-.5, .5), rand(.4, 1.2), rand(-.5, .5)), life: 0.6, s }); } },
   splash(x, y, z) { for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(GEO.sphLo, toon('#cfe9f7')); m.scale.setScalar(0.1); m.position.set(x, y, z); this.scene.add(m); this.parts.push({ m, v: new THREE.Vector3(rand(-1.5, 1.5), rand(2, 4), rand(-1.5, 1.5)), life: 0.7, s: 0.1, g: true }); } },
   track(x, z, yaw, kind = 'deer') { const y = Terrain.height(x, z) + 0.03; const m = new THREE.Mesh(this.trackGeo, this.trackMat); m.position.set(x, y, z); m.rotation.y = yaw; if (kind === 'boot') m.scale.set(1.2, 1, 1.5); this.scene.add(m); this.tracks.push({ m, life: kind === 'clue' ? 1e9 : 140 }); if (this.tracks.length > 260) { const t = this.tracks.shift(); this.scene.remove(t.m); } return m; },
+  // footprints: boots and hooves press into mud after rain, into snow and into the sandy river banks; they fade after a minute
+  soft(x, z) { const h = Terrain.height(x, z); if (h < WORLD.waterY + 0.05) return 0; if (h > 28) return 1; if (Math.abs(x - riverX(z)) < 13 && h < WORLD.waterY + 1.4) return 1; return (Sky.wet || 0) > 0.3 && Grass.at(x, z) < 0.35 ? 1 : 0; },
+  prints: [],
+  print(x, z, yaw, kind) { if (Game.quality === 'low' || !this.soft(x, z)) return; if (!this.printGeo) { this.printGeo = { boot: new THREE.CircleGeometry(0.075, 7).rotateX(-Math.PI / 2).scale(1, 1, 1.9), hoof: new THREE.CircleGeometry(0.1, 8).rotateX(-Math.PI / 2).scale(1, 1, 1.15) }; this.printMat = new THREE.MeshBasicMaterial({ color: 0x2e241b, transparent: true, opacity: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }); }
+    const m = new THREE.Mesh(this.printGeo[kind], this.printMat); m.position.set(x, Col.ground(x, z, Terrain.height(x, z) + 0.5) + 0.02, z); m.rotation.y = yaw; this.scene.add(m); this.prints.push({ m, life: 60 }); if (this.prints.length > 160) this.scene.remove(this.prints.shift().m); },
   /* gunfight effects: soft sprite puffs for smoke, dust and blood, an additive muzzle flash, and debris that falls */
   tex() { if (this._tex) return this._tex; const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.5, 'rgba(255,255,255,0.55)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); return this._tex = new THREE.CanvasTexture(c); },
   puff(x, y, z, o = {}) {
@@ -38,6 +43,7 @@ const FX = {
     this.tracers = this.tracers.filter(t => { t.life -= dt; if (t.life <= 0) { this.scene.remove(t.l); t.l.geometry.dispose(); return false; } return true; });
     this.flash.intensity = Math.max(0, this.flash.intensity - dt * 30);
     for (const t of this.tracks) { t.life -= dt; if (t.life < 20) t.m.material = t.m.material; }
+    for (const p of this.prints) p.life -= dt; while (this.prints.length && this.prints[0].life <= 0) this.scene.remove(this.prints.shift().m);
     this.tracks = this.tracks.filter(t => { if (t.life <= 0) { this.scene.remove(t.m); return false; } return true; });
   }
 };
@@ -45,7 +51,7 @@ const FX = {
 /* ---------- Shooting (shared by player and NPCs) ---------- */
 function noiseEvent(x, z, r, src) { for (const a of Animal.all) if (a.alive && Math.hypot(a.pos.x - x, a.pos.z - z) < r) a.scare(x, z); for (const n of NPC.all) if (n.alive && n !== src && Math.hypot(n.pos.x - x, n.pos.z - z) < r) n.hearShot({ x, z }, src); if (Game.horse) Game.horse.spook(x, z, r); }
 /* Gunplay hit tests. People get a standing capsule split into head, body and legs; animals keep their hit sphere. */
-const GUN = { revolver: { dmg: 40, range: 45, cool: 0.38, spread: 0.004, bloom: 0.02, kick: 0.028 }, rifle: { dmg: 75, range: 90, cool: 1.0, spread: 0.0012, bloom: 0.03, kick: 0.05 }, ZONE: { head: 2.5, body: 1, legs: 0.65 } };
+const GUN = { revolver: { dmg: 40, range: 45, cool: 0.38, spread: 0.004, bloom: 0.02, kick: 0.028 }, rifle: { dmg: 75, range: 90, cool: 1.0, spread: 0.0012, bloom: 0.03, kick: 0.05 }, ZONE: { head: 2.5, body: 1, legs: 0.65, hand: 0.35 } };
 function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground to 1.75 m): distance and which part was hit
   const by = h.pos.y - (h.state === 'ride' ? 0.6 : 0); // a seated rider's capsule starts below the saddle so head/body zones line up
   const px = o.x - h.pos.x, pz = o.z - h.pos.z, a = d.x * d.x + d.z * d.z; if (a < 1e-8) return null; const b = px * d.x + pz * d.z, c = px * px + pz * pz - 0.36 * 0.36, disc = b * b - a * c; if (disc < 0) return null;
@@ -53,7 +59,7 @@ function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground
 }
 function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
   let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
-    if (h instanceof Person) r = rayPerson(o, d, h); else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
+    if (h instanceof Person) { r = rayPerson(o, d, h); const th = Brawl.handRay(o, d, h); if (th > 0 && (!r || (r.zone !== 'head' && th < r.t + 0.3))) r = { t: th, zone: 'hand' }; } else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
     if (r && r.t < range && (!best || r.t < best.t)) best = Object.assign(r, { h }); }
   if (best) { const x = o.x + d.x * best.t, y = o.y + d.y * best.t, z = o.z + d.z * best.t; if (!Col.los(o.x, o.y, o.z, x - d.x * 0.3, y - d.y * 0.3, z - d.z * 0.3)) return null; }
   return best;
@@ -74,7 +80,7 @@ class Player {
   busy() { return this.anim.busy() || ['mount', 'dismount', 'climb', 'down', 'fish'].includes(this.state) || Dialog.open; }
   teleport(x, z, yaw) { for (const n of NPC.all) { n.seesPlayer = false; n.perceiveT = 0; } this.pos.set(x, Col.ground(x, z, 99), z); this.vel.set(0, 0, 0); if (yaw !== undefined) this.yaw = yaw; if (this.state === 'ride') this.state = 'ground'; Game.cam.snap = true; }
   canAct() { return !Dialog.open && !UI.panelOpen && this.alive && this.state !== 'down' && !Fishing.on; }
-  onStep() { const w = Terrain.height(this.pos.x, this.pos.z) < WORLD.waterY + 0.05; if (w) { Sfx.burst(1500, 0.08, 0.06, 'bandpass'); } else Sfx.step(this.crouch ? 0.02 : 0.05, this.crouch); if (!this.crouch && this.vel.length() > 5) FX.dust(this.pos.x, this.pos.y, this.pos.z, 2, 0.09); if (inBuilding(this.pos.x, this.pos.z, this.pos.y) === null && Math.random() < 0.3) S.stats.distance += 1; }
+  onStep() { const w = Terrain.height(this.pos.x, this.pos.z) < WORLD.waterY + 0.05; if (w) { Sfx.burst(1500, 0.08, 0.06, 'bandpass'); } else Sfx.step(this.crouch ? 0.02 : 0.05, this.crouch); if (!this.crouch && this.vel.length() > 5) FX.dust(this.pos.x, this.pos.y, this.pos.z, 2, 0.09); if (inBuilding(this.pos.x, this.pos.z, this.pos.y) === null) { if (Math.random() < 0.3) S.stats.distance += 1; this.foot = -(this.foot || 1); const r = { x: Math.cos(this.yaw), z: -Math.sin(this.yaw) }; FX.print(this.pos.x + r.x * 0.12 * this.foot, this.pos.z + r.z * 0.12 * this.foot, this.yaw, 'boot'); } }
   input() {
     const c = Game.cam; let mx = 0, my = 0, walk = false;
     if (this.canAct()) { if (Input.down('w') || Input.down('arrowup')) my += 1; if (Input.down('s') || Input.down('arrowdown')) my -= 1; if (Input.down('a') || Input.down('arrowleft')) mx -= 1; if (Input.down('d') || Input.down('arrowright')) mx += 1; walk = Input.down('control');
@@ -100,8 +106,8 @@ class Player {
       if ((Input.hit('x') || Input.tb('dodge')) && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
     const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
-    this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !aiming && this.state === 'ground';
-    this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
+    this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !this.grab && !aiming && this.state === 'ground'; this.blockT = this.blocking ? (this.blockT || 0) + dt : 0; // how long the guard has been up (a fresh one counters)
+    this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry || this.grab ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
     this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
     // physics in fixed sub-steps: speed, jump height and stopping distance are the same at 30, 60 or 144 fps
     if (this.state === 'ground' && Math.hypot(this.vel.x, this.vel.z) > 5.2 && I.mag < 0.1 && !(this.jumpT > 0) && !this.anim.playing('skid') && !this.anim.busy()) this.anim.play('skid'); // once per frame, never over a jump start
@@ -126,7 +132,7 @@ class Player {
   step(dt, I, aiming) { // one fixed physics step: speed, facing, gravity, jumping, collision
     const swimming = this.state === 'swim', tired = S.p.st < 1; let spd = this.crouch ? PLAYER.CROUCH : I.walk ? PLAYER.WALK : PLAYER.JOG;
     if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = PLAYER.SPRINT * (1 + S.p.xpSt * 0.0004); S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
-    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.anim.busy() || !this.canAct()) spd = 0;
+    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.grab) spd = 0; if (this.anim.busy() || !this.canAct()) spd = 0;
     if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
     this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45; // brief recovery after a hard landing
     const onG = this.state === 'ground'; const wantSp = Math.hypot(I.x, I.z) * spd, curSp = Math.hypot(this.vel.x, this.vel.z); const accel = swimming ? 6 : onG ? (wantSp > curSp ? PLAYER.ACCEL : PLAYER.DECEL) : PLAYER.AIR_ACCEL;
@@ -176,7 +182,7 @@ class Player {
     if (!atk || this.cool > 0 || this.anim.busy()) return;
     if (this.weapon !== 'fists' && (aiming || this.state === 'swim' ? false : true) && !aiming) { return this.shoot(false); }
     if (this.weapon !== 'fists' && aiming) return this.shoot(true);
-    if (this.carry) return; if (S.p.st < 6) { UI.toast('Too tired to swing', 'bad'); return; }
+    if (this.carry || this.grab) return; if (this.blocking && Brawl.tryGrab(this)) return; if (S.p.st < 6) { UI.toast('Too tired to swing', 'bad'); return; }
     const names = ['punch', 'hook', 'uppercut']; if (this.comboT <= 0) this.combo = 0; const nm = names[this.combo % 3]; this.combo++; this.comboT = 0.9; this.cool = 0.32; S.p.st -= 7; this.stDelay = 0.7;
     // auto-face nearest target in front
     let tgt = null, td = 2.6; for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const d = Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z); if (d < td) { td = d; tgt = h; } } if (tgt) this.yaw = Math.atan2(tgt.pos.x - this.pos.x, tgt.pos.z - this.pos.z);
@@ -219,11 +225,11 @@ class Player {
       point = hit ? new THREE.Vector3(hit.h.pos.x, hit.h.pos.y + hit.h.hitH, hit.h.pos.z) : (FX.groundHit(muzzle, new THREE.Vector3(f.x, -0.06, f.z).normalize(), 40) || muzzle.clone().add(new THREE.Vector3(f.x * 30, 0, f.z * 30))); Game.cam.kick(g.kick * 0.5);
     }
     if (hit) { const dmg = g.dmg * boost * GUN.ZONE[hit.zone]; hit.h.takeHit({ dmg, from: this, gun: w, dir: fwd(this.yaw), zone: hit.zone }); UI.hitmark(hit.zone === 'head'); this.lastHit = { key: hit.h.key || hit.h.sp, zone: hit.zone, dmg }; }
-    FX.tracer(muzzle, point, hit ? 'none' : 'auto'); noiseEvent(this.pos.x, this.pos.z, w === 'rifle' ? 110 : 80, this); // hits draw blood in takeHit
+    FX.tracer(muzzle, point, hit ? 'none' : 'auto'); Tactics.nearMiss(muzzle, point, hit && hit.h); noiseEvent(this.pos.x, this.pos.z, w === 'rifle' ? 110 : 80, this); // hits draw blood in takeHit
   }
   takeHit(o) { this.hurt(o.dmg, o.from, o.melee ? 'melee' : 'gun'); }
   hurt(d, from, kind) {
-    if (this.inv > 0 || this.state === 'down') return; if (kind === 'gun') FX.impact({ x: this.pos.x, y: this.pos.y + 1.15, z: this.pos.z }, 'blood'); if (this.blocking && kind === 'melee') { d *= 0.2; Sfx.burst(900, 0.1, 0.2); } S.p.hp -= d; S.p.xpHp += d * 0.05; this.hurtT = 0;
+    if (this.inv > 0 || this.state === 'down') return; if (this.grab && kind !== 'fall') Brawl.release(this); if (kind === 'gun') FX.impact({ x: this.pos.x, y: this.pos.y + 1.15, z: this.pos.z }, 'blood'); if (this.blocking && kind === 'melee') { d *= 0.2; Sfx.burst(900, 0.1, 0.2); } S.p.hp -= d; S.p.xpHp += d * 0.05; this.hurtT = 0;
     if (this.state !== 'ride') { const back = from && from.pos && Math.cos(angDiff(this.yaw, Math.atan2(from.pos.x - this.pos.x, from.pos.z - this.pos.z))) < 0; this.anim.play(back ? 'hitB' : 'hit', { replace: false }); } UI.flash(); Game.shake(0.25); this.anim.expr = 'alarm'; setTimeout(() => this.anim.expr = 'calm', 900);
     if (S.p.hp <= 0) this.knockout(from);
   }
@@ -282,7 +288,7 @@ class Horse {
   stop() { this.speed = 0; this.state = 'idle'; }
   call() { const d = Math.hypot(this.pos.x - Game.player.pos.x, this.pos.z - Game.player.pos.z); const range = 120 + this.bondLevel() * 40; if (d > range) { this.pos.set(Game.player.pos.x - 30, 0, Game.player.pos.z - 30); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); } this.state = 'follow'; Sfx.neigh(); }
   spook(x, z, r) { const d = Math.hypot(this.pos.x - x, this.pos.z - z); if (d > r * 0.5) return; this.fear += (this.rider && this.rider.isPlayer && d < 2 ? 0.25 : 0.6) / this.bondLevel(); }
-  onStep() { if (this.speed > 0.5) { Sfx.hoof(this.speed > 6 ? 0.1 : 0.06); if (this.speed > 7) FX.dust(this.pos.x, this.pos.y, this.pos.z, 2, 0.15); } }
+  onStep() { if (this.speed > 0.5) { Sfx.hoof(this.speed > 6 ? 0.1 : 0.06); if (this.speed > 7) FX.dust(this.pos.x, this.pos.y, this.pos.z, 2, 0.15); this.foot = -(this.foot || 1); const f = fwd(this.yaw), r = { x: Math.cos(this.yaw), z: -Math.sin(this.yaw) }; for (const b of [0.6, -0.55]) FX.print(this.pos.x + f.x * b + r.x * 0.2 * this.foot, this.pos.z + f.z * b + r.z * 0.2 * this.foot, this.yaw, 'hoof'); } }
   control(dt, I) {
     if (this.rearT > 0) return; const fw = I.mag > 0.15; const sprint = I.sprint; const H = this; let target = 0;
     if (fw) { target = I.walk ? 1 : 2; if (sprint && S.h.st > 5) { this.gallopT += dt; target = this.gallopT > 1.4 && S.h.st > 25 ? 4 : 3; } else this.gallopT = 0; } else this.gallopT = 0;
@@ -421,10 +427,11 @@ class Person {
   takeHit(o) {
     if (!this.alive) return; const fromP = o.from && o.from.isPlayer;
     if (fromP && o.melee && !this.hostileToPlayer && this.state !== 'combat' && (this.alert || 0) < 0.5 && Game.player.crouch && !this.seesPlayer && (this.group || !this.lawful)) { this.knockdown(); Sfx.punch(); UI.toast('Silent takedown', 'good'); return; }
-    this.hp -= o.dmg; this.anim.play('hit', { replace: false }); this.anim.expr = 'alarm'; if (o.gun) FX.impact({ x: this.pos.x, y: this.pos.y + (o.zone === 'head' ? 1.55 : o.zone === 'legs' ? 0.6 : 1.1), z: this.pos.z }, 'blood'); if (o.dir) { this.pos.x += o.dir.x * (o.melee ? 0.35 : 0.15); this.pos.z += o.dir.z * (o.melee ? 0.35 : 0.15); }
+    this.hp -= o.dmg * (o.melee && this.stunT > 0 ? 1.5 : 1); this.anim.play('hit', { replace: false }); this.anim.expr = 'alarm'; if (o.gun) FX.impact({ x: this.pos.x, y: this.pos.y + (o.zone === 'head' ? 1.55 : o.zone === 'legs' ? 0.6 : 1.1), z: this.pos.z }, 'blood'); if (o.dir) { this.pos.x += o.dir.x * (o.melee ? 0.35 : 0.15); this.pos.z += o.dir.z * (o.melee ? 0.35 : 0.15); }
     if (fromP && this.lawful && !this.hostileToPlayer && !this.witness) { Law.crime(this.hp <= 0 && !o.melee ? 'murder' : 'assault', this.pos, { victim: this, noise: o.gun ? 60 : 0 }); }
     if (fromP && this.group) this.alertGroup(Game.player.pos);
     if (fromP && this.lawful && !this.lawman && this.alive && this.hp > 0 && o.melee && this.brave > 0.55) { this.fightPlayer(true); this.say(pick(['You want a fight? You got one!', 'Why you...!'])); }
+    Brawl.react(this, o);
     if (this.hp <= 0) { if (o.melee || this.knockoutOnly) this.knockdown(); else { this.setDead(); if (fromP) { S.stats.kills++; Missions.emit('kill', { npc: this }); } } }
   }
   knockdown() { this.downed = true; this.downT = this.tags.includes('bounty') || this.tags.includes('outlaw') ? 1e9 : 30; /* hideout outlaws stay down */ this.state = 'down'; this.hp = 0; Sfx.burst(250, 0.3, 0.2); Missions.emit('ko', { npc: this }); if (this.gunM) this.gunM.visible = false; }
@@ -440,7 +447,7 @@ class Person {
     if (this.isAsleep()) this.seesPlayer = P.alive && d < 2.2 && !P.crouch; // eyes closed: only someone standing right beside the bedroll
   }
   moveTo(tx, tz, speed, dt, arrive = 0.6) {
-    const dx = tx - this.pos.x, dz = tz - this.pos.z, d = Math.hypot(dx, dz); if (d < arrive) { this.sp = damp(this.sp, 0, 10, dt); return true; }
+    const dx = tx - this.pos.x, dz = tz - this.pos.z, d = Math.hypot(dx, dz); if (d < arrive) { this.sp = damp(this.sp, 0, 10, dt); return true; } if (this.limpT > 0) speed = Math.min(speed, 1.8); // shot in the leg
     this.sp = damp(this.sp, speed, 6, dt); const a = Math.atan2(dx, dz); this.yaw = dampAngle(this.yaw, a, 8, dt);
     const ox = this.pos.x, oz = this.pos.z; this.pos.x += Math.sin(this.yaw) * this.sp * dt; this.pos.z += Math.cos(this.yaw) * this.sp * dt;
     if (Col.resolve(this.pos, 0.34, this.pos.y, 1.6)) { this.stuck += dt; if (this.stuck > 0.8) { this.pos.x += Math.cos(this.yaw) * 0.6 * dt * 4; this.pos.z -= Math.sin(this.yaw) * 0.6 * dt * 4; } } else this.stuck = Math.max(0, this.stuck - dt);
@@ -454,6 +461,7 @@ class Person {
     if (this.carried) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
     if (!this.alive) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
     if (this.downed) { this.downT -= dt; this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); if (this.downT <= 0 && !this.hogtied) { this.downed = false; this.hp = this.maxHp * 0.5; this.anim.play('standup'); if (this.lawful && !this.lawman) { this.state = 'report'; this.witness = { type: 'assault', value: Law.VALUES.assault, pos: { x: this.pos.x, z: this.pos.z } }; this.say('You\'ll pay for that!'); } else this.fightPlayer(); } return; }
+    if (Brawl.npcTick(this, dt)) return; // grabbed, shoved to the ground, or reeling
     this.perceiveT -= dt; if (this.perceiveT <= 0) { this.perceiveT = far ? 1 : 0.2; this.perceive(); }
     if (far && this.state === 'routine' && !this.group) { const e = this.schedEntry(); if (e) { const pl = PLACES[e[2]]; if (pl && Math.hypot(pl.x - this.pos.x, pl.z - this.pos.z) > 2) { this.pos.set(pl.x, Col.ground(pl.x, pl.z, 99), pl.z); this.yaw = pl.yaw || 0; this.path = null; } this.act = pl ? pl.act : 'idle'; this.atPlace = true; } this.place(); return; }
     let animState = 'ground'; this.poseClip = null;
@@ -497,18 +505,21 @@ class Person {
     const P = Game.player; this.face(P.pos); this.anim.expr = 'angry'; const d = this.distP;
     if (this.fleeHp && this.hp < this.fleeHp) { this.state = 'retreat'; this.fled = true; this.say('I\'m done! I\'m done!'); this.script = null; this.state = 'scripted'; this.script = (dt2, me) => { const a = Math.atan2(me.pos.x - P.pos.x, me.pos.z - P.pos.z); me.moveTo(me.pos.x + Math.sin(a) * 5, me.pos.z + Math.cos(a) * 5, 5.5, dt2); }; return; }
     if (!P.alive || P.state === 'down') { this.sp = 0; return; }
+    if (this.regun && Brawl.regunTick(this, dt)) return;
     if (this.fists || !this.gun || d < 2.4) { // melee
-      if (d > 1.5) this.moveTo(P.pos.x, P.pos.z, 4.6, dt, 1.4); else { this.sp = 0; this.shootT -= dt; if (this.shootT <= 0) { this.shootT = rand(0.9, 1.6); this.anim.play(pick(['punch', 'hook']), { on: { hit: () => { if (Math.hypot(P.pos.x - this.pos.x, P.pos.z - this.pos.z) < 1.9) { P.hurt(this.fists ? 9 : 12, this, 'melee'); Sfx.punch(); } } } }); } }
+      if (d > 1.5) this.moveTo(P.pos.x, P.pos.z, 4.6, dt, 1.4); else { this.sp = 0; this.shootT -= dt; if (this.shootT <= 0) { this.shootT = rand(0.9, 1.6); Brawl.windup(this); this.anim.play(pick(['punch', 'hook']), { on: { hit: () => { if (Math.hypot(P.pos.x - this.pos.x, P.pos.z - this.pos.z) < 1.9 && !this.stunT && !Brawl.counter(P, this)) { P.hurt(this.fists ? 9 : 12, this, 'melee'); Sfx.punch(); } } } }); } }
       return;
     }
     if (this.gunM) this.gunM.visible = true; this.anim.layers.aim = 1; this.anim.layers.rifle = this.gun === 'rifle' ? 1 : 0;
     // cover logic
     this.coverT -= dt; if (!this.cover || this.coverT <= 0) { this.coverT = rand(5, 9); this.cover = this.pickCover(); }
-    if (this.cover) { const there = this.moveTo(this.cover.x, this.cover.z, 4.6, dt, 0.5); this.crouchC = there && this.peek <= 0; if (there) { this.face(P.pos); } }
+    if (Tactics.move(this, dt, d)) {} // rushing in, or swinging around the flank
+    else if (this.cover) { const there = this.moveTo(this.cover.x, this.cover.z, 4.6, dt, 0.5); this.crouchC = there && this.peek <= 0; if (there) { this.face(P.pos); } }
     else if (d > 22) this.moveTo(P.pos.x, P.pos.z, 3.5, dt, 18); else this.sp = damp(this.sp, 0, 6, dt);
-    this.peek = (this.peek || 0) - dt; this.shootT -= dt;
+    this.peek = (this.peek || 0) - dt; this.shootT -= dt; if (this.rushT > 0) this.shootT = Math.min(this.shootT, 0.9);
+    if (this.suppressT > 0) { this.suppressT -= dt; this.crouchC = !!this.cover; this.shootT = Math.max(this.shootT, 0.4); } // pinned by near misses
     if (this.shootT <= 0) { this.shootT = rand(1.3, 2.4); this.peek = 0.7; this.crouchC = false;
-      if (this.seesPlayer && d < 45) { const m = new THREE.Vector3(); this.rig.R.hand.getWorldPosition(m); let acc = this.accuracy * (d < 10 ? 1.2 : d > 25 ? 0.6 : 1) * (Math.hypot(P.vel.x, P.vel.z) > 4 ? 0.6 : 1) * (Sky.night() ? 0.8 : 1) * (P.state === 'ride' ? 0.8 : 1);
+      if (this.seesPlayer && d < 45) { const m = new THREE.Vector3(); this.rig.R.hand.getWorldPosition(m); let acc = this.accuracy * (d < 10 ? 1.2 : d > 25 ? 0.6 : 1) * (Math.hypot(P.vel.x, P.vel.z) > 4 ? 0.6 : 1) * (Sky.night() ? 0.8 : 1) * (P.state === 'ride' ? 0.8 : 1) * (this.rushT > 0 || this.flankT > 0 ? 0.7 : 1) * (this.limpT > 0 ? 0.85 : 1);
         const hit = Math.random() < acc; const tgt = new THREE.Vector3(P.pos.x + (hit ? 0 : rand(-1.5, 1.5)), P.pos.y + (hit ? 1.2 : rand(-0.2, 1.8)), P.pos.z + (hit ? 0 : rand(-1.5, 1.5))); if (!hit && tgt.y < P.pos.y + 0.6) tgt.y = Terrain.height(tgt.x, tgt.z); FX.tracer(m, tgt, hit ? 'none' : 'auto'); Sfx.shot(this.gun === 'rifle'); this.anim.play('recoil'); if (hit) P.hurt(this.dmg, this, 'gun'); if (Game.horse.distP < 30) Game.horse.spook(this.pos.x, this.pos.z, 30); } }
   }
   pickCover() { const P = Game.player; let best = null, bs = 1e9; for (const c of Col.near(this.pos.x, this.pos.z, 16, [])) { if (!c.cover && !c.block) continue; if (c.y1 - c.y0 < 0.9) continue; const cx = c.type === 'box' ? (c.minX + c.maxX) / 2 : c.x, cz = c.type === 'box' ? (c.minZ + c.maxZ) / 2 : c.z, cr = c.type === 'box' ? Math.max(c.maxX - c.minX, c.maxZ - c.minZ) / 2 : c.r; const ax = cx - P.pos.x, az = cz - P.pos.z, al = Math.hypot(ax, az) || 1; const sx = cx + ax / al * (cr + 0.6), sz = cz + az / al * (cr + 0.6); const dpl = Math.hypot(sx - P.pos.x, sz - P.pos.z); if (dpl < 6) continue; const sc = Math.hypot(sx - this.pos.x, sz - this.pos.z) + (this.flanker ? -dpl * 0.3 : 0); if (sc < bs && Math.abs(Terrain.height(sx, sz) - this.pos.y) < 1.5) { bs = sc; best = { x: sx, z: sz }; } } return best; }

@@ -15,6 +15,7 @@ Stylized frontier open-world game. Three.js (r128), plain JavaScript, no build s
 - `src/04_state.js` — items, persistent world state `S`, inventory, reputation, save/load
 - `src/05_systems.js` — interaction prompts, law and witnesses, dialogue engine, mission framework
 - `src/06_entities.js` — player, horse, NPC AI (schedules, witnesses, combat, cover), wildlife
+- `src/06b_brawl.js` — counters, grabs and shoves, hit reactions (limp, disarm, flinch), squad tactics (flank, suppression, rushes)
 - `src/07_content.js` — sky, time and weather, world layout, containers, clues, doors
 - `src/07c_interiors.js` — furnished interiors for every building
 - `src/08_story.js` — cast, reactive dialogue, missions, encounters
@@ -50,6 +51,22 @@ Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a 
 Gameplay follows Red Dead Redemption 2. `src/07b_camps.js`:
 - **Traveler camps** (Teague's Camp, Holt Hunting Camp): trappers work near camp by day, sit at the fire in the evening and sleep at night. Greet them, ask about the area (they'll mark the outlaw hideout on your map), or rob them. Sneak in crouched to loot their satchel and lockbox: sleepers only notice someone standing right beside them, and walking upright past a bedroll wakes them. Anyone who sees a theft is a witness, which brings honor loss and a bounty through the normal law system. Aim at someone until their hands go up, then choose **Rob** (a witnessed robbery: honor -8, bounty). They remember you.
 - **Outlaw hideout** (Rattlesnake Hollow, Crane gang): two sentries patrol and two outlaws sit at the fire facing inward. Crouched, you aren't noticed from behind, so a punch from behind is a silent takedown; otherwise it's a shootout using the cover AI. Downed outlaws stay down. When nobody's left standing the hideout is cleared and its lockbox (gold, cash, ammo) is free loot; breaking it open while the gang is still around makes them suspicious. Killing outlaws costs no honor. Cleared hideouts are reoccupied after five days.
+
+## Close combat and squads
+RDR2-style close combat, in our own style (`Brawl` and `Tactics` in `src/06b_brawl.js`):
+- **Counter:** an enemy's swing has an audible wind-up. Raise your guard (Q) just before it lands and Wren slips the punch and hits back, and the attacker reels. A guard held up early only blocks.
+- **Grab:** block + attack on someone in reach grabs them. While holding:
+  - attack punches them;
+  - X (or Q again) shoves them to the ground, and anyone behind them stumbles;
+  - hold on too long and they wriggle free.
+- **Where a bullet lands matters:**
+  - Legs: they limp, sometimes dropping to a knee, and shoot worse.
+  - Gun hand: the gun flies to the ground. Brave outlaws dive for it, or you can walk over and take it along with its rounds. Otherwise they come at you with their fists.
+  - Body: a flinch that throws off their next shot.
+- **Squads:**
+  - With three or more gunmen, one in three swings around to your side.
+  - Bullets whizzing past pin outlaws down in cover.
+  - Reload in the open, or get badly hurt, and the nearest one charges you, with a shout.
 
 ## Gunplay
 RDR2-style aiming (`aimTick`, `shoot` and `rayHit` in `src/06_entities.js`; the aim camera in `src/10_main.js`):
@@ -156,6 +173,11 @@ All our own code, with no extra libraries, so the installed app still works offl
   - Each blade has a fixed spot in the world, and the patch wraps around the camera.
   - The shader reads terrain height, ground colour and a grass mask from small textures. The mask keeps grass off trails, water, buildings, porches, rocks and steep slopes, and the town is thinned out.
   - Gusts roll across the field in waves, the player and horse push blades aside, and rain darkens it.
+- **Grass reach:** past the dense patch, a sparser ring of wider blades carries the meadow out to about 50 m, so there's no hard edge.
+- **Trees:** canopies and bushes are leafy clumps. Noise pushes the silhouette in and out, and light and dark clumps of leaves are painted across it.
+- **Light shafts:** a screen-space pass marches from each pixel toward the sun, gathering open sky, so a low golden sun streams between trunks and branches. It's faint at noon and off at night.
+- **Mud and puddles:** rain darkens trails and pond edges to mud, and puddles gather in them. The puddles reflect the sky, with rings where drops land.
+- **Footprints:** boots and hooves leave prints in mud after rain, in snow and on the sandy river banks. Prints fade after a minute.
 - **Water**: a height texture gives every pixel its depth.
   - Shallows are clear, the depths dark, and foam laps the shore.
   - Ripple normals reflect the current sky with fresnel and catch a hard sun glint.

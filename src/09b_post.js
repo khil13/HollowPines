@@ -12,9 +12,17 @@ const Post = {
       fragmentShader: 'uniform sampler2D tSrc; uniform float uThr; varying vec2 vUv; void main(){ vec3 c = texture2D(tSrc, vUv).rgb; float l = dot(c, vec3(0.299,0.587,0.114)); float k = smoothstep(uThr, uThr + 0.12, l); gl_FragColor = vec4(c * k, 1.0); }' });
     this.mBlur = new THREE.ShaderMaterial({ uniforms: { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } }, vertexShader: vs, depthTest: false, depthWrite: false,
       fragmentShader: 'uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv; void main(){ vec3 c = texture2D(tSrc, vUv).rgb * 0.227; c += (texture2D(tSrc, vUv + uDir * 1.385).rgb + texture2D(tSrc, vUv - uDir * 1.385).rgb) * 0.316; c += (texture2D(tSrc, vUv + uDir * 3.231).rgb + texture2D(tSrc, vUv - uDir * 3.231).rgb) * 0.070; gl_FragColor = vec4(c, 1.0); }' });
+    // light shafts: march from each pixel toward the sun, gathering bright open sky; trees and buildings in the way leave
+    // dark gaps, so the low sun streams through branches (quarter resolution, only while the sun is in front of the camera)
+    this.mGod = new THREE.ShaderMaterial({ uniforms: { tCol: { value: null }, tDepth: { value: null }, uSun: { value: new THREE.Vector2() }, uNear: { value: 0.1 }, uFar: { value: 900 }, uAsp: { value: 1 } }, vertexShader: vs, depthTest: false, depthWrite: false,
+      fragmentShader: `uniform sampler2D tCol; uniform sampler2D tDepth; uniform vec2 uSun; uniform float uNear; uniform float uFar; uniform float uAsp; varying vec2 vUv;
+        float mask(vec2 uv){ float d = texture2D(tDepth, uv).r; float z = (uNear * uFar) / (uFar - d * (uFar - uNear)); if (z < 250.0) return 0.0; vec3 c = texture2D(tCol, uv).rgb; return smoothstep(0.8, 1.0, dot(c, vec3(0.3, 0.59, 0.11))); }
+        void main(){ vec2 dl = (uSun - vUv) / 40.0, uv = vUv; float w = 1.0, acc = 0.0, nrm = 0.0;
+          for (int i = 0; i < 40; i++) { acc += mask(uv) * w; nrm += w; w *= 0.96; uv += dl; }
+          float fall = 1.0 - smoothstep(0.0, 0.8, length((vUv - uSun) * vec2(uAsp, 1.0))); gl_FragColor = vec4(vec3(acc / nrm * fall), 1.0); }` });
     this.mComp = new THREE.ShaderMaterial({ vertexShader: vs, depthTest: false, depthWrite: false,
-      uniforms: { tCol: { value: null }, tDepth: { value: null }, tBloom: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.1 }, uFar: { value: 900 }, uAO: { value: 0 }, uFXAA: { value: 0 }, uBloom: { value: 0.55 }, uWarm: { value: 0 }, uNight: { value: 0 }, uT: { value: 0 }, uFlash: { value: 0 }, uTan: { value: new THREE.Vector2(1, 1) } }, extensions: { derivatives: true },
-      fragmentShader: `uniform vec2 uTan; uniform sampler2D tCol; uniform sampler2D tDepth; uniform sampler2D tBloom; uniform vec2 uRes; uniform float uNear; uniform float uFar; uniform float uAO; uniform float uFXAA; uniform float uBloom; uniform float uWarm; uniform float uNight; uniform float uT; uniform float uFlash; varying vec2 vUv;
+      uniforms: { tCol: { value: null }, tDepth: { value: null }, tBloom: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.1 }, uFar: { value: 900 }, uAO: { value: 0 }, uFXAA: { value: 0 }, uBloom: { value: 0.55 }, uWarm: { value: 0 }, uNight: { value: 0 }, uT: { value: 0 }, uFlash: { value: 0 }, tGod: { value: null }, uGod: { value: 0 }, uGodCol: { value: new THREE.Color() }, uTan: { value: new THREE.Vector2(1, 1) } }, extensions: { derivatives: true },
+      fragmentShader: `uniform vec2 uTan; uniform sampler2D tGod; uniform float uGod; uniform vec3 uGodCol; uniform sampler2D tCol; uniform sampler2D tDepth; uniform sampler2D tBloom; uniform vec2 uRes; uniform float uNear; uniform float uFar; uniform float uAO; uniform float uFXAA; uniform float uBloom; uniform float uWarm; uniform float uNight; uniform float uT; uniform float uFlash; varying vec2 vUv;
         float lin(float d){ return (uNear * uFar) / (uFar - d * (uFar - uNear)); }
         float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
         vec3 vpos(vec2 uv, float z){ return vec3((uv * 2.0 - 1.0) * uTan * z, -z); } // view-space position from screen uv and linear depth
@@ -34,6 +42,7 @@ const Post = {
               occ += max(0.0, dot(N, v / dist) - 0.2) * (1.0 - smoothstep(Rw * 0.7, Rw * 1.8, dist)); }
             c *= 1.0 - uAO * clamp(occ / 8.0 * 1.6, 0.0, 1.0) * (1.0 - smoothstep(20.0, 60.0, z)); }
           c += texture2D(tBloom, vUv).rgb * uBloom;
+          if (uGod > 0.0) c += texture2D(tGod, vUv).rgb * uGodCol * uGod;
           // grade: gentle S-curve contrast, richer colour, cool shadows and warm highlights (warmer at golden hour)
           float l = luma(c); c = mix(vec3(l), c, 1.12 + uWarm * 0.08); c = (c - 0.5) * 1.08 + 0.5;
           vec3 shadowT = mix(vec3(0.96, 0.99, 1.05), vec3(0.92, 0.96, 1.08), uNight), highT = mix(vec3(1.03, 1.0, 0.95), vec3(1.08, 0.98, 0.86), uWarm);
@@ -46,16 +55,21 @@ const Post = {
   },
   build() {
     this.r.getDrawingBufferSize(this.size); const w = Math.max(2, this.size.x), h = Math.max(2, this.size.y);
-    for (const k of ['rt', 'ra', 'rb']) if (this[k]) { this[k].dispose(); if (this[k].depthTexture) this[k].depthTexture.dispose(); }
+    for (const k of ['rt', 'ra', 'rb', 'rc']) if (this[k]) { this[k].dispose(); if (this[k].depthTexture) this[k].depthTexture.dispose(); }
     this.rt = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat });
     this.rt.depthTexture = new THREE.DepthTexture(w, h); this.rt.depthTexture.type = THREE.UnsignedIntType;
     const bw = Math.max(2, w >> 2), bh = Math.max(2, h >> 2);
-    this.ra = new THREE.WebGLRenderTarget(bw, bh, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }); this.rb = this.ra.clone();
+    this.ra = new THREE.WebGLRenderTarget(bw, bh, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }); this.rb = this.ra.clone(); this.rc = this.ra.clone();
     this.mComp.uniforms.uRes.value.set(w, h); this.bw = bw; this.bh = bh;
   },
   setQuality(q) { this.on = q !== 'low'; this.ao = q === 'high'; this.fxaa = q === 'high'; if (this.r) this.build(); },
   resize() { if (this.r) this.build(); },
   pass(mat, target) { this.quad.material = mat; this.r.setRenderTarget(target); this.r.render(this.quadScene, this.cam); },
+  godRays(camera) { // strength of the light shafts this frame: strongest toward a low golden sun, none at night or under cloud
+    if (!Sky.sunM || !Sky.sunM.visible || Sky.night()) return 0; const sp = this._sp || (this._sp = new THREE.Vector3()); sp.copy(Sky.sunM.position);
+    const cd = camera.getWorldDirection(this._cd || (this._cd = new THREE.Vector3())), facing = sp.clone().sub(camera.position).normalize().dot(cd); if (facing < 0.15) return 0;
+    sp.project(camera); this.mGod.uniforms.uSun.value.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5); this.mComp.uniforms.uGodCol.value.copy(Sky.domeU.sunCol.value);
+    const k = (0.12 + (Sky.golden || 0) * 0.75) * (1 - (Sky.cloud || 0) * 0.85) * smoothstep(0.15, 0.6, facing); this.godK = k; return k > 0.02 ? k : 0; },
   render(scene, camera) {
     const R = this.r; if (!this.on) { R.setRenderTarget(null); R.render(scene, camera); return; }
     R.setRenderTarget(this.rt); R.render(scene, camera);
@@ -64,6 +78,8 @@ const Post = {
     this.mBlur.uniforms.tSrc.value = this.rb.texture; this.mBlur.uniforms.uDir.value.set(0, 1 / this.bh); this.pass(this.mBlur, this.ra);
     const u = this.mComp.uniforms; u.tCol.value = this.rt.texture; u.tDepth.value = this.rt.depthTexture; u.tBloom.value = this.ra.texture; u.uNear.value = camera.near; u.uFar.value = camera.far; const th = Math.tan(camera.fov * Math.PI / 360); u.uTan.value.set(th * camera.aspect, th);
     u.uAO.value = this.ao ? 0.55 : 0; u.uFXAA.value = this.fxaa ? 1 : 0; u.uBloom.value = Sky.night() ? 0.5 : (Sky.golden || 0) * 0.2; /* subtle by day, stronger for lanterns at night */ u.uWarm.value = Sky.golden || 0; u.uNight.value = Sky.night() ? 1 : 0; u.uT.value = (u.uT.value + 1.7) % 1000; u.uFlash.value = Sky.flash || 0;
+    const god = this.godRays(camera); u.uGod.value = god; u.tGod.value = this.rc.texture;
+    if (god > 0) { const g = this.mGod.uniforms; g.tCol.value = this.rt.texture; g.tDepth.value = this.rt.depthTexture; g.uNear.value = camera.near; g.uFar.value = camera.far; g.uAsp.value = camera.aspect; this.pass(this.mGod, this.rc); }
     this.pass(this.mComp, null);
   },
 };

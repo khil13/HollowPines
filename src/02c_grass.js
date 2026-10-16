@@ -5,6 +5,7 @@
 const Grass = {
   mesh: null, U: null,
   counts: { low: 0, medium: 26000, high: 70000 }, sizes: { low: 0, medium: 34, high: 46 },
+  farCounts: { low: 0, medium: 16000, high: 42000 }, farSizes: { low: 0, medium: 80, high: 112 }, // a sparser ring of wider blades out to ~50 m, so the meadow has no hard edge
   build(scene) {
     const n = Terrain.n, H = Terrain.H, res = WORLD.res, half = WORLD.half, b = Terrain.baseCol;
     const tH = Terrain.tH;
@@ -22,12 +23,15 @@ const Grass = {
     for (const B of Buildings) clear(B.minX - 1, B.maxX + 1, B.minZ - 1, B.maxZ + 1);
     for (const c of Col.all) if (c.maxX - c.minX < 30 && c.maxZ - c.minZ < 30) clear(c.minX - 0.3, c.maxX + 0.3, c.minZ - 0.3, c.maxZ + 0.3); // porches, rocks, logs, fences, trees
     const tC = new THREE.DataTexture(cd, n, n, THREE.RGBAFormat); tC.magFilter = tC.minFilter = THREE.LinearFilter; tC.needsUpdate = true; this.tC = tC; this.cd = cd;
-    this.U = { tH: { value: tH }, tC: { value: tC }, uN: { value: n }, uHalf: { value: half }, uRes: { value: res }, uS: { value: 46 }, uC: { value: new THREE.Vector2() }, uCam: { value: new THREE.Vector2() },
+    this.U = { tH: { value: tH }, tC: { value: tC }, uN: { value: n }, uHalf: { value: half }, uRes: { value: res }, uC: { value: new THREE.Vector2() }, uCam: { value: new THREE.Vector2() },
       uPushA: { value: new THREE.Vector3(1e4, 0, 1e4) }, uPushB: { value: new THREE.Vector3(1e4, 0, 1e4) }, uWet: { value: 0 } };
+    this.mat = this.makeMat(this.L = { uS: { value: 46 }, uIn: { value: -1 }, uW: { value: 1 } }); this.farMat = this.makeMat(this.LF = { uS: { value: 112 }, uIn: { value: 14 }, uW: { value: 2.6 } }); this.scene = scene;
+  },
+  makeMat(L) {
     const m = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }); const U = this.U;
-    m.onBeforeCompile = sh => { Object.assign(sh.uniforms, U, { uTime: WIND.uTime, uStr: WIND.uStrength });
+    m.onBeforeCompile = sh => { Object.assign(sh.uniforms, U, L, { uTime: WIND.uTime, uStr: WIND.uStrength });
       sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
-        uniform sampler2D tH; uniform sampler2D tC; uniform float uN; uniform float uHalf; uniform float uRes; uniform float uS; uniform vec2 uC; uniform vec2 uCam; uniform vec3 uPushA; uniform vec3 uPushB; uniform float uTime; uniform float uStr; uniform float uWet;
+        uniform sampler2D tH; uniform sampler2D tC; uniform float uN; uniform float uHalf; uniform float uRes; uniform float uS; uniform float uIn; uniform float uW; uniform vec2 uC; uniform vec2 uCam; uniform vec3 uPushA; uniform vec3 uPushB; uniform float uTime; uniform float uStr; uniform float uWet;
         attribute vec4 aI; varying vec3 vGC;
         float hAt(vec2 g){ vec2 i = floor(g), f = g - i; float a = texture2D(tH, (i + 0.5) / uN).r, b = texture2D(tH, (i + vec2(1.5, 0.5)) / uN).r, c = texture2D(tH, (i + vec2(0.5, 1.5)) / uN).r, d = texture2D(tH, (i + 1.5) / uN).r; return mix(mix(a, b, f.x), mix(c, d, f.x), f.y); }
         vec2 push(vec3 P, vec2 w, float gy){ vec2 dp = w - P.xz; float pd = length(dp) + 1e-3; return dp / pd * (1.0 - smoothstep(0.25, 1.25, pd)) * step(P.y - gy, 1.6) * 1.1; }`)
@@ -35,10 +39,10 @@ const Grass = {
         .replace('#include <begin_vertex>', `
         vec2 w = uC - uS * 0.5 + mod(aI.xy - (uC - uS * 0.5), uS);
         vec2 g = (w + uHalf) / uRes; vec4 gc = texture2D(tC, (g + 0.5) / uN); float gy = hAt(g);
-        float fade = 1.0 - smoothstep(uS * 0.3, uS * 0.48, length(w - uC)), near = smoothstep(0.6, 2.2, length(w - uCam));
+        float fade = (1.0 - smoothstep(uS * 0.3, uS * 0.48, length(w - uC))) * (uIn < 0.0 ? 1.0 : smoothstep(uIn, uIn + 5.0, length(w - uC))), near = smoothstep(0.6, 2.2, length(w - uCam));
         float s = (0.2 + aI.z * 0.3) * mix(0.55, 1.0, gc.a) * step(aI.w, gc.a * 1.05 - 0.05) * fade * mix(0.35, 1.0, near);
         float yaw = fract(aI.z * 91.7 + aI.w * 13.1) * 6.2831; vec2 cs = vec2(cos(yaw), sin(yaw));
-        vec3 p = vec3(position.x * cs.x, position.y * s, position.x * cs.y) * step(0.001, s);
+        vec3 p = vec3(position.x * uW * cs.x, position.y * s, position.x * uW * cs.y) * step(0.001, s);
         float k = position.y * position.y; vec2 wd = vec2(0.94, 0.34);
         float gust = sin(dot(w, wd) * 0.11 - uTime * 1.6) * 0.5 + 0.5, flut = sin(uTime * 3.3 + aI.x * 1.7 + aI.y * 1.3) * 0.3;
         vec2 bend = wd * (0.15 + gust * gust * 0.85 + flut) * uStr * 0.32 + push(uPushA, w, gy) + push(uPushB, w, gy);
@@ -47,19 +51,24 @@ const Grass = {
         vGC = gc.rgb * mix(0.58, 1.08, position.y) * (0.88 + 0.24 * fract(aI.w * 7.3)) * (1.0 - uWet * 0.28) * (1.0 + gust * 0.08 * position.y);`);
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vGC;').replace('#include <color_fragment>', 'diffuseColor.rgb *= vGC;').replace(/gl_FrontFacing/g, 'true');
     };
-    m.customProgramCacheKey = () => 'grass'; this.mat = m; this.scene = scene;
+    m.customProgramCacheKey = () => 'grass'; return m;
   },
   setQuality(q) {
-    if (!this.U) return; const N = this.counts[q] || 0, S = this.sizes[q] || 0; if (this.mesh) { this.scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh = null; } this.count = N; if (!N) return;
+    if (!this.U) return; for (const k of ['mesh', 'far']) if (this[k]) { this.scene.remove(this[k]); this[k].geometry.dispose(); this[k] = null; }
+    const N = this.counts[q] || 0; this.count = N; if (!N) return;
+    this.LF.uIn.value = this.sizes[q] * 0.3; // the wide blades fade in where the fine ones fade out
+    this.mesh = this.layer(N, this.sizes[q], this.mat, this.L, 11); this.far = this.layer(this.farCounts[q], this.farSizes[q], this.farMat, this.LF, 12);
+  },
+  layer(N, S, mat, L, seed) {
     const w = 0.035, base = new THREE.BufferGeometry(); // one tapered blade, two segments so it can bend
     base.setAttribute('position', new THREE.Float32BufferAttribute([-w, 0, 0, w, 0, 0, -w * 0.7, 0.5, 0, w * 0.7, 0.5, 0, 0, 1, 0], 3)); base.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3)); base.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4]);
     const g = new THREE.InstancedBufferGeometry(); g.index = base.index; g.setAttribute('position', base.attributes.position); g.setAttribute('normal', base.attributes.normal);
-    const R = mulberry(11), a = new Float32Array(N * 4); for (let i = 0; i < N; i++) { a[i * 4] = R() * S; a[i * 4 + 1] = R() * S; a[i * 4 + 2] = R(); a[i * 4 + 3] = R(); }
+    const R = mulberry(seed), a = new Float32Array(N * 4); for (let i = 0; i < N; i++) { a[i * 4] = R() * S; a[i * 4 + 1] = R() * S; a[i * 4 + 2] = R(); a[i * 4 + 3] = R(); }
     g.setAttribute('aI', new THREE.InstancedBufferAttribute(a, 4)); g.instanceCount = N;
-    this.U.uS.value = S; this.mesh = new THREE.Mesh(g, this.mat); this.mesh.frustumCulled = false; this.mesh.receiveShadow = true; this.scene.add(this.mesh);
+    L.uS.value = S; const m = new THREE.Mesh(g, mat); m.frustumCulled = false; m.receiveShadow = true; this.scene.add(m); return m;
   },
   update() {
-    if (!this.mesh) return; const P = Game.cam.pos, f = Game.cam.dir(), l = Math.hypot(f.x, f.z) || 1, S = this.U.uS.value;
+    if (!this.mesh) return; const P = Game.cam.pos, f = Game.cam.dir(), l = Math.hypot(f.x, f.z) || 1, S = this.L.uS.value;
     this.U.uCam.value.set(P.x, P.z); this.U.uC.value.set(P.x + f.x / l * S * 0.22, P.z + f.z / l * S * 0.22); this.U.uWet.value = Sky.wet || 0;
     if (Game.player) this.U.uPushA.value.copy(Game.player.pos); if (Game.horse) this.U.uPushB.value.copy(Game.horse.pos);
   },
