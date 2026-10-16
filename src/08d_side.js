@@ -45,12 +45,14 @@ const SIDE = {
     const t = NPC.spawn({ key: 'bgen_' + a.id, name: a.name, x: h.x, z: h.z, lawful: false, group: 'bgen', state: 'patrol', gun: a.kind === 'brawler' ? null : (a.gun || 'revolver'), hp: a.hp || 90, maxHp: a.hp || 90, accuracy: 0.4, wild: true, tags: ['bounty', 'bgen', 'generic'], look: a.look, route: [{ x: h.x, z: h.z, wait: 14 }, { x: h.x + 5, z: h.z + 3, wait: 6 }], fists: a.kind === 'brawler' });
     t.loot = () => { this.bs().active && (this.bs().active.proof = true); UI.toast(`Took ${a.name}'s gun belt as proof`); };
     if (a.kind === 'sleeper') { t.state = 'scripted'; t.sleepy = true; t.sense = 0.25; t.script = (dt, me) => { me.sp = 0; me.anim.expr = 'calm'; }; }
-    if (a.kind === 'runner') t.onPatrol = (dt, me) => { if (me.seesPlayer && me.distP < 22 && !me._ran) this.run(me); };
+    if (a.kind === 'runner') { t.onPatrol = (dt, me) => { if (me.seesPlayer && me.distP < 22 && !me._ran) this.run(me); }; for (const hh of Riders.horses.filter(x => x.bountyHorse)) hh.remove(); const hr = new NPCHorse(h.x + 3, h.z + 2, 0); hr.bountyHorse = true; hr.tethered = true; t.horse = hr; } // runners keep a horse saddled
     for (let i = 0; i < a.gang; i++) { const ang = i / Math.max(1, a.gang) * TAU; NPC.spawn({ key: `bgen_g${i}`, name: 'Outlaw', x: h.x + Math.cos(ang) * 6, z: h.z + Math.sin(ang) * 6, lawful: false, group: 'bgen', state: 'patrol', gun: 'revolver', hp: 80, maxHp: 80, fleeHp: 20, accuracy: 0.38, wild: true, tags: ['bgen', 'generic'], look: { skin: '#e8b48c', shirt: pick(['#5a3a2a', '#3b3b5b', '#4a6a4a']), hair: '#3b2a1e', hatColor: '#2b2b2b' }, route: [{ x: h.x + Math.cos(ang) * 6, z: h.z + Math.sin(ang) * 6, wait: 9 }, { x: h.x + Math.cos(ang + 1) * 10, z: h.z + Math.sin(ang + 1) * 10, wait: 6 }] }); }
     this._fires = this._fires || {}; if (!this._fires[h.id]) { this._fires[h.id] = 1; World.campfire(h.x + 2, h.z - 2); }
   },
   run(me) { // runners bolt the moment they see you, then turn and fight if you catch up
-    me._ran = 1; me.say(pick(['Not today, lawdog!', 'You ain\'t taking me in!']), 3); me.state = 'scripted'; let t = 0;
+    me._ran = 1; me.say(pick(['Not today, lawdog!', 'You ain\'t taking me in!']), 3);
+    if (me.horse && me.horse.alive && !me.horse.rider && Riders.horses.includes(me.horse) && me.horse.pos.distanceTo(me.pos) < 12) { Riders.mount(me, me.horse); me.rideMode = 'flee'; me.onEscape = () => { const b = this.bs(); if (b.active) b.active.fled = true; }; return; } // on horseback: shoot the horse to throw them
+    me.state = 'scripted'; let t = 0;
     me.script = (dt, x) => { t += dt; const P = Game.player, a = Math.atan2(x.pos.x - P.pos.x, x.pos.z - P.pos.z); x.moveTo(x.pos.x + Math.sin(a) * 6, x.pos.z + Math.cos(a) * 6, 5.4, dt); if (x.distP < 3.5 || t > 22) { x.script = null; x.fightPlayer(!x.gun); } if (x.distP > 140) { const b = this.bs(); if (b.active) b.active.fled = true; } };
   },
   turnIn(alive) {
@@ -60,7 +62,7 @@ const SIDE = {
   },
   bountyComplete(ctx) {
     const b = this.bs(), q = b.active, a = this.outlaw(q.o); ctx.m.outcome = `Brought ${a.name} in ${q.turnedIn} ($${q.turnedIn === 'alive' ? a.alive : a.dead})`;
-    b.done++; b.recent = b.recent.concat(q.o).slice(-3); b.active = null; ctx.m.status = 'locked'; for (const n of NPC.all.slice()) if (n.tags.includes('bgen')) NPC.despawn(n); // repeatable: the next poster reuses this mission
+    b.done++; b.recent = b.recent.concat(q.o).slice(-3); b.active = null; for (const hh of Riders.horses.filter(x => x.bountyHorse)) hh.remove(); ctx.m.status = 'locked'; for (const n of NPC.all.slice()) if (n.tags.includes('bgen')) NPC.despawn(n); // repeatable: the next poster reuses this mission
   },
 
   /* ---------- road encounters ---------- */

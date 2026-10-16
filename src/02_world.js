@@ -191,6 +191,20 @@ function building(o) {
   const trim = o.trim || '#f4ead3';
   for (const s of [-1, 1]) { const wx = s * hw * 0.55; if (W > 6) { g.add(M(GEO.box, '#3c5a6e', 1.1, 1.0, 0.06, wx, fy + 1.7, dz + (side === 'S' ? 0.02 : -0.02) * 1)); g.add(M(GEO.box, trim, 1.3, 0.12, 0.1, wx, fy + 1.15, dz)); } }
   g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, hw + 0.02, fy + 1.7, 0)); g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, -hw - 0.02, fy + 1.7, 0));
+  // interior shell: plank walls with darker wainscoting and a skirting board, inside window frames, floorboards, beams and a
+  // ceiling (it casts shadow, so rooms are shaded like real rooms once the roof hides when you step inside)
+  if (o.interior !== false) {
+    const iw = o.inside || '#b98f65', wain = o.wainscot || '#7a5232', inT = 0.02, ix = hw - t - inT, iz = hd - t - inT;
+    const panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; g.add(M(GEO.box, iw, w, H - 1.05, d, cx, fy + 1.05 + (H - 1.05) / 2, cz)); g.add(M(GEO.box, wain, w, 1.0, d, cx, fy + 0.5, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
+    const doorZ = side === 'S' ? iz : -iz;
+    for (const zc of [iz, -iz]) { const dzc = zc + (zc > 0 ? -inT : inT); if ((zc > 0) === (side === 'S') && side !== 'W') { panel(-ix, -dw / 2, dzc - inT, dzc + inT); panel(dw / 2, ix, dzc - inT, dzc + inT); } else panel(-ix, ix, dzc - inT, dzc + inT); }
+    for (const xc of [ix, -ix]) panel(xc - inT, xc + inT, -iz, iz);
+    const win = (x, z, ry) => { const f = new THREE.Group(); f.position.set(x, fy + 1.7, z); f.rotation.y = ry; f.add(M(GEO.box, '#9fc3d8', 1.0, 0.9, 0.02)); for (const [w, h, px, py] of [[1.16, 0.08, 0, 0.49], [1.16, 0.08, 0, -0.49], [0.08, 1.0, 0.54, 0], [0.08, 1.0, -0.54, 0], [0.05, 0.9, 0, 0], [1.0, 0.05, 0, 0]]) f.add(M(GEO.box, trim, w, h, 0.05, px, py, 0.02)); f.add(M(GEO.box, trim, 1.3, 0.08, 0.16, 0, -0.54, 0.06)); g.add(f); };
+    win(ix - 0.03, 0, -Math.PI / 2); win(-ix + 0.03, 0, Math.PI / 2); if (W > 6) for (const sx of [-1, 1]) win(sx * hw * 0.55, doorZ + (side === 'S' ? -0.03 : 0.03), side === 'S' ? Math.PI : 0);
+    for (let k = -W / 2 + 0.6; k < W / 2 - 0.4; k += 0.55) g.add(M(GEO.box, '#8f6a45', 0.025, 0.005, D - 0.5, k, fy + 0.022, 0)); // floorboard seams
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W - 2 * t, D - 2 * t), toon(o.ceiling || '#8b6a47')); ceil.rotation.x = Math.PI / 2; ceil.position.y = fy + H - 0.02; ceil.castShadow = true; ceil.receiveShadow = true; g.add(ceil);
+    for (let k = -W / 2 + 1.2; k < W / 2 - 0.8; k += 1.8) g.add(M(GEO.box, '#5a3a22', 0.18, 0.2, D - 2 * t, k, fy + H - 0.12, 0));
+  }
   // false front (western facade) & roof
   const roof = new THREE.Group(); roof.position.y = fy + H; g.add(roof); b.roofs.push(roof);
   const rc = o.roof || '#7a4b3a', ang = 0.42, rl = (W / 2 + 0.4) / Math.cos(ang);

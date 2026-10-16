@@ -480,6 +480,20 @@ function building(o) {
   const trim = o.trim || '#f4ead3';
   for (const s of [-1, 1]) { const wx = s * hw * 0.55; if (W > 6) { g.add(M(GEO.box, '#3c5a6e', 1.1, 1.0, 0.06, wx, fy + 1.7, dz + (side === 'S' ? 0.02 : -0.02) * 1)); g.add(M(GEO.box, trim, 1.3, 0.12, 0.1, wx, fy + 1.15, dz)); } }
   g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, hw + 0.02, fy + 1.7, 0)); g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, -hw - 0.02, fy + 1.7, 0));
+  // interior shell: plank walls with darker wainscoting and a skirting board, inside window frames, floorboards, beams and a
+  // ceiling (it casts shadow, so rooms are shaded like real rooms once the roof hides when you step inside)
+  if (o.interior !== false) {
+    const iw = o.inside || '#b98f65', wain = o.wainscot || '#7a5232', inT = 0.02, ix = hw - t - inT, iz = hd - t - inT;
+    const panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; g.add(M(GEO.box, iw, w, H - 1.05, d, cx, fy + 1.05 + (H - 1.05) / 2, cz)); g.add(M(GEO.box, wain, w, 1.0, d, cx, fy + 0.5, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
+    const doorZ = side === 'S' ? iz : -iz;
+    for (const zc of [iz, -iz]) { const dzc = zc + (zc > 0 ? -inT : inT); if ((zc > 0) === (side === 'S') && side !== 'W') { panel(-ix, -dw / 2, dzc - inT, dzc + inT); panel(dw / 2, ix, dzc - inT, dzc + inT); } else panel(-ix, ix, dzc - inT, dzc + inT); }
+    for (const xc of [ix, -ix]) panel(xc - inT, xc + inT, -iz, iz);
+    const win = (x, z, ry) => { const f = new THREE.Group(); f.position.set(x, fy + 1.7, z); f.rotation.y = ry; f.add(M(GEO.box, '#9fc3d8', 1.0, 0.9, 0.02)); for (const [w, h, px, py] of [[1.16, 0.08, 0, 0.49], [1.16, 0.08, 0, -0.49], [0.08, 1.0, 0.54, 0], [0.08, 1.0, -0.54, 0], [0.05, 0.9, 0, 0], [1.0, 0.05, 0, 0]]) f.add(M(GEO.box, trim, w, h, 0.05, px, py, 0.02)); f.add(M(GEO.box, trim, 1.3, 0.08, 0.16, 0, -0.54, 0.06)); g.add(f); };
+    win(ix - 0.03, 0, -Math.PI / 2); win(-ix + 0.03, 0, Math.PI / 2); if (W > 6) for (const sx of [-1, 1]) win(sx * hw * 0.55, doorZ + (side === 'S' ? -0.03 : 0.03), side === 'S' ? Math.PI : 0);
+    for (let k = -W / 2 + 0.6; k < W / 2 - 0.4; k += 0.55) g.add(M(GEO.box, '#8f6a45', 0.025, 0.005, D - 0.5, k, fy + 0.022, 0)); // floorboard seams
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W - 2 * t, D - 2 * t), toon(o.ceiling || '#8b6a47')); ceil.rotation.x = Math.PI / 2; ceil.position.y = fy + H - 0.02; ceil.castShadow = true; ceil.receiveShadow = true; g.add(ceil);
+    for (let k = -W / 2 + 1.2; k < W / 2 - 0.8; k += 1.8) g.add(M(GEO.box, '#5a3a22', 0.18, 0.2, D - 2 * t, k, fy + H - 0.12, 0));
+  }
   // false front (western facade) & roof
   const roof = new THREE.Group(); roof.position.y = fy + H; g.add(roof); b.roofs.push(roof);
   const rc = o.roof || '#7a4b3a', ang = 0.42, rl = (W / 2 + 0.4) / Math.cos(ang);
@@ -1413,8 +1427,9 @@ function noiseEvent(x, z, r, src) { for (const a of Animal.all) if (a.alive && M
 /* Gunplay hit tests. People get a standing capsule split into head, body and legs; animals keep their hit sphere. */
 const GUN = { revolver: { dmg: 40, range: 45, cool: 0.38, spread: 0.004, bloom: 0.02, kick: 0.028 }, rifle: { dmg: 75, range: 90, cool: 1.0, spread: 0.0012, bloom: 0.03, kick: 0.05 }, ZONE: { head: 2.5, body: 1, legs: 0.65 } };
 function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground to 1.75 m): distance and which part was hit
+  const by = h.pos.y - (h.state === 'ride' ? 0.6 : 0); // a seated rider's capsule starts below the saddle so head/body zones line up
   const px = o.x - h.pos.x, pz = o.z - h.pos.z, a = d.x * d.x + d.z * d.z; if (a < 1e-8) return null; const b = px * d.x + pz * d.z, c = px * px + pz * pz - 0.36 * 0.36, disc = b * b - a * c; if (disc < 0) return null;
-  const sq = Math.sqrt(disc); for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - h.pos.y; if (y < 0 || y > (h.downed ? 0.5 : 1.75)) continue; return { t, zone: y > 1.42 ? 'head' : y < 0.85 ? 'legs' : 'body' }; } return null;
+  const sq = Math.sqrt(disc); for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - by; if (y < 0 || y > (h.downed ? 0.5 : 1.75)) continue; return { t, zone: y > 1.42 ? 'head' : y < 0.85 ? 'legs' : 'body' }; } return null;
 }
 function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
   let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
@@ -1480,7 +1495,7 @@ class Player {
     // combat
     if (this.canAct()) this.combat(dt, aiming);
     // stealth: crouched in tall grass/dark is quieter
-    this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8;
+    this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8; if (Sky.raining()) this.noise *= 0.6; // rain muffles footsteps
     let la = null, ld = 7; for (const nn of NPC.all) { if (!nn.alive || nn.downed) continue; const d = Math.hypot(nn.pos.x - this.pos.x, nn.pos.z - this.pos.z); if (d < ld) { ld = d; la = nn.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
     this.feedLoco(dt, hs, I.mag > 0.1);
     this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn: this._turn, tired: S.p.st < 1 && hs > 1, loco: this.loco });
@@ -1658,7 +1673,7 @@ class Horse {
     this.drive(dt, target);
   }
   drive(dt, gl) {
-    const speeds = [0, 2.1, 4.7, 8.4, 13.2], names = ['walk', 'walk', 'trot', 'canter', 'gallop']; const ts = speeds[gl] * (S.h.st < 5 ? 0.6 : 1);
+    const speeds = [0, 2.1, 4.7, 8.4, 13.2], names = ['walk', 'walk', 'trot', 'canter', 'gallop']; const ts = speeds[gl] * (S.h.st < 5 ? 0.6 : 1) * (1 - Sky.wet * 0.18); // mud slows a horse down
     this.speed = damp(this.speed, ts, ts > this.speed ? 1.6 : 2.6, dt); this.gait = this.speed < 3.2 ? 'walk' : this.speed < 6.4 ? 'trot' : this.speed < 10.5 ? 'canter' : 'gallop';
     if (this.gait === 'gallop') S.h.st -= (S.upgrades.saddle ? 6 : 9) * dt; else if (this.gait === 'canter') S.h.st -= 1.5 * dt; else S.h.st = Math.min(this.maxSt(), S.h.st + (S.upgrades.saddle ? 9 : 6) * dt);
     if (S.h.st <= 0) { S.h.st = 0; if (Math.random() < dt) Sfx.neigh(); }
@@ -1799,7 +1814,7 @@ class Person {
   asCarry() { const n = this; return { id: 'npc:' + this.key, label: this.name, h: 0.3, stowable: true, mesh: this.rig.root, npc: this, onPick() { n.carried = true; }, onDrop(x, z) { n.carried = false; n.pos.set(x, Col.ground(x, z, 99), z); } }; }
   perceive() {
     const P = Game.player; const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z, d = Math.hypot(dx, dz); this.distP = d;
-    const facing = Math.cos(angDiff(this.yaw, Math.atan2(dx, dz))); const range = (Sky.night() ? 20 : 34) * this.sense;
+    const facing = Math.cos(angDiff(this.yaw, Math.atan2(dx, dz))); const range = (Sky.night() ? 20 : 34) * this.sense * Sky.visMul(); // rain, storms and fog shorten how far anyone sees
     this.seesPlayer = P.alive && d < range && (facing > -0.1 || (d < 5 && !P.crouch)) && Col.los(this.pos.x, this.pos.y + 1.5, this.pos.z, P.pos.x, P.pos.y + 1.2, P.pos.z);
     if (this.sleepy) this.seesPlayer = this.seesPlayer && d < 2.2 && !P.crouch;
     if (this.isAsleep()) this.seesPlayer = P.alive && d < 2.2 && !P.crouch; // eyes closed: only someone standing right beside the bedroll
@@ -1813,7 +1828,7 @@ class Person {
   }
   followPath(dt, speed) { if (!this.path || !this.path.length) return true; const p = this.path[0]; if (this.moveTo(p.x, p.z, speed, dt, this.path.length > 1 ? 0.9 : 0.5)) { this.path.shift(); if (!this.path.length) return true; } return false; }
   go(tx, tz, wild) { this.path = wild ? [{ x: tx, z: tz }] : townPath(this.pos.x, this.pos.z, tx, tz); this.goal = { x: tx, z: tz }; }
-  schedEntry() { if (!this.schedule) return null; const h = S.time.hour; const rain = Sky.weather === 'rain'; for (const e of this.schedule) { const [a, b] = e; if (a <= b ? (h >= a && h < b) : (h >= a || h < b)) { if (rain && e[3] && e[3].rain) return Object.assign({}, e, { 2: e[3].rain }); return e; } } return this.schedule[0]; }
+  schedEntry() { if (!this.schedule) return null; const h = S.time.hour; const rain = Sky.raining(); for (const e of this.schedule) { const [a, b] = e; if (a <= b ? (h >= a && h < b) : (h >= a || h < b)) { if (rain && e[3] && e[3].rain) return Object.assign({}, e, { 2: e[3].rain }); return e; } } return this.schedule[0]; }
   update(dt, far) {
     this.t += dt; this.say_t -= dt; if (this.say_t <= 0) this.speech = null; this.wakeT = Math.max(0, (this.wakeT || 0) - dt); this.it.r = this.state === 'handsup' ? 7 : 2.4; // hold-ups work at gunpoint range
     if (this.carried) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
@@ -1841,9 +1856,10 @@ class Person {
       case 'patrol': this.patrol(dt); if (this.sitter && this.alert < 0.3) { const s = this.sitter; if (Math.hypot(this.pos.x - s.x, this.pos.z - s.z) < 1.2) { this.pos.x = damp(this.pos.x, s.x, 8, dt); this.pos.z = damp(this.pos.z, s.z, 8, dt); this.yaw = dampAngle(this.yaw, s.yaw, 6, dt); this.sp = 0; animState = 'sit'; this.poseClip = s.clip; } } break; // fireside sitters face the fire
       case 'scripted': if (this.script) this.script(dt, this); break;
       case 'tied': this.sp = 0; animState = 'sit'; break;
+      case 'ride': Riders.ai(this, dt); animState = 'ride'; break;
     }
     if (this.state !== 'pursue' && this.state !== 'combat' && !this.allyAim) this.anim.layers.aim = 0;
-    const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt);
+    if (this.state !== 'ride') { const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt); }
     this.anim.lookAt = (this.distP < 6 && Game.player.alive && !this.hostileToPlayer && animState !== 'lie') ? Game.player.pos : null;
     this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: (x, z, y) => Col.ground(x, z, y), poseClip: this.poseClip });
     this.place();
@@ -1964,17 +1980,19 @@ const Sky = {
     this.glare = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(gc), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false })); this.glare.scale.setScalar(140); scene.add(this.glare);
   },
   night() { const h = S.time.hour; return h < 5.5 || h > 20.5; },
+  raining() { return this.weather === 'rain' || this.weather === 'storm'; },
+  visMul() { return { fog: 0.45, storm: 0.6, rain: 0.75, cloudy: 0.95 }[this.weather] || 1; }, // how far people can see in this weather
   advance(hours) { S.time.hour += hours; while (S.time.hour >= 24) { S.time.hour -= 24; S.time.day++; Game.newDay(); } },
   update(dt) {
     this.advance(dt * this.RATE);
     // weather
-    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(); const k = r < 0.5 ? 'clear' : r < 0.78 ? 'cloudy' : 'rain'; S.weather.kind = k; S.weather.next = rand(3, 8); }
-    this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
-    const raining = this.weather === 'rain'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
+    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(), h0 = S.time.hour; const k = r < 0.45 ? 'clear' : r < 0.67 ? 'cloudy' : r < 0.81 ? 'rain' : r < 0.9 ? 'storm' : (h0 > 3 && h0 < 11 ? 'fog' : 'cloudy'); S.weather.kind = k; S.weather.next = rand(3, 8); }
+    this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : this.weather === 'fog' ? 0.7 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
+    const raining = this.raining(), storm = this.weather === 'storm', fog = this.weather === 'fog'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
     if (Math.abs(this.wet - (this._lw || 0)) > 0.04) { this._lw = this.wet; Terrain.setWet(this.wet); }
     const h = S.time.hour; const th = (h - 5.5) / 14.5 * Math.PI; const sy = Math.sin(th), sx = Math.cos(th); // sunrise ~5:30, sunset ~20:00 (night() and the street lamps agree)
     const day = smoothstep(-0.1, 0.22, sy); const dusk = (sy > -0.08 ? 1 - smoothstep(0.02, 0.45, sy) : 0) * (1 - this.cloud * 0.7); this.golden = dusk; // a long golden hour, RDR2-style
-    const mist = (smoothstep(4.6, 5.8, h) * (1 - smoothstep(7.4, 9.6, h)) + (this.weather === 'rain' ? 0.5 : 0)) * (1 - this.cloud * 0.3); this.mistAmt = mist;
+    const mist = (smoothstep(4.6, 5.8, h) * (1 - smoothstep(7.4, 9.6, h)) + (raining ? 0.5 : 0) + (fog ? 1.1 : 0)) * (fog ? 1 : 1 - this.cloud * 0.3); this.mistAmt = mist;
     const P = Game.player.pos; this.sun.position.set(P.x + sx * 80, P.y + Math.max(8, sy * 90), P.z + 35); this.sun.target.position.copy(P);
     this.sunM.position.set(Game.cam.pos.x + sx * 350, Game.cam.pos.y + sy * 350, Game.cam.pos.z + 140); this.sunM.visible = sy > -0.1;
     this.moonM.position.set(Game.cam.pos.x - sx * 350, Game.cam.pos.y - sy * 350, Game.cam.pos.z - 120); this.moonM.visible = sy < 0.1;
@@ -1983,17 +2001,19 @@ const Sky = {
     const sky = cNight.clone().lerp(cDay, day).lerp(cDusk, dusk * 0.8); const top = new THREE.Color('#0a1024').lerp(new THREE.Color('#4f9ad2').lerp(new THREE.Color('#7f8b94'), this.cloud * 0.8), day).lerp(new THREE.Color('#6a7fb0'), dusk * 0.35);
     const hor = sky.clone().lerp(new THREE.Color('#ffffff'), 0.25 * day * (1 - this.cloud * 0.5)); this.domeU.top.value.copy(top); this.domeU.hor.value.copy(hor); this.domeU.sunDir.value.set(sx, sy, 0.4); this.domeU.sunCol.value.set(dusk > 0.3 ? '#ffb070' : '#fff2cc').multiplyScalar(day * (1 - this.cloud * 0.8));
     this.dome.position.copy(Game.cam.pos); Game.scene.background = hor; Game.scene.fog.color.copy(hor).lerp(new THREE.Color('#9fb6a0'), 0.12 * day).lerp(new THREE.Color('#f0b07a'), dusk * 0.3).lerp(new THREE.Color('#e3e6e2'), mist * 0.5);
-    Game.scene.fog.density = (raining ? 0.0085 : this.cloud > 0.4 ? 0.0045 : 0.003) + mist * 0.0045 + dusk * 0.0008;
+    Game.scene.fog.density = (fog ? 0.014 : storm ? 0.011 : raining ? 0.0085 : this.cloud > 0.4 ? 0.0045 : 0.003) + mist * 0.0045 + dusk * 0.0008;
+    // thunderstorms: lightning lights up the valley, thunder rolls in a moment later
+    this.flash = Math.max(0, (this.flash || 0) - dt * 5); if (storm) { this.boltT = (this.boltT ?? rand(3, 8)) - dt; if (this.boltT <= 0) { this.boltT = rand(6, 14); this.flash = 1; this.bolts = (this.bolts || 0) + 1; setTimeout(() => Sfx.burst(70, 1.8, 0.5, 'lowpass'), rand(400, 1800)); } }
     this.mist.position.set(Game.cam.pos.x, 4.2, Game.cam.pos.z); this.mistU.uCam.value.copy(Game.cam.pos); this.mistU.uT.value += dt; this.mistU.uOp.value = Math.min(0.85, mist * 0.75 + (1 - day) * 0.12); this.mistU.uCol.value.copy(Game.scene.fog.color).lerp(new THREE.Color('#ffffff'), 0.25 * day);
-    this.glare.position.copy(this.sunM.position); this.glare.material.opacity = sy > -0.05 ? (0.08 + dusk * 0.4) * (1 - this.cloud * 0.8) : 0; this.glare.scale.setScalar(70 + dusk * 90); WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
+    this.glare.position.copy(this.sunM.position); this.glare.material.opacity = sy > -0.05 ? (0.08 + dusk * 0.4) * (1 - this.cloud * 0.8) : 0; this.glare.scale.setScalar(70 + dusk * 90); WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, storm ? 2.8 : raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
     // warm low sun and long shadows at golden hour; at night the 'sun' becomes a dim blue moonlight and the world goes properly dark
     this.sun.intensity = day * (1 - this.cloud * 0.55) * (0.95 + dusk * 0.2) + (1 - day) * 0.16; this.sun.color.set('#fff1d6').lerp(new THREE.Color('#ff8a3a'), dusk).lerp(new THREE.Color('#8fa8e0'), 1 - day); if (day < 0.2) this.sun.position.set(P.x - sx * 80, P.y + 60, P.z - 30);
-    this.hemi.intensity = 0.13 + day * 0.47; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.05 + day * 0.07;
+    this.hemi.intensity = 0.13 + day * 0.47; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.05 + day * 0.07 + this.flash * 1.4; if (this.flash > 0.05) Game.scene.background = hor.clone().lerp(new THREE.Color('#e8eeff'), this.flash * 0.8);
     this.cloudMat.color.set(raining ? '#8e979e' : '#ffffff'); for (const c of this.clouds.children) { c.position.x += dt * 1.5; if (c.position.x > 280) c.position.x = -280; c.visible = Math.random() < 2 && (c.id % 3 < 1 + this.cloud * 2); }
     this.rain.visible = raining; if (raining) { this.rain.position.set(Game.cam.pos.x, Game.cam.pos.y - 8, Game.cam.pos.z); const a = this.rain.geometry.attributes.position.array; for (let i = 0; i < a.length; i += 6) { a[i + 1] -= dt * 26; a[i + 4] -= dt * 26; if (a[i + 1] < 0) { a[i + 1] += 22; a[i + 4] += 22; } } this.rain.geometry.attributes.position.needsUpdate = true; }
     const lampOn = h > 19 || h < 6.2; for (const l of Game.lamps) l.intensity = lampOn ? 1.15 + (1 - day) * 0.6 : 0; // lanterns matter once it's dark
     // ambience
-    Sfx.bed('wind', 0.05 + clamp((P.y - 10) / 30, 0, 0.12) + this.cloud * 0.04); Sfx.bed('rain', raining ? 0.18 : 0);
+    Sfx.bed('wind', 0.05 + clamp((P.y - 10) / 30, 0, 0.12) + this.cloud * 0.04); Sfx.bed('rain', storm ? 0.28 : raining ? 0.18 : 0);
     const rd = Math.abs(P.x - riverX(P.z)); Sfx.bed('river', clamp(1 - rd / 30, 0, 1) * 0.12);
     if (this.night() && Math.random() < dt * 1.2 && !raining) Sfx.tone(rand(4200, 4800), 0.04, 0.012, 'sine');
   }
@@ -2143,7 +2163,7 @@ const World = {
     /* --- Rook's hideout at the ford (bounty) --- */
     const fx = riverX(-120) + 22, fz = -128; this.campfire(fx, fz, false); const tt = new THREE.Group(); tt.position.set(fx + 3, Terrain.height(fx + 3, fz - 3), fz - 3); sc.add(tt); const tc = M(GEO.cone, '#a0794f', 1.6, 1.8, 1.6, 0, 0.9, 0); tc.geometry = new THREE.ConeGeometry(1, 1, 4); tt.add(tc); Col.circle(fx + 3, fz - 3, 1.1, Terrain.height(fx + 3, fz - 3) - 1, Terrain.height(fx + 3, fz - 3) + 2, { block: true, cover: true });
     /* --- vegetation, rocks, gatherables --- */
-    this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
+    Interiors.build(); this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
     /* --- graves near the cabin: environmental story --- */
     for (let i = 0; i < 2; i++) { const gx = -158 + i * 1.6, gz = -78; const g = new THREE.Group(); g.position.set(gx, Terrain.height(gx, gz), gz); sc.add(g); g.add(M(GEO.box, '#8b6a47', 0.1, 1.0, 0.1, 0, 0.5, 0)); g.add(M(GEO.box, '#8b6a47', 0.6, 0.1, 0.1, 0, 0.75, 0)); g.add(M(GEO.box, '#7a6a52', 0.7, 0.15, 1.6, 0, 0.07, 0.9)); }
     Interact.add({ pos: () => ({ x: -157.2, y: Terrain.height(-157, -78), z: -78 }), r: 1.8, opts: () => [{ label: 'Read grave markers', fn: () => { UI.banner('Hollow Cabin', 'Two markers', '"T. Ashby, homesteader. Sold to the railroad, never left." The ground is older than Eli\'s visit. Someone else lost this land first.'); if (!S.evidence.graves) { S.evidence.graves = true; journal('Two graves by Hollow Cabin. The Ashbys "sold to the railroad" and never left. Same story as the Greers, years earlier.', 'evidence'); } } }] });
@@ -2285,7 +2305,7 @@ const Ambient = {
     const t = Game.time, P = Game.player.pos, night = Sky.night();
     for (const c of this.birds) { c.x += Math.sin(t * 0.03 + c.r) * dt * 2; for (const b of c.list) { const a = t * c.sp + b.off; b.m.position.set(c.x + Math.cos(a) * c.r, c.h + b.dy + Math.sin(t * 2 + b.off * 9) * 0.6, c.z + Math.sin(a) * c.r); b.m.rotation.set(0, -a + (c.sp > 0 ? 0 : Math.PI), 0); b.m.scale.set(1, 1 + Math.sin(t * 9 + b.off * 30) * 0.8, 1); b.m.visible = !night; } }
     const spots = World.flowerSpots || []; for (const f of this.flies) { f.t += dt; if (!f.base || Math.hypot(f.base[0] - P.x, f.base[2] - P.z) > 40) { const near = spots.filter(s => Math.hypot(s[0] - P.x, s[2] - P.z) < 35); f.base = near.length ? pick(near) : null; } f.m.visible = !!f.base && !night && Sky.weather !== 'rain'; if (!f.m.visible) continue; f.m.position.set(f.base[0] + Math.sin(f.t * 0.7) * 1.5, f.base[1] + 0.6 + Math.abs(Math.sin(f.t * 3)) * 0.5, f.base[2] + Math.cos(f.t * 0.9) * 1.5); f.m.rotation.set(0, f.t, Math.sin(f.t * 25) * 0.9); }
-    this.ff.visible = night && Sky.weather !== 'rain'; if (this.ff.visible) { const a = this.ff.geometry.attributes.position.array; this.ffSeed.forEach(([x, y, z, ph], i) => { a[i * 3] = P.x + x + Math.sin(t * 0.4 + ph) * 1.5; a[i * 3 + 1] = Terrain.height(P.x + x, P.z + z) + y + Math.sin(t + ph) * 0.3; a[i * 3 + 2] = P.z + z + Math.cos(t * 0.3 + ph) * 1.5; }); this.ff.geometry.attributes.position.needsUpdate = true; this.ff.material.opacity = 0.5 + Math.sin(t * 3) * 0.4; }
+    this.ff.visible = night && !Sky.raining(); if (this.ff.visible) { const a = this.ff.geometry.attributes.position.array; this.ffSeed.forEach(([x, y, z, ph], i) => { a[i * 3] = P.x + x + Math.sin(t * 0.4 + ph) * 1.5; a[i * 3 + 1] = Terrain.height(P.x + x, P.z + z) + y + Math.sin(t + ph) * 0.3; a[i * 3 + 2] = P.z + z + Math.cos(t * 0.3 + ph) * 1.5; }); this.ff.geometry.attributes.position.needsUpdate = true; this.ff.material.opacity = 0.5 + Math.sin(t * 3) * 0.4; }
     // chimney smoke
     this.smokeT -= dt; if (this.smokeT <= 0 && World.chimneys) { this.smokeT = 0.35; for (const c of World.chimneys) if (Math.hypot(c.x - P.x, c.z - P.z) < 90) { const m = new THREE.Mesh(GEO.sphLo, toon('#d8d4cc', { transparent: true, opacity: 0.55 })); m.position.set(c.x, c.y, c.z); m.scale.setScalar(0.3); Game.scene.add(m); this.smoke.push({ m, life: 4 }); } }
     this.smoke = this.smoke.filter(p => { p.life -= dt; p.m.position.y += dt * 0.9; p.m.position.x += dt * 0.4 * WIND.uStrength.value; p.m.scale.setScalar(0.3 + (4 - p.life) * 0.25); p.m.material.opacity = p.life / 8; if (p.life <= 0) { Game.scene.remove(p.m); return false; } return true; });
@@ -2406,6 +2426,110 @@ CAMPS.forEach(c => {
       { key: 'rs_gus', name: 'Gus Ketter', dx: 12, dz: 6, route: [[12, 6, 8], [12, -8, 8]], look: { skin: '#e2a57c', shirt: '#3b3b5b', hair: '#3b2a1e', beard: '#3b2a1e', hatColor: '#2b2b2b' } }],
     loot: [{ kind: 'lockbox', dx: 0.6, dz: -4.4, yaw: 0, money: 22, items: [['gold', 1], ['ammo_rev', 12]] }] });
 });
+
+/* ===== Interiors: furnishing every building so stepping inside feels like stepping into a lived-in room =====
+   Local coordinates are relative to each building's centre (door 'S' = +z, 'N' = -z). The floor top is at y 0.35.
+   Big pieces along the walls get colliders; anything near an NPC's place (desk chairs, beds, bar spots) stays clear. */
+const Interiors = {
+  F: 0.35,
+  build() {
+    const B = n => Buildings.find(b => b.name === n);
+    this.sheriff(B("Sheriff's office")); this.store(B('General store')); this.saloon(B('Saloon')); this.mae(B("Mae's house")); this.doc(B("Doc Pell's"));
+    this.boarding(B('Boarding house')); this.farmhouse(B('Greer farmhouse')); this.barn(B('Greer barn')); this.mill(B('Coyote Mill')); this.cabin(B('Hollow Cabin'));
+  },
+  put(b, geo, col, sx, sy, sz, lx, ly, lz, o = {}) { // ly is the bottom of the piece above the floor
+    const m = M(geo, col, sx, sy, sz, lx, this.F + ly + sy / 2, lz, o.mat); if (o.ry) m.rotation.y = o.ry; if (o.rx) m.rotation.x = o.rx; if (o.rz) m.rotation.z = o.rz; b.g.add(m);
+    if (o.col) { const turn = o.ry && Math.abs(Math.sin(o.ry)) > 0.7, hx = (turn ? sz : sx) / 2 + 0.04, hz = (turn ? sx : sz) / 2 + 0.04; Col.box(b.x + lx - hx, b.x + lx + hx, b.z + lz - hz, b.z + lz + hz, b.y - 1, b.floor + ly + sy, { block: true, cover: !!o.cover }); }
+    return m;
+  },
+  glow: { emissive: '#ffb84a', emissiveIntensity: 0.9 },
+  lamp(b, x, z, h = 3.0) { this.put(b, GEO.cyl, '#2b2b2b', 0.02, 3.35 - h, 0.02, x, h + 0.25, z); this.put(b, GEO.cyl, '#3b2a1e', 0.18, 0.06, 0.18, x, h + 0.2, z); this.put(b, GEO.box, '#ffd27a', 0.16, 0.22, 0.16, x, h - 0.05, z, { mat: this.glow }); },
+  candle(b, x, y, z) { this.put(b, GEO.cyl, '#f4ead3', 0.03, 0.12, 0.03, x, y, z); this.put(b, GEO.sphLo, '#ffd27a', 0.03, 0.05, 0.03, x, y + 0.13, z, { mat: this.glow }); },
+  rug(b, x, z, w, d, col, edge = '#e9c46a') { this.put(b, GEO.box, edge, w, 0.012, d, x, 0.01, z); this.put(b, GEO.box, col, w - 0.2, 0.014, d - 0.2, x, 0.012, z); },
+  chair(b, x, z, ry = 0, col = '#6b4226') { const g = new THREE.Group(); g.position.set(x, this.F, z); g.rotation.y = ry; g.add(M(GEO.box, col, 0.45, 0.06, 0.45, 0, 0.45, 0)); for (const [lx, lz] of [[-0.19, -0.19], [0.19, -0.19], [-0.19, 0.19], [0.19, 0.19]]) g.add(M(GEO.box, col, 0.05, 0.45, 0.05, lx, 0.22, lz)); g.add(M(GEO.box, col, 0.45, 0.5, 0.05, 0, 0.72, -0.2)); b.g.add(g); },
+  table(b, x, z, w, d, col = '#7a5232', h = 0.75) { this.put(b, GEO.box, col, w, 0.06, d, x, h - 0.06, z); for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) this.put(b, GEO.box, '#5a3a22', 0.07, h - 0.06, 0.07, x + lx * (w / 2 - 0.08), 0, z + lz * (d / 2 - 0.08)); },
+  stove(b, x, z) { this.put(b, GEO.box, '#2b2b2b', 0.7, 0.8, 0.6, x, 0.05, z, { col: true }); this.put(b, GEO.box, '#1b1b1b', 0.74, 0.05, 0.64, x, 0.85, z); this.put(b, GEO.box, '#ff8a3a', 0.3, 0.12, 0.02, x, 0.35, z + 0.31, { mat: { emissive: '#ff6a1a', emissiveIntensity: 0.7 } }); this.put(b, GEO.cyl, '#3b3b3b', 0.09, 2.3, 0.09, x, 0.9, z - 0.1); for (const s of [-1, 1]) this.put(b, GEO.box, '#2b2b2b', 0.06, 0.05, 0.06, x + s * 0.3, 0, z + s * 0.25); },
+  shelf(b, x, z, ry, w, items = ['#c8443a', '#e9c46a', '#4f7ca8', '#9dbf8a', '#f4ead3'], rows = 2, y0 = 1.1) { // wall shelf with goods
+    const g = new THREE.Group(); g.position.set(x, this.F, z); g.rotation.y = ry; b.g.add(g);
+    for (let r = 0; r < rows; r++) { const y = y0 + r * 0.55; g.add(M(GEO.box, '#6b4226', w, 0.05, 0.28, 0, y, 0)); for (let k = 0; k < Math.floor(w / 0.22); k++) { const c = items[(k * 7 + r * 3) % items.length]; if ((k + r) % 4 === 3) continue; g.add(k % 3 === 0 ? M(GEO.box, c, 0.16, 0.2, 0.14, -w / 2 + 0.15 + k * 0.22, y + 0.125, 0) : M(GEO.cyl, c, 0.06, 0.24, 0.06, -w / 2 + 0.15 + k * 0.22, y + 0.15, 0)); } }
+  },
+  frame(b, x, y, z, ry, w, h, col) { const g = new THREE.Group(); g.position.set(x, this.F + y, z); g.rotation.y = ry; g.add(M(GEO.box, '#5a3a22', w + 0.1, h + 0.1, 0.04)); g.add(M(GEO.box, col, w, h, 0.05)); b.g.add(g); },
+  crate(b, x, z, s = 0.6, ly = 0, col = true) { this.put(b, GEO.box, '#8b6a47', s, s, s, x, ly, z, { col, cover: true }); this.put(b, GEO.box, '#6b4a2f', s + 0.02, 0.06, s + 0.02, x, ly + s * 0.5, z); },
+  barrel(b, x, z, col = true) { this.put(b, GEO.cyl, '#8b5a2b', 0.38, 0.9, 0.38, x, 0, z, { col }); for (const y of [0.15, 0.75]) this.put(b, GEO.cyl, '#3b2a1e', 0.4, 0.05, 0.4, x, y, z); },
+  sack(b, x, z, ly = 0) { this.put(b, GEO.sphLo, '#d9c58f', 0.32, 0.4, 0.28, x, ly, z); },
+  bed(b, x, z, ry = 0, col = '#4f7ca8') { const g = new THREE.Group(); g.position.set(x, this.F, z); g.rotation.y = ry; g.add(M(GEO.box, '#6b4226', 1.1, 0.35, 2.1, 0, 0.27, 0)); g.add(M(GEO.box, col, 1.06, 0.14, 1.5, 0, 0.5, 0.25)); g.add(M(GEO.box, '#f4ead3', 0.8, 0.14, 0.4, 0, 0.52, -0.75)); g.add(M(GEO.box, '#5a3a22', 1.15, 0.8, 0.08, 0, 0.45, -1.06)); b.g.add(g); },
+  window(b) { /* inner frames come from building() */ },
+
+  sheriff(b) { if (!b) return;
+    this.rug(b, 0, -0.3, 3.2, 2.2, '#8a3b3b');
+    this.chair(b, 0, -2.6, 0); this.put(b, GEO.box, '#f4ead3', 0.5, 0.01, 0.35, -0.5, 0.92, -1.25, { ry: 0.2 }); this.put(b, GEO.box, '#f4ead3', 0.3, 0.01, 0.4, 0.6, 0.92, -1.1, { ry: -0.3 }); this.put(b, GEO.cyl, '#e6dcc5', 0.06, 0.1, 0.06, 0.2, 0.9, -1.4); this.candle(b, -0.9, 0.9, -1.55);
+    // jail cell: cot, bucket, cross bars and a side wall of bars
+    this.put(b, GEO.box, '#5a3a22', 0.8, 0.3, 1.25, 3.2, 0.1, -2.5); this.put(b, GEO.box, '#9a8f7a', 0.75, 0.08, 1.15, 3.2, 0.4, -2.5); this.put(b, GEO.cyl, '#6b6b6b', 0.15, 0.25, 0.15, 1.75, 0, -3.0);
+    for (const y of [0.15, 1.2, 2.85]) this.put(b, GEO.box, '#555', 2.5, 0.05, 0.05, 2.5, y, -1.8);
+    for (let i = 0; i < 5; i++) this.put(b, GEO.cyl, '#555', 0.03, 2.6, 0.03, 1.3, 0.25, -2.0 - i * 0.3);
+    // gun rack with two rifles, wanted board, gun cabinet, filing cabinet, map, stove, coat rack
+    this.put(b, GEO.box, '#6b4226', 1.4, 0.9, 0.08, -2.3, 1.2, -3.15); for (const k of [-0.4, 0.1]) { this.put(b, GEO.box, '#3b2a1e', 0.06, 1.0, 0.08, -2.3 + k, 1.15, -3.08, { rz: 0.06 }); this.put(b, GEO.box, '#4a4a4a', 0.03, 0.55, 0.05, -2.3 + k, 1.55, -3.04); }
+    this.put(b, GEO.box, '#5a3a22', 0.9, 1.8, 0.5, -3.0, 0, -2.85, { col: true }); this.put(b, GEO.box, '#3c5a6e', 0.7, 1.2, 0.02, -3.0, 0.45, -2.59);
+    this.put(b, GEO.box, '#6b6b5a', 0.6, 1.3, 0.55, -1.6, 0, -2.88, { col: true }); for (const y of [0.25, 0.65, 1.05]) this.put(b, GEO.box, '#cfc4a0', 0.15, 0.04, 0.02, -1.6, y, -2.6);
+    this.frame(b, 3.64, 1.8, 0.9, -Math.PI / 2, 1.3, 0.9, '#d9c58f'); this.stove(b, 3.15, 1.9); this.lamp(b, 0, -0.8);
+    { const x = -3.3, z = 2.6; this.put(b, GEO.cyl, '#5a3a22', 0.04, 1.75, 0.04, x, 0, z); this.put(b, GEO.cyl, '#5a3a22', 0.22, 0.04, 0.22, x, 0, z); this.put(b, GEO.cyl, '#2b2b2b', 0.24, 0.05, 0.24, x, 1.72, z); this.put(b, GEO.cyl, '#2b2b2b', 0.13, 0.12, 0.13, x, 1.76, z); }
+  },
+  store(b) { if (!b) return;
+    this.rug(b, 0, 1.4, 4, 2.2, '#4f6b8a');
+    for (const [x, z] of [[-4.3, 0.2], [-4.3, 0.7], [-3.85, 0.45]]) this.sack(b, x, z); this.sack(b, -4.1, 0.45, 0.35);
+    this.crate(b, 4.3, -0.4, 0.7, 0, false); this.crate(b, 4.3, -0.4, 0.5, 0.7, false); this.crate(b, 3.6, -0.7, 0.6, 0, false); // no collision: Mae's way out from behind the counter runs past here
+    this.table(b, 2.4, 1.6, 1.4, 0.8); for (let k = 0; k < 5; k++) this.put(b, k % 2 ? GEO.cyl : GEO.box, ['#c8443a', '#e9c46a', '#4f7ca8', '#9dbf8a', '#f4ead3'][k], 0.14, 0.18, 0.14, 1.9 + k * 0.25, 0.75, 1.6);
+    for (let k = 0; k < 3; k++) this.put(b, GEO.cyl, '#cfe6ef', 0.1, 0.24, 0.1, -2.2 + k * 0.3, 0.88, -1.2, { mat: { transparent: true, opacity: 0.75 } }); // candy jars on the counter
+    this.put(b, GEO.cyl, '#b0a070', 0.18, 0.04, 0.18, 2.6, 0.88, -1.2); this.put(b, GEO.box, '#8b5a2b', 0.12, 0.25, 0.12, 2.6, 0.92, -1.2); // scale
+    for (let k = 0; k < 4; k++) this.put(b, GEO.cyl, '#3b3b3b', 0.22, 0.03, 0.22, -4.62, 1.8 + (k % 2) * 0.35, -1.6 + k * 0.6, { rz: Math.PI / 2 }); // pans on the wall
+    this.shelf(b, 4.5, 1.2, -Math.PI / 2, 2.2); this.lamp(b, -1.5, 0.6); this.lamp(b, 1.8, 0.6);
+    this.frame(b, 0, 2.55, -3.62, 0, 2.2, 0.45, '#e9c46a');
+  },
+  saloon(b) { if (!b) return;
+    this.put(b, GEO.box, '#b8c8d0', 3.2, 0.8, 0.02, 0, 2.55, -4.66); this.put(b, GEO.box, '#5a3a22', 3.4, 0.08, 0.04, 0, 3.37, -4.65); // mirror over the back bar
+    for (let k = 0; k < 5; k++) { const x = -3 + k * 1.5; this.put(b, GEO.cyl, '#5a3a22', 0.04, 0.7, 0.04, x, 0, -1.85); this.put(b, GEO.cyl, '#8b3b3b', 0.2, 0.07, 0.2, x, 0.7, -1.85); }
+    for (const tx of [-3, 3]) { for (let k = 0; k < 4; k++) this.put(b, GEO.box, '#f4ead3', 0.08, 0.005, 0.12, tx - 0.25 + k * 0.17, 0.83, 2 + (k % 2) * 0.1, { ry: k * 0.4 }); for (let k = 0; k < 3; k++) this.put(b, GEO.cyl, ['#c8443a', '#f4ead3', '#2b2b2b'][k], 0.05, 0.03 + k * 0.02, 0.05, tx + 0.25, 0.82, 1.85 + k * 0.08); this.put(b, GEO.cyl, '#cfa040', 0.05, 0.14, 0.05, tx - 0.35, 0.82, 2.25, { mat: { transparent: true, opacity: 0.8 } }); }
+    { const x = 0, z = 0.8, y = 2.9; this.put(b, GEO.cyl, '#2b2b2b', 0.02, 0.45, 0.02, x, y + 0.4, z); this.put(b, GEO.cyl, '#3b2a1e', 0.75, 0.06, 0.75, x, y, z); for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; this.candle(b, x + Math.cos(a) * 0.62, y + 0.06, z + Math.sin(a) * 0.62); } }
+    this.put(b, GEO.box, '#5a3a22', 0.6, 0.45, 0.35, -5, 0, 2.0); // piano stool
+    for (const [x, z] of [[-5.3, -1.5], [2.0, 3.6], [-1.6, 3.6]]) this.put(b, GEO.cyl, '#b08a3a', 0.18, 0.25, 0.18, x, 0, z);
+    { const x = -5.64, y = 2.4, z = -1.0; this.put(b, GEO.box, '#5a3a22', 0.05, 0.4, 0.3, x, y, z); for (const s of [-1, 1]) { this.put(b, GEO.box, '#e6dcc5', 0.05, 0.5, 0.05, x + 0.05, y + 0.35, z + s * 0.25, { rx: s * 0.6 }); this.put(b, GEO.box, '#e6dcc5', 0.05, 0.3, 0.05, x + 0.05, y + 0.55, z + s * 0.45, { rx: s * 1.1 }); } } // antlers
+    this.frame(b, 5.64, 1.9, 1.2, -Math.PI / 2, 1.4, 0.9, '#c97b5a'); this.frame(b, 5.64, 1.9, -2.0, -Math.PI / 2, 0.8, 1.0, '#6a7fb0');
+    this.barrel(b, 4.9, -3.6, false); this.barrel(b, 5.3, -2.9, false); // decorative: Cora walks round the end of the bar this.lamp(b, -3.5, -2.6, 2.95); this.lamp(b, 3.5, -2.6, 2.95);
+  },
+  mae(b) { if (!b) return; // door N: the back wall is +z
+    this.rug(b, 0.3, 0.3, 2.4, 1.8, '#9dbf8a', '#c97b5a'); this.table(b, 1.6, -0.6, 1.2, 0.8); this.chair(b, 1.0, -0.6, Math.PI / 2); this.chair(b, 2.25, -0.6, -Math.PI / 2);
+    this.put(b, GEO.cyl, '#4f7ca8', 0.08, 0.18, 0.08, 1.6, 0.75, -0.6); this.put(b, GEO.sphLo, '#e9c46a', 0.12, 0.1, 0.12, 1.6, 0.93, -0.6); this.stove(b, -2.75, -2.1);
+    this.shelf(b, 3.0, 0.6, -Math.PI / 2, 1.4, ['#f4ead3', '#cfe6ef', '#f4ead3', '#c8443a'], 2, 1.3); this.frame(b, -1.0, 1.75, 2.64, Math.PI, 0.7, 0.9, '#d9a07a'); this.lamp(b, 0, 0);
+  },
+  doc(b) { if (!b) return; // door N
+    this.shelf(b, -3.5, -1.6, Math.PI / 2, 1.6, ['#cfe6ef', '#9b1c1c', '#4f7ca8', '#e9c46a', '#cfe6ef'], 3, 0.9);
+    this.put(b, GEO.box, '#f4ead3', 0.6, 0.85, 0.45, 3.3, 0, -1.6, { col: true }); this.put(b, GEO.cyl, '#e6e6e6', 0.22, 0.08, 0.22, 3.3, 0.85, -1.6); this.frame(b, 3.62, 1.7, -1.6, -Math.PI / 2, 0.5, 0.7, '#cfe6ef');
+    for (let k = 0; k < 3; k++) this.put(b, GEO.box, '#e6dcc5', 0.75, 1.5, 0.03, -0.05 + (k - 1) * 0.0, 0, 1.0 + (k - 1) * 0.72, { ry: Math.PI / 2 + (k % 2 ? 0.35 : -0.35) }); // folding screen between the cots
+    this.frame(b, 0, 1.9, 3.14, Math.PI, 1.0, 0.7, '#f4ead3'); this.put(b, GEO.cyl, '#b0a070', 0.06, 0.04, 0.06, -3.3, 1.05, 2.2); this.lamp(b, 0, -0.5);
+  },
+  boarding(b) { if (!b) return; // door N
+    for (const x of [-2.5, 2.5]) this.put(b, GEO.box, '#6b4226', 0.45, 0.55, 0.4, x + (x < 0 ? 0.95 : -0.95), 0, 2.4);
+    this.candle(b, -1.55, 0.55, 2.4); this.put(b, GEO.box, '#7a5232', 0.6, 0.8, 0.45, 3.3, 0, -1.7, { col: true }); this.put(b, GEO.cyl, '#cfe6ef', 0.22, 0.08, 0.22, 3.3, 0.8, -1.7);
+    this.chair(b, -3.2, -1.7, Math.PI / 2); this.rug(b, 0, 0, 2, 1.4, '#8a6a4a'); for (let k = 0; k < 3; k++) this.put(b, GEO.box, '#3b2a1e', 0.05, 0.05, 0.12, -1 + k * 0.5, 1.75, 2.62); this.lamp(b, 0, 0.2);
+  },
+  farmhouse(b) { if (!b) return; // door S
+    this.bed(b, 2, 1.5, 0, '#c97b5a'); // the second bed (Nell's)
+    this.table(b, -0.2, -0.8, 1.4, 0.9); this.chair(b, -0.9, -0.8, Math.PI / 2); this.chair(b, 0.5, -0.8, -Math.PI / 2); this.stove(b, 3.1, -2.4); this.rug(b, 0, 0.5, 2.2, 1.6, '#c8443a');
+    this.shelf(b, -3.5, -1.5, Math.PI / 2, 1.4, ['#f4ead3', '#e9c46a', '#d9c58f'], 2, 1.2); this.barrel(b, -3.2, 2.7); this.lamp(b, 0, -0.5);
+  },
+  barn(b) { if (!b) return; // rough: hay, stalls, tools
+    for (const [x, z, ly] of [[-4, -3.2, 0], [-3, -3.4, 0], [-3.5, -3.3, 0.6], [4, -3.4, 0]]) this.put(b, GEO.box, '#e0c068', 1.0, 0.6, 0.6, x, ly, z, { col: ly === 0, cover: true });
+    for (let k = 0; k < 3; k++) this.put(b, GEO.box, '#6b4226', 0.1, 1.2, 2.2, 1.0 + k * 1.4, 0, -2.6);
+    this.put(b, GEO.box, '#6b4226', 0.05, 1.4, 0.05, -4.5, 0, 1.0, { rz: 0.2 }); this.put(b, GEO.box, '#888', 0.3, 0.05, 0.02, -4.35, 1.4, 1.0); this.barrel(b, 4.2, 2.6);
+  },
+  mill(b) { if (!b) return;
+    this.crate(b, -4.5, -3.0, 0.8); this.crate(b, -3.6, -3.2, 0.7); this.crate(b, -4.1, -3.1, 0.6, 0.8, false); for (const [x, z] of [[4.6, -3.2], [4.1, -3.4], [4.4, -2.6]]) this.sack(b, x, z);
+    this.put(b, GEO.cyl, '#7d6650', 1.1, 0.2, 1.1, 0, 0, -2.6, { col: true }); this.put(b, GEO.cyl, '#5a3a22', 0.12, 1.6, 0.12, 0, 0.2, -2.6); this.table(b, 3.5, 1.5, 1.2, 0.7, '#5a3a22'); this.lamp(b, 0, 0.5, 2.9);
+  },
+  cabin(b) { if (!b) return; // Eli's cabin: keep the clue spots (overturned table, floorboard) clear
+    this.bed(b, -1.6, 1.3, Math.PI / 2, '#6b5a4a'); this.stove(b, 2.1, -1.5); this.shelf(b, 2.45, 0.5, -Math.PI / 2, 1.0, ['#d9c58f', '#f4ead3', '#8b6a47'], 1, 1.3); this.put(b, GEO.box, '#e6dcc5', 0.6, 0.01, 0.45, 0.4, 0.012, 1.0, { ry: 0.5 });
+  },
+};
 
 /* ===== Story: cast, reactive dialogue, missions, encounters =====
    Hollow Pines — five chapters. Wren Calloway comes home to Juniper Gap because her brother Eli, a railroad
@@ -2882,7 +3006,7 @@ const Encounters = {
     ] }, thanks: { text: 'I won\'t forget this. If you\'re ever in the saloon, the first drink is mine. And I keep my eyes open.' }, bye: { text: 'I... see. Well. Good day.' } };
   },
   craneAmbush() { S.flags.lastAmbushDay = S.time.day; const P = Game.player; UI.toast('"There\'s Calloway!" Crane riders!', 'bad');
-    for (let i = 0; i < 2; i++) { const a = P.yaw + (i ? 0.6 : -0.6), x = P.pos.x + Math.sin(a) * 32, z = P.pos.z + Math.cos(a) * 32; const n = NPC.spawn({ key: 'crane_amb' + i, name: 'Crane gunman', x, z, look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b' }, lawful: false, group: 'crane_r', gun: 'revolver', hp: 80, maxHp: 80, tags: ['generic', 'random'], wild: true, fleeHp: 20, accuracy: 0.35 }); n.fightPlayer(); setTimeout(() => { if (NPC.all.includes(n)) NPC.despawn(n); }, 180000); } },
+    for (let i = 0; i < 2; i++) { const a = P.yaw + (i ? 0.6 : -0.6), x = P.pos.x + Math.sin(a) * 32, z = P.pos.z + Math.cos(a) * 32; const n = Riders.spawnRider({ key: 'crane_amb' + i, name: 'Crane gunman', look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b' }, lawful: false, group: 'crane_r', gun: 'revolver', hp: 80, maxHp: 80, tags: ['generic', 'random'], fleeHp: 20, accuracy: 0.35 }, 'chase', x, z, a + Math.PI); n.hostileToPlayer = true; n.anim.expr = 'angry'; /* they ride in */ setTimeout(() => { if (NPC.all.includes(n)) NPC.despawn(n); }, 180000); } },
 };
 
 /* ===== Chapter 4: Night at Willow Bridge =====
@@ -2980,8 +3104,9 @@ const CH4 = {
   learnEli() { if (S.evidence.eli_alive) return; S.evidence.eli_alive = true; journal('Eli is alive. Vane is holding him at Survey Camp 3, Tamarack Pass, until the survey is finished.', 'evidence'); UI.toast('Eli is alive', 'good'); },
   listenEnter(ctx) { const c = ctx.m.c; const pk = NPC.byKey('pike'); if (pk) pk.sense = 0.6; // eyes on Vane now, not the road
     c.lineI = c.lineI || 0; c.lineT = 1.2; c.sus = 0; c.heard = c.heard || 0; c.total = this.lines().length; STORY.hint('Crouch and creep within earshot. Vane and Pike stop talking if you\'re too far away to hear.'); },
+  distractTick(dt, c) { if (c.distractT > 0) { c.distractT -= dt; if (c.distractT <= 0 && this._distract) { this._distract(); this._distract = null; } } },
   listenUpdate(dt, ctx) {
-    const c = ctx.m.c, P = Game.player, v = NPC.byKey('vane'), pk = NPC.byKey('pike'); if (!v || c.fight || c.done) return; const L = this.lines();
+    this.distractTick(dt, ctx.m.c); const c = ctx.m.c, P = Game.player, v = NPC.byKey('vane'), pk = NPC.byKey('pike'); if (!v || c.fight || c.done) return; const L = this.lines();
     if (c.lineI < L.length) {
       if (v.distP < this.HEAR) { c.farT = 0; c.lineT -= dt; if (c.lineT <= 0) { const [who, txt, fx] = L[c.lineI]; const sp = who === 'v' ? v : pk; if (sp && sp.alive) sp.say(txt, 4.4); c.heard++; if (fx) fx(); c.lineI++; c.lineT = 4.6; if (c.lineI >= L.length) c.over = 1; } }
       else { c.farT = (c.farT || 0) + dt; if (c.farT > 6 && !c.farHint) { c.farHint = 1; UI.toast('Too far to make out what they\'re saying. Get closer.', ''); } }
@@ -3000,9 +3125,9 @@ const CH4 = {
   },
   dutchyDistract(d) {
     const c = this.c(); c.dutchyUsed = 1; d.say('Leave it to me.', 3); d.goTo = { x: MEET.x + 30, z: MEET.z + 16 };
-    setTimeout(() => { if (Missions.active !== 'ch4' || c.fight) return; UI.toast('Horses screaming east of the bridge. Vane\'s men run to them.', 'good');
+    c.distractT = 4; this._distract = () => { if (Missions.active !== 'ch4' || c.fight) return; UI.toast('Horses screaming east of the bridge. Vane\'s men run to them.', 'good');
       for (const n of NPC.all) if (n.group === 'rail4' && n.alive && !n.downed && n.state === 'patrol') { n.state = 'scripted'; n.away = 45; n.script = (dt, me) => { me.moveTo(MEET.x + 34, MEET.z + 12, 4.2, dt, 2); me.away -= dt; if (me.away <= 0) { me.state = 'patrol'; me.script = null; } }; }
-      NPC.despawn(d); }, 4000);
+      NPC.despawn(d); }; // runs on game time from the stage updates
   },
 
   /* ---------- stage 4: settle it ---------- */
@@ -3056,7 +3181,7 @@ const CH4 = {
     else if (v && !c.done) v.say('We\'re done here, Amos.', 2);
   },
   confrontUpdate(dt, ctx) {
-    const c = ctx.m.c; if (c.done) return;
+    const c = ctx.m.c; this.distractTick(dt, c); if (c.done) return;
     if (c.fight) { if (NPC.all.filter(n => n.tags.includes('ch4foe')).every(n => !n.alive || n.downed || n.fled)) this.resolve('fight'); return; }
     if (this.distMeet() > this.LEAVE) this.resolve(S.evidence.ledger ? 'stole' : 'walked');
   },
@@ -3359,12 +3484,14 @@ const SIDE = {
     const t = NPC.spawn({ key: 'bgen_' + a.id, name: a.name, x: h.x, z: h.z, lawful: false, group: 'bgen', state: 'patrol', gun: a.kind === 'brawler' ? null : (a.gun || 'revolver'), hp: a.hp || 90, maxHp: a.hp || 90, accuracy: 0.4, wild: true, tags: ['bounty', 'bgen', 'generic'], look: a.look, route: [{ x: h.x, z: h.z, wait: 14 }, { x: h.x + 5, z: h.z + 3, wait: 6 }], fists: a.kind === 'brawler' });
     t.loot = () => { this.bs().active && (this.bs().active.proof = true); UI.toast(`Took ${a.name}'s gun belt as proof`); };
     if (a.kind === 'sleeper') { t.state = 'scripted'; t.sleepy = true; t.sense = 0.25; t.script = (dt, me) => { me.sp = 0; me.anim.expr = 'calm'; }; }
-    if (a.kind === 'runner') t.onPatrol = (dt, me) => { if (me.seesPlayer && me.distP < 22 && !me._ran) this.run(me); };
+    if (a.kind === 'runner') { t.onPatrol = (dt, me) => { if (me.seesPlayer && me.distP < 22 && !me._ran) this.run(me); }; for (const hh of Riders.horses.filter(x => x.bountyHorse)) hh.remove(); const hr = new NPCHorse(h.x + 3, h.z + 2, 0); hr.bountyHorse = true; hr.tethered = true; t.horse = hr; } // runners keep a horse saddled
     for (let i = 0; i < a.gang; i++) { const ang = i / Math.max(1, a.gang) * TAU; NPC.spawn({ key: `bgen_g${i}`, name: 'Outlaw', x: h.x + Math.cos(ang) * 6, z: h.z + Math.sin(ang) * 6, lawful: false, group: 'bgen', state: 'patrol', gun: 'revolver', hp: 80, maxHp: 80, fleeHp: 20, accuracy: 0.38, wild: true, tags: ['bgen', 'generic'], look: { skin: '#e8b48c', shirt: pick(['#5a3a2a', '#3b3b5b', '#4a6a4a']), hair: '#3b2a1e', hatColor: '#2b2b2b' }, route: [{ x: h.x + Math.cos(ang) * 6, z: h.z + Math.sin(ang) * 6, wait: 9 }, { x: h.x + Math.cos(ang + 1) * 10, z: h.z + Math.sin(ang + 1) * 10, wait: 6 }] }); }
     this._fires = this._fires || {}; if (!this._fires[h.id]) { this._fires[h.id] = 1; World.campfire(h.x + 2, h.z - 2); }
   },
   run(me) { // runners bolt the moment they see you, then turn and fight if you catch up
-    me._ran = 1; me.say(pick(['Not today, lawdog!', 'You ain\'t taking me in!']), 3); me.state = 'scripted'; let t = 0;
+    me._ran = 1; me.say(pick(['Not today, lawdog!', 'You ain\'t taking me in!']), 3);
+    if (me.horse && me.horse.alive && !me.horse.rider && Riders.horses.includes(me.horse) && me.horse.pos.distanceTo(me.pos) < 12) { Riders.mount(me, me.horse); me.rideMode = 'flee'; me.onEscape = () => { const b = this.bs(); if (b.active) b.active.fled = true; }; return; } // on horseback: shoot the horse to throw them
+    me.state = 'scripted'; let t = 0;
     me.script = (dt, x) => { t += dt; const P = Game.player, a = Math.atan2(x.pos.x - P.pos.x, x.pos.z - P.pos.z); x.moveTo(x.pos.x + Math.sin(a) * 6, x.pos.z + Math.cos(a) * 6, 5.4, dt); if (x.distP < 3.5 || t > 22) { x.script = null; x.fightPlayer(!x.gun); } if (x.distP > 140) { const b = this.bs(); if (b.active) b.active.fled = true; } };
   },
   turnIn(alive) {
@@ -3374,7 +3501,7 @@ const SIDE = {
   },
   bountyComplete(ctx) {
     const b = this.bs(), q = b.active, a = this.outlaw(q.o); ctx.m.outcome = `Brought ${a.name} in ${q.turnedIn} ($${q.turnedIn === 'alive' ? a.alive : a.dead})`;
-    b.done++; b.recent = b.recent.concat(q.o).slice(-3); b.active = null; ctx.m.status = 'locked'; for (const n of NPC.all.slice()) if (n.tags.includes('bgen')) NPC.despawn(n); // repeatable: the next poster reuses this mission
+    b.done++; b.recent = b.recent.concat(q.o).slice(-3); b.active = null; for (const hh of Riders.horses.filter(x => x.bountyHorse)) hh.remove(); ctx.m.status = 'locked'; for (const n of NPC.all.slice()) if (n.tags.includes('bgen')) NPC.despawn(n); // repeatable: the next poster reuses this mission
   },
 
   /* ---------- road encounters ---------- */
@@ -3571,6 +3698,102 @@ Object.assign(SIDE, {
   },
 });
 
+/* ===== Riders: NPCs on horseback =====
+   RDR2-style mounted enemies: posses ride after you when you're wanted out in the country, bounty runners flee on
+   horseback, ambushers ride in. Riders shoot from the saddle; shooting the rider drops them, shooting the horse throws
+   them. Riderless horses bolt, then wander off. (Weather effects on play live in Sky and Person.perceive.) */
+class NPCHorse {
+  constructor(x, z, yaw, color = pick(['#4b3a2a', '#7a5232', '#2b2018', '#a0673a', '#d9c7a3'])) {
+    this.rig = makeQuad({ type: 'horse', color, dark: '#2b1d14', mane: '#2b1d14', tail: '#2b1d14', muzzle: '#5a4030', scale: 0.98 }); this.rig.saddle.visible = true; Game.scene.add(this.rig.root);
+    this.anim = new QuadAnimator(this.rig, this); this.pos = new THREE.Vector3(x, Col.ground(x, z, 99), z); this.yaw = yaw || 0; this.speed = 0; this.gait = 'walk'; this.turnRate = 0;
+    this.alive = true; this.hp = 150; this.hitR = 0.7; this.hitH = 1.05; // body sphere stops at the saddle, so shots at the rider hit the rider
+    this.isMount = true; this.rider = null; this.t = 0; this.fleeT = 0; HURTABLE.push(this); Riders.horses.push(this);
+  }
+  seat() { const p = new THREE.Vector3(); this.rig.seat.getWorldPosition(p); return p; }
+  steer(tx, tz, want, dt) { // limited turn rate and acceleration, like a real horse; mud slows it down
+    const a = Math.atan2(tx - this.pos.x, tz - this.pos.z), d = angDiff(this.yaw, a), maxT = (this.speed > 8 ? 1.4 : 2.4) * dt; const turn = clamp(d * (1 - Math.exp(-3 * dt)), -maxT, maxT); this.yaw += turn; this.turnRate = turn / Math.max(dt, 1e-4);
+    const top = want * (1 - Sky.wet * 0.18); this.speed = damp(this.speed, Math.abs(d) > 1.6 ? Math.min(top, 3) : top, top > this.speed ? 1.5 : 2.5, dt); this.move(dt);
+  }
+  move(dt) {
+    const f = fwd(this.yaw); this.pos.x += f.x * this.speed * dt; this.pos.z += f.z * this.speed * dt;
+    if (Col.resolve(this.pos, 0.55, this.pos.y, 1.6)) this.speed *= 0.85; if (WORLD.waterY - Terrain.height(this.pos.x, this.pos.z) > 1.4) this.speed = Math.min(this.speed, 2.6);
+    this.pos.x = clamp(this.pos.x, -WORLD.half + 8, WORLD.half - 8); this.pos.z = clamp(this.pos.z, -WORLD.half + 8, WORLD.half - 8); this.pos.y = damp(this.pos.y, Col.ground(this.pos.x, this.pos.z, this.pos.y + 1), 14, dt);
+    this.gait = this.speed < 3.2 ? 'walk' : this.speed < 6.4 ? 'trot' : this.speed < 10.5 ? 'canter' : 'gallop';
+  }
+  takeHit(o) {
+    if (!this.alive) return; FX.impact({ x: this.pos.x, y: this.pos.y + this.hitH, z: this.pos.z }, 'blood'); this.hp -= o.dmg; Sfx.neigh && Sfx.neigh();
+    if (this.hp <= 0) { this.alive = false; this.speed = 0; if (o.from && o.from.isPlayer) Rep.honor(-1); if (this.rider) Riders.throwRider(this.rider, true); }
+  }
+  update(dt) {
+    this.t += dt; const P = Game.player, dP = Math.hypot(P.pos.x - this.pos.x, P.pos.z - this.pos.z); this.distP = dP;
+    if (!this.alive) { this.anim.update(dt, { speed: 0, dead: 1 }); this.rig.root.position.copy(this.pos); this.rig.root.rotation.y = this.yaw; if (dP > 170) this.remove(); return; }
+    if (!this.rider && this.tethered) { this.speed = 0; } // a saddled horse waiting for its owner stays put
+    else if (!this.rider) { // riderless: bolt for a few seconds, then graze; disappear once far away
+      this.fleeT -= dt; if (this.fleeT > 0) { const a = this.yaw; this.steer(this.pos.x + Math.sin(a) * 10, this.pos.z + Math.cos(a) * 10, 9, dt); } else { this.speed = damp(this.speed, 0, 2, dt); this.move(dt); }
+      if (dP > 160) { this.remove(); return; }
+    }
+    if (this.speed > 6 && this.speed > 0) { this.dustT = (this.dustT || 0) - dt; if (this.dustT <= 0) { this.dustT = 0.09; const b = fwd(this.yaw); FX.puff(this.pos.x - b.x * 0.9, this.pos.y + 0.15, this.pos.z - b.z * 0.9, { color: Sky.wet > 0.4 ? 0x7d6646 : 0xc9b48a, n: 1, size: 0.55, life: 1.0, rise: 0.35, burst: 0.3, op: 0.4, grow: 2.4 }); } }
+    this.anim.update(dt, { speed: this.speed, gait: this.gait, roll: -this.turnRate * 0.03 * clamp(this.speed / 8, 0, 1), graze: !this.rider && this.speed < 0.3 ? 1 : 0 });
+    this.rig.root.position.copy(this.pos); this.rig.root.rotation.y = this.yaw; const cp = Game.cam.pos; this.rig.root.visible = (this.pos.x - cp.x) ** 2 + (this.pos.z - cp.z) ** 2 < 150 * 150;
+  }
+  remove() { Game.scene.remove(this.rig.root); const i = HURTABLE.indexOf(this); if (i >= 0) HURTABLE.splice(i, 1); Riders.horses = Riders.horses.filter(h => h !== this); if (this.rider) { this.rider.mount = null; } }
+}
+
+const Riders = {
+  horses: [], posseCD: 0,
+  mount(n, horse) { n.mount = horse; horse.rider = n; horse.tethered = false; n.prevState = n.state; n.state = 'ride'; n.path = null; if (n.gunM && n.gun) n.gunM.visible = true; },
+  spawnRider(cfg, mode, x, z, yaw) { const h = new NPCHorse(x, z, yaw); const n = NPC.spawn(Object.assign({ x, z, wild: true }, cfg)); this.mount(n, h); n.rideMode = mode; n.shootT = rand(1.5, 2.5); return n; },
+  throwRider(n, stun) { // off the horse: thrown riders are stunned on the ground (a bounty can then be hogtied); dead ones just fall
+    const h = n.mount; if (!h) return; h.rider = null; h.fleeT = 6; n.mount = null; const s = fwd(h.yaw + Math.PI / 2); n.pos.set(h.pos.x + s.x * 1.2, Col.ground(h.pos.x + s.x * 1.2, h.pos.z + s.z * 1.2, 99), h.pos.z + s.z * 1.2);
+    if (!n.alive) { n.state = 'dead'; return; } if (n.downed) { n.state = 'down'; return; }
+    if (stun) { n.knockdown(); if (!n.tags.includes('bounty') && !n.tags.includes('outlaw')) n.downT = 4; UI.toast(`${n.name} was thrown from the saddle`, 'good'); return; }
+    n.state = 'combat'; n.fightPlayer(!n.gun);
+  },
+  ai(n, dt) { // runs from Person.update while n.state === 'ride'
+    const h = n.mount; if (!h || !h.alive) { n.state = 'combat'; n.mount = null; return; }
+    const P = Game.player, d = n.distP || 0; let tx = h.pos.x, tz = h.pos.z, want = 0;
+    if (n.rideMode === 'chase') { // close in, then ride alongside at pistol range
+      if (n.lawman && !S.wanted) n.rideMode = 'leave';
+      const side = n.flankSide || (n.flankSide = Math.random() < 0.5 ? -1 : 1), r = fwd(Math.atan2(P.pos.x - h.pos.x, P.pos.z - h.pos.z) + Math.PI / 2);
+      if (d > 22) { tx = P.pos.x; tz = P.pos.z; want = 11.5; } else { tx = P.pos.x + r.x * side * 10; tz = P.pos.z + r.z * side * 10; want = P.state === 'ride' ? Math.max(4, Game.horse.speed) : 4; }
+    } else if (n.rideMode === 'flee') { const a = Math.atan2(h.pos.x - P.pos.x, h.pos.z - P.pos.z); tx = h.pos.x + Math.sin(a) * 20; tz = h.pos.z + Math.cos(a) * 20; want = d < 120 ? 12 : 6; if (d > 160 && n.onEscape) { n.onEscape(n); n.onEscape = null; }
+    } else if (n.rideMode === 'leave') { tx = -40; tz = 20; want = 7; if (d > 150) { this.despawnRider(n); return; }
+    } else if (n.rideMode === 'travel' && n.dest) { tx = n.dest.x; tz = n.dest.z; want = n.destSpeed || 5; if (Math.hypot(tx - h.pos.x, tz - h.pos.z) < 4) want = 0; }
+    h.steer(tx, tz, want, dt);
+    const seat = h.seat(); n.pos.set(seat.x, seat.y - (n.rig.isModel ? 0.24 : 0.62), seat.z); n.yaw = h.yaw; n.sp = 0;
+    // shooting from the saddle
+    n.allyAim = false;
+    if ((n.hostileToPlayer || (n.lawman && S.wanted)) && n.rideMode === 'chase' && P.alive && d < 40) {
+      n.allyAim = true; n.anim.layers.aim = 1; n.face(P.pos); n.shootT -= dt;
+      if (n.shootT <= 0 && n.seesPlayer) { n.shootT = rand(1.6, 2.8); const m = new THREE.Vector3(); n.rig.R.hand.getWorldPosition(m);
+        const acc = n.accuracy * 0.65 * (d < 12 ? 1.2 : d > 25 ? 0.55 : 1) * (P.state === 'ride' ? 0.75 : 1) * Sky.visMul(); const hit = Math.random() < acc;
+        const tgt = new THREE.Vector3(P.pos.x + (hit ? 0 : rand(-2, 2)), P.pos.y + (hit ? 1.2 : rand(-0.2, 1.8)), P.pos.z + (hit ? 0 : rand(-2, 2))); if (!hit && tgt.y < P.pos.y + 0.6) tgt.y = Terrain.height(tgt.x, tgt.z);
+        FX.tracer(m, tgt, hit ? 'none' : 'auto'); Sfx.shot(n.gun === 'rifle'); n.anim.play('recoil'); if (hit) P.hurt(n.dmg, n, 'gun'); }
+    }
+  },
+  despawnRider(n) { const h = n.mount; if (h) { h.rider = null; h.remove(); } NPC.despawn(n); },
+  /* ---------- the law rides out ---------- */
+  posse(dt) {
+    this.posseCD -= dt; const P = Game.player, posse = NPC.all.filter(n => n.tags.includes('posse'));
+    if (!S.wanted || this.posseCD > 0 || posse.length || Missions.active === 'ch4') return;
+    if (Math.hypot(P.pos.x + 40, P.pos.z - 20) < 75) return; // in town the deputies on foot handle it
+    this.posseCD = 90; const a = Math.atan2(-40 - P.pos.x, 20 - P.pos.z); // they ride out from Juniper Gap
+    for (let i = 0; i < 2; i++) { const x = P.pos.x + Math.sin(a + (i ? 0.25 : -0.25)) * 95, z = P.pos.z + Math.cos(a + (i ? 0.25 : -0.25)) * 95;
+      this.spawnRider({ key: 'posse' + i + '_' + Math.floor(Math.random() * 1e5), name: i ? 'Posse rider' : 'Deputy Marshal', lawful: true, lawman: true, gun: i ? 'rifle' : 'revolver', hp: 110, maxHp: 110, accuracy: 0.45, tags: ['generic', 'posse'], look: { skin: '#e8b48c', shirt: '#6b6b6b', vest: '#2b2b2b', hair: '#3b2a1e', hatColor: '#2b2b2b', badge: true } }, 'chase', x, z, a + Math.PI); }
+    UI.toast('A posse is riding out after you!', 'bad');
+  },
+  update(dt) {
+    if (!Game.running) return; this.posse(dt);
+    for (const h of this.horses.slice()) h.update(dt);
+    for (const n of NPC.all) if (n.mount && (!n.alive || n.downed)) this.throwRider(n, false); // shot out of the saddle
+  },
+};
+
+// mounted people are driven by Riders.ai; lawmen on horseback keep riding instead of switching to foot pursuit
+const _pursue = Person.prototype.pursue, _calm = Person.prototype.calm;
+Person.prototype.pursue = function () { if (this.state === 'ride') { this.rideMode = 'chase'; return; } return _pursue.call(this); };
+Person.prototype.calm = function () { if (this.state === 'ride') { this.hostileToPlayer = false; this.rideMode = 'leave'; return; } return _calm.call(this); };
+
 /* ===== UI: HUD, prompts, dialogue, panels, map, shop, camp, fishing ===== */
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -3739,7 +3962,7 @@ const UI = {
     const P = Game.player, H = Game.horse; this.setRing('hp', S.p.hp / S.p.maxHp, S.p.hpCore / 100); this.setRing('st', S.p.st / S.p.maxSt, S.p.stCore / 100);
     $('hrings').hidden = P.state !== 'ride' && H.distP > 12; this.setRing('hhp', 1, S.h.fed / 100); this.setRing('hst', S.h.st / H.maxSt(), H.bondLevel() / 4);
     $('cash').textContent = '$' + S.money.toFixed(2);
-    const h = S.time.hour, hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 15) * 15; $('clock').textContent = `Day ${S.time.day} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} · ${{ clear: 'Clear', cloudy: 'Overcast', rain: 'Rain' }[Sky.weather]}`;
+    const h = S.time.hour, hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 15) * 15; $('clock').textContent = `Day ${S.time.day} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} · ${{ clear: 'Clear', cloudy: 'Overcast', rain: 'Rain', storm: 'Thunderstorm', fog: 'Fog' }[Sky.weather]}`;
     const ob = $('objective'); if (Missions.active) { const objs = Missions.objectives().filter(o => !o.check(Missions.ctx) && !(o.optional && Missions.ctx.m.opt[o.id])); const main = objs.find(o => !o.optional) || objs[0]; ob.hidden = !main; if (main) ob.innerHTML = `<small>${esc(Missions.defs[Missions.active].title)}</small>${esc(typeof main.text === 'function' ? main.text(Missions.ctx) : main.text)}`; } else ob.hidden = true;
     const w = $('wanted'); w.hidden = !(S.wanted || S.bounty > 0); if (!w.hidden) w.textContent = S.wanted ? `WANTED · $${S.bounty.toFixed(2)}` : `Bounty $${S.bounty.toFixed(2)}`; w.style.background = S.wanted ? 'var(--brick)' : 'rgba(29,42,37,.7)';
     $('cross').hidden = !P.aiming; $('cross').classList.toggle('lock', !!(P.hover && P.hover.h)); if (P.aiming) $('cross').style.setProperty('--s', (1 + P.spread() * 45).toFixed(3)); // red over a target, wider while the spread blooms const am = $('ammo'); am.hidden = P.weapon === 'fists'; if (!am.hidden) am.textContent = P.weapon === 'revolver' ? `${S.ammoClip.revolver} | ${Inv.count('ammo_rev')}` : `${S.ammoClip.rifle} | ${Inv.count('ammo_rifle')}`;
@@ -3864,7 +4087,7 @@ const Game = {
     Sky.update(dt); P.update(dt); H.update(dt); Fishing.update(dt);
     for (const n of NPC.all) { const d = Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.update(dt, d > 110 && !n.tags.includes('story')); }
     for (const a of Animal.all) a.update(dt, a.distP > 150);
-    DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); this.wildlifeTick(dt); Dialog.update();
+    DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); Riders.update(dt); this.wildlifeTick(dt); Dialog.update();
     if (!Dialog.open && !UI.panelOpen) Interact.update(P); else UI.prompts([]);
     FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Ambient.update(dt); Terrain.waterU.uTime.value = this.time;
     // discovery

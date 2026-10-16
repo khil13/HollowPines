@@ -31,17 +31,19 @@ const Sky = {
     this.glare = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(gc), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false })); this.glare.scale.setScalar(140); scene.add(this.glare);
   },
   night() { const h = S.time.hour; return h < 5.5 || h > 20.5; },
+  raining() { return this.weather === 'rain' || this.weather === 'storm'; },
+  visMul() { return { fog: 0.45, storm: 0.6, rain: 0.75, cloudy: 0.95 }[this.weather] || 1; }, // how far people can see in this weather
   advance(hours) { S.time.hour += hours; while (S.time.hour >= 24) { S.time.hour -= 24; S.time.day++; Game.newDay(); } },
   update(dt) {
     this.advance(dt * this.RATE);
     // weather
-    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(); const k = r < 0.5 ? 'clear' : r < 0.78 ? 'cloudy' : 'rain'; S.weather.kind = k; S.weather.next = rand(3, 8); }
-    this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
-    const raining = this.weather === 'rain'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
+    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(), h0 = S.time.hour; const k = r < 0.45 ? 'clear' : r < 0.67 ? 'cloudy' : r < 0.81 ? 'rain' : r < 0.9 ? 'storm' : (h0 > 3 && h0 < 11 ? 'fog' : 'cloudy'); S.weather.kind = k; S.weather.next = rand(3, 8); }
+    this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : this.weather === 'fog' ? 0.7 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
+    const raining = this.raining(), storm = this.weather === 'storm', fog = this.weather === 'fog'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
     if (Math.abs(this.wet - (this._lw || 0)) > 0.04) { this._lw = this.wet; Terrain.setWet(this.wet); }
     const h = S.time.hour; const th = (h - 5.5) / 14.5 * Math.PI; const sy = Math.sin(th), sx = Math.cos(th); // sunrise ~5:30, sunset ~20:00 (night() and the street lamps agree)
     const day = smoothstep(-0.1, 0.22, sy); const dusk = (sy > -0.08 ? 1 - smoothstep(0.02, 0.45, sy) : 0) * (1 - this.cloud * 0.7); this.golden = dusk; // a long golden hour, RDR2-style
-    const mist = (smoothstep(4.6, 5.8, h) * (1 - smoothstep(7.4, 9.6, h)) + (this.weather === 'rain' ? 0.5 : 0)) * (1 - this.cloud * 0.3); this.mistAmt = mist;
+    const mist = (smoothstep(4.6, 5.8, h) * (1 - smoothstep(7.4, 9.6, h)) + (raining ? 0.5 : 0) + (fog ? 1.1 : 0)) * (fog ? 1 : 1 - this.cloud * 0.3); this.mistAmt = mist;
     const P = Game.player.pos; this.sun.position.set(P.x + sx * 80, P.y + Math.max(8, sy * 90), P.z + 35); this.sun.target.position.copy(P);
     this.sunM.position.set(Game.cam.pos.x + sx * 350, Game.cam.pos.y + sy * 350, Game.cam.pos.z + 140); this.sunM.visible = sy > -0.1;
     this.moonM.position.set(Game.cam.pos.x - sx * 350, Game.cam.pos.y - sy * 350, Game.cam.pos.z - 120); this.moonM.visible = sy < 0.1;
@@ -50,17 +52,19 @@ const Sky = {
     const sky = cNight.clone().lerp(cDay, day).lerp(cDusk, dusk * 0.8); const top = new THREE.Color('#0a1024').lerp(new THREE.Color('#4f9ad2').lerp(new THREE.Color('#7f8b94'), this.cloud * 0.8), day).lerp(new THREE.Color('#6a7fb0'), dusk * 0.35);
     const hor = sky.clone().lerp(new THREE.Color('#ffffff'), 0.25 * day * (1 - this.cloud * 0.5)); this.domeU.top.value.copy(top); this.domeU.hor.value.copy(hor); this.domeU.sunDir.value.set(sx, sy, 0.4); this.domeU.sunCol.value.set(dusk > 0.3 ? '#ffb070' : '#fff2cc').multiplyScalar(day * (1 - this.cloud * 0.8));
     this.dome.position.copy(Game.cam.pos); Game.scene.background = hor; Game.scene.fog.color.copy(hor).lerp(new THREE.Color('#9fb6a0'), 0.12 * day).lerp(new THREE.Color('#f0b07a'), dusk * 0.3).lerp(new THREE.Color('#e3e6e2'), mist * 0.5);
-    Game.scene.fog.density = (raining ? 0.0085 : this.cloud > 0.4 ? 0.0045 : 0.003) + mist * 0.0045 + dusk * 0.0008;
+    Game.scene.fog.density = (fog ? 0.014 : storm ? 0.011 : raining ? 0.0085 : this.cloud > 0.4 ? 0.0045 : 0.003) + mist * 0.0045 + dusk * 0.0008;
+    // thunderstorms: lightning lights up the valley, thunder rolls in a moment later
+    this.flash = Math.max(0, (this.flash || 0) - dt * 5); if (storm) { this.boltT = (this.boltT ?? rand(3, 8)) - dt; if (this.boltT <= 0) { this.boltT = rand(6, 14); this.flash = 1; this.bolts = (this.bolts || 0) + 1; setTimeout(() => Sfx.burst(70, 1.8, 0.5, 'lowpass'), rand(400, 1800)); } }
     this.mist.position.set(Game.cam.pos.x, 4.2, Game.cam.pos.z); this.mistU.uCam.value.copy(Game.cam.pos); this.mistU.uT.value += dt; this.mistU.uOp.value = Math.min(0.85, mist * 0.75 + (1 - day) * 0.12); this.mistU.uCol.value.copy(Game.scene.fog.color).lerp(new THREE.Color('#ffffff'), 0.25 * day);
-    this.glare.position.copy(this.sunM.position); this.glare.material.opacity = sy > -0.05 ? (0.08 + dusk * 0.4) * (1 - this.cloud * 0.8) : 0; this.glare.scale.setScalar(70 + dusk * 90); WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
+    this.glare.position.copy(this.sunM.position); this.glare.material.opacity = sy > -0.05 ? (0.08 + dusk * 0.4) * (1 - this.cloud * 0.8) : 0; this.glare.scale.setScalar(70 + dusk * 90); WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, storm ? 2.8 : raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
     // warm low sun and long shadows at golden hour; at night the 'sun' becomes a dim blue moonlight and the world goes properly dark
     this.sun.intensity = day * (1 - this.cloud * 0.55) * (0.95 + dusk * 0.2) + (1 - day) * 0.16; this.sun.color.set('#fff1d6').lerp(new THREE.Color('#ff8a3a'), dusk).lerp(new THREE.Color('#8fa8e0'), 1 - day); if (day < 0.2) this.sun.position.set(P.x - sx * 80, P.y + 60, P.z - 30);
-    this.hemi.intensity = 0.13 + day * 0.47; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.05 + day * 0.07;
+    this.hemi.intensity = 0.13 + day * 0.47; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.05 + day * 0.07 + this.flash * 1.4; if (this.flash > 0.05) Game.scene.background = hor.clone().lerp(new THREE.Color('#e8eeff'), this.flash * 0.8);
     this.cloudMat.color.set(raining ? '#8e979e' : '#ffffff'); for (const c of this.clouds.children) { c.position.x += dt * 1.5; if (c.position.x > 280) c.position.x = -280; c.visible = Math.random() < 2 && (c.id % 3 < 1 + this.cloud * 2); }
     this.rain.visible = raining; if (raining) { this.rain.position.set(Game.cam.pos.x, Game.cam.pos.y - 8, Game.cam.pos.z); const a = this.rain.geometry.attributes.position.array; for (let i = 0; i < a.length; i += 6) { a[i + 1] -= dt * 26; a[i + 4] -= dt * 26; if (a[i + 1] < 0) { a[i + 1] += 22; a[i + 4] += 22; } } this.rain.geometry.attributes.position.needsUpdate = true; }
     const lampOn = h > 19 || h < 6.2; for (const l of Game.lamps) l.intensity = lampOn ? 1.15 + (1 - day) * 0.6 : 0; // lanterns matter once it's dark
     // ambience
-    Sfx.bed('wind', 0.05 + clamp((P.y - 10) / 30, 0, 0.12) + this.cloud * 0.04); Sfx.bed('rain', raining ? 0.18 : 0);
+    Sfx.bed('wind', 0.05 + clamp((P.y - 10) / 30, 0, 0.12) + this.cloud * 0.04); Sfx.bed('rain', storm ? 0.28 : raining ? 0.18 : 0);
     const rd = Math.abs(P.x - riverX(P.z)); Sfx.bed('river', clamp(1 - rd / 30, 0, 1) * 0.12);
     if (this.night() && Math.random() < dt * 1.2 && !raining) Sfx.tone(rand(4200, 4800), 0.04, 0.012, 'sine');
   }
@@ -210,7 +214,7 @@ const World = {
     /* --- Rook's hideout at the ford (bounty) --- */
     const fx = riverX(-120) + 22, fz = -128; this.campfire(fx, fz, false); const tt = new THREE.Group(); tt.position.set(fx + 3, Terrain.height(fx + 3, fz - 3), fz - 3); sc.add(tt); const tc = M(GEO.cone, '#a0794f', 1.6, 1.8, 1.6, 0, 0.9, 0); tc.geometry = new THREE.ConeGeometry(1, 1, 4); tt.add(tc); Col.circle(fx + 3, fz - 3, 1.1, Terrain.height(fx + 3, fz - 3) - 1, Terrain.height(fx + 3, fz - 3) + 2, { block: true, cover: true });
     /* --- vegetation, rocks, gatherables --- */
-    this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
+    Interiors.build(); this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
     /* --- graves near the cabin: environmental story --- */
     for (let i = 0; i < 2; i++) { const gx = -158 + i * 1.6, gz = -78; const g = new THREE.Group(); g.position.set(gx, Terrain.height(gx, gz), gz); sc.add(g); g.add(M(GEO.box, '#8b6a47', 0.1, 1.0, 0.1, 0, 0.5, 0)); g.add(M(GEO.box, '#8b6a47', 0.6, 0.1, 0.1, 0, 0.75, 0)); g.add(M(GEO.box, '#7a6a52', 0.7, 0.15, 1.6, 0, 0.07, 0.9)); }
     Interact.add({ pos: () => ({ x: -157.2, y: Terrain.height(-157, -78), z: -78 }), r: 1.8, opts: () => [{ label: 'Read grave markers', fn: () => { UI.banner('Hollow Cabin', 'Two markers', '"T. Ashby, homesteader. Sold to the railroad, never left." The ground is older than Eli\'s visit. Someone else lost this land first.'); if (!S.evidence.graves) { S.evidence.graves = true; journal('Two graves by Hollow Cabin. The Ashbys "sold to the railroad" and never left. Same story as the Greers, years earlier.', 'evidence'); } } }] });
@@ -352,7 +356,7 @@ const Ambient = {
     const t = Game.time, P = Game.player.pos, night = Sky.night();
     for (const c of this.birds) { c.x += Math.sin(t * 0.03 + c.r) * dt * 2; for (const b of c.list) { const a = t * c.sp + b.off; b.m.position.set(c.x + Math.cos(a) * c.r, c.h + b.dy + Math.sin(t * 2 + b.off * 9) * 0.6, c.z + Math.sin(a) * c.r); b.m.rotation.set(0, -a + (c.sp > 0 ? 0 : Math.PI), 0); b.m.scale.set(1, 1 + Math.sin(t * 9 + b.off * 30) * 0.8, 1); b.m.visible = !night; } }
     const spots = World.flowerSpots || []; for (const f of this.flies) { f.t += dt; if (!f.base || Math.hypot(f.base[0] - P.x, f.base[2] - P.z) > 40) { const near = spots.filter(s => Math.hypot(s[0] - P.x, s[2] - P.z) < 35); f.base = near.length ? pick(near) : null; } f.m.visible = !!f.base && !night && Sky.weather !== 'rain'; if (!f.m.visible) continue; f.m.position.set(f.base[0] + Math.sin(f.t * 0.7) * 1.5, f.base[1] + 0.6 + Math.abs(Math.sin(f.t * 3)) * 0.5, f.base[2] + Math.cos(f.t * 0.9) * 1.5); f.m.rotation.set(0, f.t, Math.sin(f.t * 25) * 0.9); }
-    this.ff.visible = night && Sky.weather !== 'rain'; if (this.ff.visible) { const a = this.ff.geometry.attributes.position.array; this.ffSeed.forEach(([x, y, z, ph], i) => { a[i * 3] = P.x + x + Math.sin(t * 0.4 + ph) * 1.5; a[i * 3 + 1] = Terrain.height(P.x + x, P.z + z) + y + Math.sin(t + ph) * 0.3; a[i * 3 + 2] = P.z + z + Math.cos(t * 0.3 + ph) * 1.5; }); this.ff.geometry.attributes.position.needsUpdate = true; this.ff.material.opacity = 0.5 + Math.sin(t * 3) * 0.4; }
+    this.ff.visible = night && !Sky.raining(); if (this.ff.visible) { const a = this.ff.geometry.attributes.position.array; this.ffSeed.forEach(([x, y, z, ph], i) => { a[i * 3] = P.x + x + Math.sin(t * 0.4 + ph) * 1.5; a[i * 3 + 1] = Terrain.height(P.x + x, P.z + z) + y + Math.sin(t + ph) * 0.3; a[i * 3 + 2] = P.z + z + Math.cos(t * 0.3 + ph) * 1.5; }); this.ff.geometry.attributes.position.needsUpdate = true; this.ff.material.opacity = 0.5 + Math.sin(t * 3) * 0.4; }
     // chimney smoke
     this.smokeT -= dt; if (this.smokeT <= 0 && World.chimneys) { this.smokeT = 0.35; for (const c of World.chimneys) if (Math.hypot(c.x - P.x, c.z - P.z) < 90) { const m = new THREE.Mesh(GEO.sphLo, toon('#d8d4cc', { transparent: true, opacity: 0.55 })); m.position.set(c.x, c.y, c.z); m.scale.setScalar(0.3); Game.scene.add(m); this.smoke.push({ m, life: 4 }); } }
     this.smoke = this.smoke.filter(p => { p.life -= dt; p.m.position.y += dt * 0.9; p.m.position.x += dt * 0.4 * WIND.uStrength.value; p.m.scale.setScalar(0.3 + (4 - p.life) * 0.25); p.m.material.opacity = p.life / 8; if (p.life <= 0) { Game.scene.remove(p.m); return false; } return true; });
