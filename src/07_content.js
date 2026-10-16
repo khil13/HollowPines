@@ -197,7 +197,7 @@ const World = {
     /* --- Rook's hideout at the ford (bounty) --- */
     const fx = riverX(-120) + 22, fz = -128; this.campfire(fx, fz, false); const tt = new THREE.Group(); tt.position.set(fx + 3, Terrain.height(fx + 3, fz - 3), fz - 3); sc.add(tt); const tc = M(GEO.cone, '#a0794f', 1.6, 1.8, 1.6, 0, 0.9, 0); tc.geometry = new THREE.ConeGeometry(1, 1, 4); tt.add(tc); Col.circle(fx + 3, fz - 3, 1.1, Terrain.height(fx + 3, fz - 3) - 1, Terrain.height(fx + 3, fz - 3) + 2, { block: true, cover: true });
     /* --- vegetation, rocks, gatherables --- */
-    this.vegetation(); this.horizon(); this.decor();
+    this.vegetation(); this.horizon(); this.decor(); Camps.build();
     /* --- graves near the cabin: environmental story --- */
     for (let i = 0; i < 2; i++) { const gx = -158 + i * 1.6, gz = -78; const g = new THREE.Group(); g.position.set(gx, Terrain.height(gx, gz), gz); sc.add(g); g.add(M(GEO.box, '#8b6a47', 0.1, 1.0, 0.1, 0, 0.5, 0)); g.add(M(GEO.box, '#8b6a47', 0.6, 0.1, 0.1, 0, 0.75, 0)); g.add(M(GEO.box, '#7a6a52', 0.7, 0.15, 1.6, 0, 0.07, 0.9)); }
     Interact.add({ pos: () => ({ x: -157.2, y: Terrain.height(-157, -78), z: -78 }), r: 1.8, opts: () => [{ label: 'Read grave markers', fn: () => { UI.banner('Hollow Cabin', 'Two markers', '"T. Ashby, homesteader. Sold to the railroad, never left." The ground is older than Eli\'s visit. Someone else lost this land first.'); if (!S.evidence.graves) { S.evidence.graves = true; journal('Two graves by Hollow Cabin. The Ashbys "sold to the railroad" and never left. Same story as the Greers, years earlier.', 'evidence'); } } }] });
@@ -220,7 +220,7 @@ const World = {
   },
   vegetation() {
     const sc = Game.scene, R = mulberry(99), dummy = new THREE.Object3D();
-    const avoid = (x, z, pad = 0) => { if (trailDist(x, z) < 4.5 + pad) return true; for (const f of FLATS) if (Math.hypot(x - f.x, z - f.z) < f.r + 5 + pad) return true; if (Math.abs(x - riverX(z)) < 12) return true; for (const p of PONDS) if (Math.hypot(x - p.x, z - p.z) < p.r + 3) return true; if (Math.hypot(x - riverX(-120) - 22, z + 128) < 10) return true; return false; };
+    const avoid = (x, z, pad = 0) => { if (trailDist(x, z) < 4.5 + pad) return true; for (const c of CAMPS) if (Math.hypot(x - c.x, z - c.z) < c.r + 3 + pad) return true; for (const f of FLATS) if (Math.hypot(x - f.x, z - f.z) < f.r + 5 + pad) return true; if (Math.abs(x - riverX(z)) < 12) return true; for (const p of PONDS) if (Math.hypot(x - p.x, z - p.z) < p.r + 3) return true; if (Math.hypot(x - riverX(-120) - 22, z + 128) < 10) return true; return false; };
     const forestD = (x, z) => fbm(x * 0.012 + 50, z * 0.012, 3) + (z < -100 ? 0.22 : 0) + fbm(x * 0.05, z * 0.05, 2) * 0.25;
     const inst = (geo, mat, list, fn, shadow = true) => { const m = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); m.count = list.length; list.forEach((t, i) => { fn(dummy, t, i); dummy.updateMatrix(); m.setMatrixAt(i, dummy.matrix); }); m.castShadow = shadow; m.receiveShadow = true; m.frustumCulled = false; sc.add(m); if (shadow) Game.treeCasters.push(m); return m; };
     const coneUp = new THREE.ConeGeometry(1, 1, 8); coneUp.translate(0, 0.5, 0); const cylUp = new THREE.CylinderGeometry(0.7, 1, 1, 7); cylUp.translate(0, 0.5, 0); const blob = new THREE.IcosahedronGeometry(1, 1);
@@ -319,7 +319,7 @@ const World = {
   apply() {
     const farmOcc = S.locations.farm === 'occupied'; if (this.farmBoards) this.farmBoards.visible = !farmOcc;
     for (const n of NPC.all.slice()) if (n.cond && !n.cond()) NPC.despawn(n);
-    STORY.spawnWorldNPCs();
+    STORY.spawnWorldNPCs(); Camps.apply();
     for (const n of NPC.all) if (n.key && S.chars[n.key] === 'dead' && n.alive) n.setDead(true);
   },
 };

@@ -9,7 +9,12 @@ const POIS = [
   { id: 'cave', name: 'Bluecap Cave', x: -55, z: -146, r: 14, icon: 'cave' },
   { id: 'ford', name: 'Shallow Ford', x: 0, z: -120, r: 14, icon: 'ford' },
   { id: 'ridge', name: 'Lookout Ridge', x: 150, z: 140, r: 16, icon: 'view' },
+  { id: 'camp_teague', name: "Teague's Camp", x: -170, z: 62, r: 18, icon: 'camp' },
+  { id: 'camp_holt', name: 'Holt Hunting Camp', x: 148, z: 14, r: 18, icon: 'camp' },
+  { id: 'camp_rattlesnake', name: 'Rattlesnake Hollow', x: 184, z: -112, r: 22, icon: 'camp' },
 ];
+// traveler camps and outlaw hideouts (layouts and behaviour in 07b_camps.js); r keeps trees out of the clearing
+const CAMPS = [{ id: 'camp_teague', x: -170, z: 62, r: 9 }, { id: 'camp_holt', x: 148, z: 14, r: 9 }, { id: 'camp_rattlesnake', x: 184, z: -112, r: 12 }];
 function riverX(z) { return 55 + 22 * Math.sin(z * 0.014) + 8 * Math.sin(z * 0.041 + 1); }
 function riverDepth(z) { return lerp(0.5, 3.4, smoothstep(10, 34, Math.abs(z + 120))); }
 POIS.find(p => p.id === 'bridge').x = riverX(0); POIS.find(p => p.id === 'ford').x = riverX(-120);

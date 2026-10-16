@@ -27,8 +27,14 @@ python3 test_mechanics.py            # 50 checks: movement, skeleton and gait, c
 python3 test_story.py                # 91 checks: two full playthroughs with opposite choices, plus failure and retry
 python3 test_controller.py           # 54 checks: movement, frame-rate independence, animation states and crossfades, camera, collision, real touch input, retargeted clips
 python3 test_pwa.py                  # 6 checks: manifest, icons, installability, offline play
+python3 test_camps.py                # 15 checks: traveler camps (routine, night theft, waking sleepers, hold-ups) and outlaw hideouts (takedowns, clearing, loot, reoccupation)
 ```
 Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
+
+## Camps
+Gameplay follows Red Dead Redemption 2; only the animation style takes after Sneaky Sasquatch. `src/07b_camps.js`:
+- **Traveler camps** (Teague's Camp, Holt Hunting Camp): trappers work near camp by day, sit at the fire in the evening and sleep at night. Greet them, ask about the area (they'll mark the outlaw hideout on your map), or rob them. Sneak in crouched to loot their satchel and lockbox: sleepers only notice someone standing right beside them, and walking upright past a bedroll wakes them. Anyone who sees a theft is a witness, which brings honor loss and a bounty through the normal law system. Aim at someone until their hands go up, then choose **Rob** (a witnessed robbery: honor -8, bounty). They remember you.
+- **Outlaw hideout** (Rattlesnake Hollow, Crane gang): two sentries patrol and two outlaws sit at the fire facing inward. Crouched, you aren't noticed from behind, so a punch from behind is a silent takedown; otherwise it's a shootout using the cover AI. Downed outlaws stay down. When nobody's left standing the hideout is cleared and its lockbox (gold, cash, ammo) is free loot; breaking it open while the gang is still around makes them suspicious. Killing outlaws costs no honor. Cleared hideouts are reoccupied after five days.
 
 ## Mission framework
 Missions are data: stages, objectives (`O.goto`, `O.talk`, `O.item`, `O.clues`, `O.defeat`, `O.check`), optional objectives, fail rules, branching `next`, `prereq` and `blocked` conditions, and `complete`/`failOutcome` hooks that write to world state. Mission types: main, side, hunt, bounty, plus dynamic encounters. A failed mission offers Retry (restores a checkpoint taken at mission start) or Accept (the failure becomes part of the story).
