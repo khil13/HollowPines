@@ -389,11 +389,11 @@ class Person {
     if (this.downed) { this.downT -= dt; this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); if (this.downT <= 0 && !this.hogtied) { this.downed = false; this.hp = this.maxHp * 0.5; this.anim.play('standup'); if (this.lawful && !this.lawman) { this.state = 'report'; this.witness = { type: 'assault', value: Law.VALUES.assault, pos: { x: this.pos.x, z: this.pos.z } }; this.say('You\'ll pay for that!'); } else this.fightPlayer(); } return; }
     this.perceiveT -= dt; if (this.perceiveT <= 0) { this.perceiveT = far ? 1 : 0.2; this.perceive(); }
     if (far && this.state === 'routine' && !this.group) { const e = this.schedEntry(); if (e) { const pl = PLACES[e[2]]; if (pl && Math.hypot(pl.x - this.pos.x, pl.z - this.pos.z) > 2) { this.pos.set(pl.x, Col.ground(pl.x, pl.z, 99), pl.z); this.yaw = pl.yaw || 0; this.path = null; } this.act = pl ? pl.act : 'idle'; } this.place(); return; }
-    let animState = 'ground';
+    let animState = 'ground'; this.poseClip = null;
     switch (this.state) {
       case 'routine': { const e = this.schedEntry(); if (!e) { if (this.idleAt) this.moveTo(this.idleAt.x, this.idleAt.z, 1.3, dt); break; } const pl = PLACES[e[2]]; if (!pl) break;
         if (!this.goal || this.goal.x !== pl.x || this.goal.z !== pl.z) this.go(pl.x, pl.z, this.wild);
-        const there = this.followPath(dt, 1.35); if (there) { this.sp = damp(this.sp, 0, 8, dt); this.yaw = dampAngle(this.yaw, pl.yaw || 0, 4, dt); animState = pl.act === 'sit' ? 'sit' : pl.act === 'sleep' ? 'lie' : pl.act === 'work' ? 'work' : pl.act === 'chat' ? 'chat' : 'ground'; if (pl.wander) { this.wT = (this.wT || 0) - dt; if (this.wT <= 0) { this.wT = rand(5, 12); const a = rand(0, TAU), r = rand(0, pl.wander); this.goal = null; this.path = [{ x: pl.x + Math.cos(a) * r, z: pl.z + Math.sin(a) * r }]; } } } this.act = pl.act; break; }
+        const there = this.followPath(dt, 1.35); if (there) { this.sp = damp(this.sp, 0, 8, dt); this.yaw = dampAngle(this.yaw, pl.yaw || 0, 4, dt); animState = pl.act === 'sit' ? 'sit' : pl.act === 'sleep' ? 'lie' : pl.act === 'work' ? 'work' : pl.act === 'chat' ? 'chat' : 'ground'; this.poseClip = pl.clip || null; if (pl.wander) { this.wT = (this.wT || 0) - dt; if (this.wT <= 0) { this.wT = rand(5, 12); const a = rand(0, TAU), r = rand(0, pl.wander); this.goal = null; this.path = [{ x: pl.x + Math.cos(a) * r, z: pl.z + Math.sin(a) * r }]; } } } this.act = pl.act; break; }
       case 'talk': this.sp = 0; this.face(Game.player.pos); animState = 'chat'; break;
       case 'handsup': this.sp = 0; animState = 'handsup'; this.handsT += dt; if (!Game.player.aiming || Game.player.lock !== this) { if (this.handsT > 2) { this.state = this.witness ? 'report' : 'flee'; this.fleeFrom = Game.player.pos.clone(); this.fleeT = 6; } } else this.handsT = 0; break;
       case 'flee': { const a = Math.atan2(this.pos.x - this.fleeFrom.x, this.pos.z - this.fleeFrom.z); this.moveTo(this.pos.x + Math.sin(a) * 5, this.pos.z + Math.cos(a) * 5, 5.2, dt); this.fleeT -= dt; if (this.fleeT <= 0) { this.state = this.witness ? 'report' : 'routine'; this.goal = null; this.anim.expr = 'calm'; } break; }
@@ -411,7 +411,7 @@ class Person {
     if (this.state !== 'pursue' && this.state !== 'combat') this.anim.layers.aim = 0;
     const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt);
     this.anim.lookAt = (this.distP < 6 && Game.player.alive && !this.hostileToPlayer && animState !== 'lie') ? Game.player.pos : null;
-    this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: (x, z, y) => Col.ground(x, z, y) });
+    this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: (x, z, y) => Col.ground(x, z, y), poseClip: this.poseClip });
     this.place();
   }
   place() { const r = this.rig.root; const cp = Game.cam.pos; r.visible = (this.pos.x - cp.x) ** 2 + (this.pos.z - cp.z) ** 2 < 125 * 125; if (this.carried) { const P = Game.player, f = fwd(P.yaw); r.position.set(P.pos.x + f.x * 0.1, P.pos.y + 1.15, P.pos.z + f.z * 0.1); r.rotation.set(0, P.yaw + Math.PI / 2, Math.PI / 2); this.pos.copy(r.position); return; } r.position.copy(this.pos); r.rotation.set(0, this.yaw, 0); }
