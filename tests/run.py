@@ -1,8 +1,18 @@
 import asyncio, sys, json, os
 from playwright.async_api import async_playwright
 if os.path.isdir('/opt/pw-browsers'): os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH','/opt/pw-browsers')  # preinstalled browsers in the cloud dev container; elsewhere use Playwright's default
+import functools, http.server, threading
 ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-URL='file://'+os.path.join(ROOT,'test.html')
+# Serve the build over local HTTP rather than file://: Chromium doesn't reliably keep file:// localStorage across a
+# reload in throwaway test profiles, which made the save-reload-continue checks flaky. HP_TEST_URL overrides.
+class _Quiet(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        if self.path.startswith('/favicon.ico'): self.send_response(204); self.end_headers(); return  # browsers ask for it over http; a 404 would log a console error
+        super().do_GET()
+_srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(_Quiet, directory=ROOT))
+threading.Thread(target=_srv.serve_forever, daemon=True).start()
+URL=os.environ.get('HP_TEST_URL') or f'http://127.0.0.1:{_srv.server_address[1]}/test.html'
 OUT=os.path.join(ROOT,'tests')+os.sep
 async def boot(p, w=1280, h=760, mobile=False, quality='low'):
     b = await p.chromium.launch(executable_path=os.environ.get('PW_CHROMIUM') or None, args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'])
