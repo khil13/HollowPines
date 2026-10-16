@@ -1,6 +1,8 @@
 # Hollow Pines — vertical slice
 
-Stylized frontier open-world game: rounded, expressive characters with procedural animation, and systemic RDR2-style gameplay. Three.js (r128), plain JavaScript, no build step beyond concatenation.
+Stylized frontier open-world game. Three.js (r128), plain JavaScript, no build step beyond concatenation.
+
+**Design direction:** gameplay, combat and graphics ideas come from Red Dead Redemption 2 (systemic open world, honor and witnesses, hold-ups, gunplay, golden-hour light, weather). Sneaky Sasquatch was only early inspiration for the rounded look; everything else is our own.
 
 ## Layout
 - `src/shell.html` — HUD, menus, touch controls, styles
@@ -33,13 +35,14 @@ python3 test_pwa.py                  # 6 checks: manifest, icons, installability
 python3 test_camps.py                # 15 checks: traveler camps (routine, night theft, waking sleepers, hold-ups) and outlaw hideouts (takedowns, clearing, loot, reoccupation)
 python3 test_gunplay.py              # 10 checks: aim-in speed, camera keeping up with the mouse, soft lock, hit zones, misses, recoil, spread
 python3 test_ch4.py                  # 34 checks: Chapter 4 start, unseen tail, eavesdropping, four endings, failure, retry and reload
+python3 test_gfx.py                  # 11 checks: sun arc and golden hour, dark nights, dawn mist, muzzle smoke, impacts, blood, gallop dust
 python3 test_side.py                 # 27 checks: bounty board (alive, dead, runner), three stranger missions, road encounters, travelers, landmarks
 python3 test_ch5.py                  # 23 checks: Chapter 5's four endings, allies fighting, silent takedown, quiet rescue, fail/retry, reload
 ```
 Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
 
 ## Camps
-Gameplay follows Red Dead Redemption 2; only the animation style takes after Sneaky Sasquatch. `src/07b_camps.js`:
+Gameplay follows Red Dead Redemption 2. `src/07b_camps.js`:
 - **Traveler camps** (Teague's Camp, Holt Hunting Camp): trappers work near camp by day, sit at the fire in the evening and sleep at night. Greet them, ask about the area (they'll mark the outlaw hideout on your map), or rob them. Sneak in crouched to loot their satchel and lockbox: sleepers only notice someone standing right beside them, and walking upright past a bedroll wakes them. Anyone who sees a theft is a witness, which brings honor loss and a bounty through the normal law system. Aim at someone until their hands go up, then choose **Rob** (a witnessed robbery: honor -8, bounty). They remember you.
 - **Outlaw hideout** (Rattlesnake Hollow, Crane gang): two sentries patrol and two outlaws sit at the fire facing inward. Crouched, you aren't noticed from behind, so a punch from behind is a silent takedown; otherwise it's a shootout using the cover AI. Downed outlaws stay down. When nobody's left standing the hideout is cleared and its lockbox (gold, cash, ammo) is free loot; breaking it open while the gang is still around makes them suspicious. Killing outlaws costs no honor. Cleared hideouts are reoccupied after five days.
 
@@ -64,6 +67,13 @@ The finale. Ride into the marker at the foot of the trail north of Coyote Mill a
 - **The Cranes** come if Dutchy is your ally, led by Fenwick (or Sal if Fenwick is dead). They open fire from the gate, and once Eli is free they execute Vane. **Ending: cranes.**
 - **Alone:** cut Eli loose from the survey tent at the back of camp. Crouched takedowns from behind are silent, and getting him out with no alarm is an optional objective. Vane steps into the gate on the way out. Draw on him (**ending: gun**), or take his $200 and hand over every paper you carry (**ending: payout**). If you took his money in Chapter 4, he remembers.
 - Allies fight Vane's men on their own: they pick targets, close in and shoot. Eli dying fails the mission, and a reload restarts it on the trail. Afterwards Eli lives in Juniper Gap (unless you took the payout), and an epilogue sums up the valley's fate.
+
+## Light, atmosphere and combat effects
+RDR2-inspired, in our own style (`Sky` in `src/07_content.js`, `FX` in `src/06_entities.js`):
+- The sun rises around 5:30 and sets around 20:00, so evenings match the street lamps and the night stealth. A long golden hour gives warm orange sunlight, a pink-orange sky, warm fog and a soft glare when you look toward the low sun.
+- Nights are dark: ambient light drops, the moon gives a dim blue light, and lanterns burn brighter so they actually matter.
+- At dawn (and in rain) low mist fills the valleys while hilltops rise out of it, then burns off by mid-morning.
+- Gunfights: every shot (yours, enemies', allies') throws a muzzle flash and a drifting cloud of powder smoke. Misses kick up dirt and debris where they hit the ground, and hits draw a puff of blood. Galloping horses leave a trail of dust (darker mud when it's wet). Particles fade out and clean up, and the low quality setting uses fewer.
 
 ## Side content
 RDR2-style things to do between (and after) story chapters, in `src/08d_side.js`:

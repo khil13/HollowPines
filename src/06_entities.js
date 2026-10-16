@@ -10,9 +10,31 @@ const FX = {
   dust(x, y, z, n = 3, s = 0.12) { for (let i = 0; i < n; i++) { const m = new THREE.Mesh(GEO.sphLo, this.dustMat); m.scale.setScalar(s); m.position.set(x + rand(-.2, .2), y + 0.05, z + rand(-.2, .2)); this.scene.add(m); this.parts.push({ m, v: new THREE.Vector3(rand(-.5, .5), rand(.4, 1.2), rand(-.5, .5)), life: 0.6, s }); } },
   splash(x, y, z) { for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(GEO.sphLo, toon('#cfe9f7')); m.scale.setScalar(0.1); m.position.set(x, y, z); this.scene.add(m); this.parts.push({ m, v: new THREE.Vector3(rand(-1.5, 1.5), rand(2, 4), rand(-1.5, 1.5)), life: 0.7, s: 0.1, g: true }); } },
   track(x, z, yaw, kind = 'deer') { const y = Terrain.height(x, z) + 0.03; const m = new THREE.Mesh(this.trackGeo, this.trackMat); m.position.set(x, y, z); m.rotation.y = yaw; if (kind === 'boot') m.scale.set(1.2, 1, 1.5); this.scene.add(m); this.tracks.push({ m, life: kind === 'clue' ? 1e9 : 140 }); if (this.tracks.length > 260) { const t = this.tracks.shift(); this.scene.remove(t.m); } return m; },
-  tracer(a, b) { const g = new THREE.BufferGeometry().setFromPoints([a, b]); const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.9 })); this.scene.add(l); this.tracers.push({ l, life: 0.08 }); this.flash.position.copy(a); this.flash.intensity = 3; },
+  /* gunfight effects: soft sprite puffs for smoke, dust and blood, an additive muzzle flash, and debris that falls */
+  tex() { if (this._tex) return this._tex; const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.5, 'rgba(255,255,255,0.55)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); return this._tex = new THREE.CanvasTexture(c); },
+  puff(x, y, z, o = {}) {
+    const n = Math.max(1, Math.round((o.n || 3) * (Game.quality === 'low' ? 0.5 : 1))); if (this.parts.length > 220) return;
+    for (let i = 0; i < n; i++) { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex(), color: o.color || 0xbdb7ad, transparent: true, opacity: o.op ?? 0.55, depthWrite: false, blending: o.add ? THREE.AdditiveBlending : THREE.NormalBlending })); const s = (o.size || 0.5) * rand(0.7, 1.3); m.scale.setScalar(s); const sp = o.spread ?? 0.15; m.position.set(x + rand(-sp, sp), y + rand(-sp, sp), z + rand(-sp, sp)); this.scene.add(m);
+      const v = new THREE.Vector3(rand(-1, 1) * (o.burst || 0.4), rand(0, 1) * (o.burst || 0.4) + (o.rise ?? 0.5), rand(-1, 1) * (o.burst || 0.4)); if (o.dir) v.addScaledVector(o.dir, rand(0.5, 1) * (o.push || 1.5));
+      this.parts.push({ m, v, life: (o.life || 1.2) * rand(0.8, 1.2), life0: 0, s, grow: o.grow ?? 1.6, sprite: true, op: m.material.opacity, drag: o.drag ?? 0.9 }); this.parts[this.parts.length - 1].life0 = this.parts[this.parts.length - 1].life; }
+  },
+  bits(x, y, z, color, n = 4) { if (Game.quality === 'low') n = 2; for (let i = 0; i < n && this.parts.length < 240; i++) { const m = new THREE.Mesh(GEO.box, toon(color)); m.scale.setScalar(rand(0.04, 0.08)); m.position.set(x, y, z); this.scene.add(m); this.parts.push({ m, v: new THREE.Vector3(rand(-2, 2), rand(1.5, 3.5), rand(-2, 2)), life: 0.6, s: m.scale.x, g: true }); } },
+  muzzle(a, b) { // flash plus a drifting cloud of black-powder smoke
+    const dir = new THREE.Vector3().subVectors(b, a).normalize(); this.puff(a.x + dir.x * 0.25, a.y + dir.y * 0.25, a.z + dir.z * 0.25, { color: 0xffd27a, add: true, n: 1, size: 0.45, life: 0.07, rise: 0, op: 0.95, grow: 0.5 });
+    this.puff(a.x + dir.x * 0.4, a.y, a.z + dir.z * 0.4, { color: 0xd8d4cc, n: 4, size: 0.35, life: 1.6, rise: 0.35, dir, push: 1.4, burst: 0.25, op: 0.5, grow: 3.2, drag: 0.92 });
+  },
+  impact(p, kind) { // where a bullet lands: dirt kicks up from the ground, blood from flesh, dust off anything else
+    if (kind === 'blood') { this.puff(p.x, p.y, p.z, { color: 0x9b1c1c, n: 3, size: 0.28, life: 0.35, rise: 0.1, burst: 0.9, op: 0.8, grow: 1.4 }); this.bits(p.x, p.y, p.z, '#7a1414', 3); return; }
+    const gy = Terrain.height(p.x, p.z); if (p.y - gy < 0.5) { this.puff(p.x, gy + 0.1, p.z, { color: 0xb8a27a, n: 4, size: 0.4, life: 0.9, rise: 0.8, burst: 0.6, op: 0.6, grow: 2.2 }); this.bits(p.x, gy + 0.1, p.z, '#7d6646', 4); }
+    else this.puff(p.x, p.y, p.z, { color: 0xcfc4b0, n: 2, size: 0.25, life: 0.5, rise: 0.2, burst: 0.5, op: 0.5 });
+  },
+  groundHit(o, dir, range) { const p = o.clone(); for (let t = 0; t < range; t += 1.2) { p.copy(o).addScaledVector(dir, t); if (p.y <= Terrain.height(p.x, p.z) + 0.05) return p; } return null; }, // first point a ray meets the ground
+  tracer(a, b, kind = 'auto') { this.muzzle(a, b); if (kind !== 'none') this.impact(b, kind);
+    const g = new THREE.BufferGeometry().setFromPoints([a, b]); const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.9 })); this.scene.add(l); this.tracers.push({ l, life: 0.08 }); this.flash.position.copy(a); this.flash.intensity = 3; },
   update(dt) {
-    this.parts = this.parts.filter(p => { p.life -= dt; p.m.position.addScaledVector(p.v, dt); if (p.g) p.v.y -= 12 * dt; else p.v.multiplyScalar(0.94); p.m.scale.setScalar(p.s * (p.g ? 1 : 1 + (0.6 - p.life) * 2)); if (p.life <= 0) { this.scene.remove(p.m); return false; } return true; });
+    this.parts = this.parts.filter(p => { p.life -= dt; p.m.position.addScaledVector(p.v, dt);
+      if (p.sprite) { const u = 1 - p.life / p.life0; p.v.multiplyScalar(Math.pow(p.drag, dt * 60)); p.m.scale.setScalar(p.s * (1 + u * p.grow)); p.m.material.opacity = p.op * (1 - u) * (1 - u * 0.3); if (p.life <= 0) { this.scene.remove(p.m); p.m.material.dispose(); return false; } return true; }
+      if (p.g) p.v.y -= 12 * dt; else p.v.multiplyScalar(0.94); p.m.scale.setScalar(p.s * (p.g ? 1 : 1 + (0.6 - p.life) * 2)); if (p.life <= 0) { this.scene.remove(p.m); return false; } return true; });
     this.tracers = this.tracers.filter(t => { t.life -= dt; if (t.life <= 0) { this.scene.remove(t.l); t.l.geometry.dispose(); return false; } return true; });
     this.flash.intensity = Math.max(0, this.flash.intensity - dt * 30);
     for (const t of this.tracks) { t.life -= dt; if (t.life < 20) t.m.material = t.m.material; }
@@ -188,19 +210,19 @@ class Player {
       if (!hit && this.lock && this.lock.alive) { // a little bullet magnetism toward the locked target, like RDR2's aim assist
         const c = new THREE.Vector3(this.lock.pos.x, this.lock.pos.y + this.lock.hitH, this.lock.pos.z), t = c.clone().sub(o).dot(dir);
         if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + 0.12 + t * 0.003 && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
-      point = hit ? o.clone().addScaledVector(dir, hit.t) : o.clone().addScaledVector(dir, range);
+      point = hit ? o.clone().addScaledVector(dir, hit.t) : (FX.groundHit(o, dir, range) || o.clone().addScaledVector(dir, range));
       this.bloom = Math.min(0.05, this.bloom + g.bloom); Game.cam.kick(g.kick);
     } else { // hip fire: whatever is in front, likelier the closer it is
       let best = 0.94, target = null; const f = fwd(this.yaw); for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d > range * 0.6) continue; const dot = (dx * f.x + dz * f.z) / d; if (dot > best && Col.los(this.pos.x, this.pos.y + 1.4, this.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; target = h; } }
       if (target && Math.random() < clamp(0.85 - Math.hypot(target.pos.x - this.pos.x, target.pos.z - this.pos.z) / 30, 0.25, 0.85)) hit = { h: target, zone: 'body' };
-      point = hit ? new THREE.Vector3(hit.h.pos.x, hit.h.pos.y + hit.h.hitH, hit.h.pos.z) : muzzle.clone().add(new THREE.Vector3(f.x * 30, 0, f.z * 30)); Game.cam.kick(g.kick * 0.5);
+      point = hit ? new THREE.Vector3(hit.h.pos.x, hit.h.pos.y + hit.h.hitH, hit.h.pos.z) : (FX.groundHit(muzzle, new THREE.Vector3(f.x, -0.06, f.z).normalize(), 40) || muzzle.clone().add(new THREE.Vector3(f.x * 30, 0, f.z * 30))); Game.cam.kick(g.kick * 0.5);
     }
     if (hit) { const dmg = g.dmg * boost * GUN.ZONE[hit.zone]; hit.h.takeHit({ dmg, from: this, gun: w, dir: fwd(this.yaw), zone: hit.zone }); UI.hitmark(hit.zone === 'head'); this.lastHit = { key: hit.h.key || hit.h.sp, zone: hit.zone, dmg }; }
-    FX.tracer(muzzle, point); noiseEvent(this.pos.x, this.pos.z, w === 'rifle' ? 110 : 80, this);
+    FX.tracer(muzzle, point, hit ? 'none' : 'auto'); noiseEvent(this.pos.x, this.pos.z, w === 'rifle' ? 110 : 80, this); // hits draw blood in takeHit
   }
   takeHit(o) { this.hurt(o.dmg, o.from, o.melee ? 'melee' : 'gun'); }
   hurt(d, from, kind) {
-    if (this.inv > 0 || this.state === 'down') return; if (this.blocking && kind === 'melee') { d *= 0.2; Sfx.burst(900, 0.1, 0.2); } S.p.hp -= d; S.p.xpHp += d * 0.05; this.hurtT = 0;
+    if (this.inv > 0 || this.state === 'down') return; if (kind === 'gun') FX.impact({ x: this.pos.x, y: this.pos.y + 1.15, z: this.pos.z }, 'blood'); if (this.blocking && kind === 'melee') { d *= 0.2; Sfx.burst(900, 0.1, 0.2); } S.p.hp -= d; S.p.xpHp += d * 0.05; this.hurtT = 0;
     if (this.state !== 'ride') { const back = from && from.pos && Math.cos(angDiff(this.yaw, Math.atan2(from.pos.x - this.pos.x, from.pos.z - this.pos.z))) < 0; this.anim.play(back ? 'hitB' : 'hit', { replace: false }); } UI.flash(); Game.shake(0.25); this.anim.expr = 'alarm'; setTimeout(() => this.anim.expr = 'calm', 900);
     if (S.p.hp <= 0) this.knockout(from);
   }
@@ -300,6 +322,7 @@ class Horse {
     const gb = Terrain.height(this.pos.x - f.x * 0.9, this.pos.z - f.z * 0.9), gf2 = Terrain.height(this.pos.x + f.x * 0.9, this.pos.z + f.z * 0.9);
     this.anim.update(dt, { speed: this.speed, gait: this.gait, graze: this.state === 'graze' && !this.rider ? 1 : 0, rear: this.rearT > 0 ? 1 : 0, slope: this.swim ? -0.25 : clamp(-Math.atan2(gf2 - gb, 1.8), -0.5, 0.5), alert: this.fear > 0.3, roll: -this.turnRate * 0.03 * clamp(this.speed / 8, 0, 1), lookYaw: this.rider ? clamp(this.turnRate * 0.15, -0.4, 0.4) : 0 });
     this.rig.root.position.copy(this.pos); this.rig.root.rotation.y = this.yaw; this.rig.saddle.visible = true;
+    if (this.speed > 6 && this.onG && !this.swim) { this.dustT = (this.dustT || 0) - dt; if (this.dustT <= 0) { this.dustT = this.speed > 10 ? 0.06 : 0.1; const b = fwd(this.yaw); FX.puff(this.pos.x - b.x * 0.9 + rand(-0.3, 0.3), this.pos.y + 0.15, this.pos.z - b.z * 0.9 + rand(-0.3, 0.3), { color: Sky.wet > 0.4 ? 0x7d6646 : 0xc9b48a, n: 1, size: 0.55, life: 1.1, rise: 0.35, burst: 0.3, op: 0.42, grow: 2.4 }); } } // hooves kick up trail dust
     S.h.x = this.pos.x; S.h.z = this.pos.z; S.h.yaw = this.yaw;
   }
   takeHit(o) { if (o.from && o.from.isPlayer) { this.fear += 1; this.addBond(-5); UI.toast(`${S.h.name} is upset with you`, 'bad'); } }
@@ -397,7 +420,7 @@ class Person {
   takeHit(o) {
     if (!this.alive) return; const fromP = o.from && o.from.isPlayer;
     if (fromP && o.melee && !this.hostileToPlayer && this.state !== 'combat' && (this.alert || 0) < 0.5 && Game.player.crouch && !this.seesPlayer && (this.group || !this.lawful)) { this.knockdown(); Sfx.punch(); UI.toast('Silent takedown', 'good'); return; }
-    this.hp -= o.dmg; this.anim.play('hit', { replace: false }); this.anim.expr = 'alarm'; if (o.dir) { this.pos.x += o.dir.x * (o.melee ? 0.35 : 0.15); this.pos.z += o.dir.z * (o.melee ? 0.35 : 0.15); }
+    this.hp -= o.dmg; this.anim.play('hit', { replace: false }); this.anim.expr = 'alarm'; if (o.gun) FX.impact({ x: this.pos.x, y: this.pos.y + (o.zone === 'head' ? 1.55 : o.zone === 'legs' ? 0.6 : 1.1), z: this.pos.z }, 'blood'); if (o.dir) { this.pos.x += o.dir.x * (o.melee ? 0.35 : 0.15); this.pos.z += o.dir.z * (o.melee ? 0.35 : 0.15); }
     if (fromP && this.lawful && !this.hostileToPlayer && !this.witness) { Law.crime(this.hp <= 0 && !o.melee ? 'murder' : 'assault', this.pos, { victim: this, noise: o.gun ? 60 : 0 }); }
     if (fromP && this.group) this.alertGroup(Game.player.pos);
     if (fromP && this.lawful && !this.lawman && this.alive && this.hp > 0 && o.melee && this.brave > 0.55) { this.fightPlayer(true); this.say(pick(['You want a fight? You got one!', 'Why you...!'])); }
@@ -484,7 +507,7 @@ class Person {
     this.peek = (this.peek || 0) - dt; this.shootT -= dt;
     if (this.shootT <= 0) { this.shootT = rand(1.3, 2.4); this.peek = 0.7; this.crouchC = false;
       if (this.seesPlayer && d < 45) { const m = new THREE.Vector3(); this.rig.R.hand.getWorldPosition(m); let acc = this.accuracy * (d < 10 ? 1.2 : d > 25 ? 0.6 : 1) * (Math.hypot(P.vel.x, P.vel.z) > 4 ? 0.6 : 1) * (Sky.night() ? 0.8 : 1) * (P.state === 'ride' ? 0.8 : 1);
-        const hit = Math.random() < acc; const tgt = new THREE.Vector3(P.pos.x + (hit ? 0 : rand(-1.5, 1.5)), P.pos.y + 1.2 + (hit ? 0 : rand(-0.5, 1)), P.pos.z + (hit ? 0 : rand(-1.5, 1.5))); FX.tracer(m, tgt); Sfx.shot(this.gun === 'rifle'); this.anim.play('recoil'); if (hit) P.hurt(this.dmg, this, 'gun'); if (Game.horse.distP < 30) Game.horse.spook(this.pos.x, this.pos.z, 30); } }
+        const hit = Math.random() < acc; const tgt = new THREE.Vector3(P.pos.x + (hit ? 0 : rand(-1.5, 1.5)), P.pos.y + (hit ? 1.2 : rand(-0.2, 1.8)), P.pos.z + (hit ? 0 : rand(-1.5, 1.5))); if (!hit && tgt.y < P.pos.y + 0.6) tgt.y = Terrain.height(tgt.x, tgt.z); FX.tracer(m, tgt, hit ? 'none' : 'auto'); Sfx.shot(this.gun === 'rifle'); this.anim.play('recoil'); if (hit) P.hurt(this.dmg, this, 'gun'); if (Game.horse.distP < 30) Game.horse.spook(this.pos.x, this.pos.z, 30); } }
   }
   pickCover() { const P = Game.player; let best = null, bs = 1e9; for (const c of Col.near(this.pos.x, this.pos.z, 16, [])) { if (!c.cover && !c.block) continue; if (c.y1 - c.y0 < 0.9) continue; const cx = c.type === 'box' ? (c.minX + c.maxX) / 2 : c.x, cz = c.type === 'box' ? (c.minZ + c.maxZ) / 2 : c.z, cr = c.type === 'box' ? Math.max(c.maxX - c.minX, c.maxZ - c.minZ) / 2 : c.r; const ax = cx - P.pos.x, az = cz - P.pos.z, al = Math.hypot(ax, az) || 1; const sx = cx + ax / al * (cr + 0.6), sz = cz + az / al * (cr + 0.6); const dpl = Math.hypot(sx - P.pos.x, sz - P.pos.z); if (dpl < 6) continue; const sc = Math.hypot(sx - this.pos.x, sz - this.pos.z) + (this.flanker ? -dpl * 0.3 : 0); if (sc < bs && Math.abs(Terrain.height(sx, sz) - this.pos.y) < 1.5) { bs = sc; best = { x: sx, z: sz }; } } return best; }
 }
@@ -504,7 +527,7 @@ class Beast {
     this.it = Interact.add({ pos: () => this.pos, r: 2, pri: 0.4, opts: p => !this.alive && !this.skinned ? [{ label: `Skin ${sp}`, fn: () => this.skin(p) }] : [] }); }
   scare(x, z) { if (!this.alive || this.cfg.predator) return; this.state = 'flee'; this.fleeFrom = { x, z }; this.fleeT = rand(6, 10); }
   onStep() { if (this.sp === 'deer' && this.speed > 3) Sfx.burst(300, 0.04, 0.03); }
-  takeHit(o) { if (!this.alive) return; this.hp -= o.dmg; this.shots++; if (o.from && o.from.isPlayer) this.lastWeapon = o.gun || 'fists';
+  takeHit(o) { if (!this.alive) return; if (o.gun) FX.impact({ x: this.pos.x, y: this.pos.y + this.hitH, z: this.pos.z }, 'blood'); this.hp -= o.dmg; this.shots++; if (o.from && o.from.isPlayer) this.lastWeapon = o.gun || 'fists';
     if (this.hp <= 0) { this.alive = false; this.state = 'dead'; this.speed = 0; Missions.emit('hunt', { sp: this.sp, quality: this.shots === 1 && o.gun === 'rifle' ? 3 : this.shots <= 2 ? 2 : 1, beast: this }); return; }
     if (this.cfg.predator) { this.state = 'attack'; } else this.scare(o.from ? o.from.pos.x : this.pos.x, o.from ? o.from.pos.z : this.pos.z); }
   skin(p) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.skinned = true; const q = this.shots === 1 ? 'perfect' : this.shots === 2 ? 'good' : 'poor'; Inv.add(this.cfg.pelt, 1); Inv.add(this.cfg.meat[0], this.cfg.meat[1]); S.stats.pelts++; UI.toast(`${q[0].toUpperCase() + q.slice(1)} ${this.sp} pelt`, 'good'); Missions.emit('skin', { sp: this.sp, quality: q }); setTimeout(() => Animal.remove(this), 20000); this.rig.vis.scale.multiplyScalar(0.85); }, 1600); }
