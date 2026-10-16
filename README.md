@@ -29,6 +29,7 @@ python3 test_story.py                # 91 checks: two full playthroughs with opp
 python3 test_controller.py           # 54 checks: movement, frame-rate independence, animation states and crossfades, camera, collision, real touch input, retargeted clips
 python3 test_pwa.py                  # 6 checks: manifest, icons, installability, offline play
 python3 test_camps.py                # 15 checks: traveler camps (routine, night theft, waking sleepers, hold-ups) and outlaw hideouts (takedowns, clearing, loot, reoccupation)
+python3 test_gunplay.py              # 10 checks: aim-in speed, camera keeping up with the mouse, soft lock, hit zones, misses, recoil, spread
 python3 test_ch4.py                  # 34 checks: Chapter 4 start, unseen tail, eavesdropping, four endings, failure, retry and reload
 ```
 Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
@@ -37,6 +38,14 @@ Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a 
 Gameplay follows Red Dead Redemption 2; only the animation style takes after Sneaky Sasquatch. `src/07b_camps.js`:
 - **Traveler camps** (Teague's Camp, Holt Hunting Camp): trappers work near camp by day, sit at the fire in the evening and sleep at night. Greet them, ask about the area (they'll mark the outlaw hideout on your map), or rob them. Sneak in crouched to loot their satchel and lockbox: sleepers only notice someone standing right beside them, and walking upright past a bedroll wakes them. Anyone who sees a theft is a witness, which brings honor loss and a bounty through the normal law system. Aim at someone until their hands go up, then choose **Rob** (a witnessed robbery: honor -8, bounty). They remember you.
 - **Outlaw hideout** (Rattlesnake Hollow, Crane gang): two sentries patrol and two outlaws sit at the fire facing inward. Crouched, you aren't noticed from behind, so a punch from behind is a silent takedown; otherwise it's a shootout using the cover AI. Downed outlaws stay down. When nobody's left standing the hideout is cleared and its lockbox (gold, cash, ammo) is free loot; breaking it open while the gang is still around makes them suspicious. Killing outlaws costs no honor. Cleared hideouts are reoccupied after five days.
+
+## Gunplay
+RDR2-style aiming (`aimTick`, `shoot` and `rayHit` in `src/06_entities.js`; the aim camera in `src/10_main.js`):
+- **Aim** (right mouse, or the Aim button on touch) moves the camera over the shoulder and zooms in within about 0.2 s. While aiming the camera doesn't trail behind the mouse, and mouse sensitivity drops slightly to match the zoom.
+- **Soft lock:** pressing aim swings the reticle onto the nearest target near the middle of the screen, preferring anyone already fighting you. The reticle turns red over a target.
+- **Shots go where the reticle points.** People have head, body and leg zones (head x2.5 damage, legs x0.65): a revolver headshot drops most men, a body shot takes 40. Animals keep their hit sphere. There's a little bullet magnetism toward the locked target, and no hidden dice rolls on aimed shots.
+- **Recoil and spread:** each shot kicks the view up, and it settles back within a fraction of a second. Firing fast widens the spread, as does moving or shooting from horseback. The reticle widens with it. Hip fire is likelier to hit the closer the target is.
+- Hit markers: white for a body hit, red for a headshot.
 
 ## Chapter 4: Night at Willow Bridge
 Unlocks after Chapter 3. Ask Cora about the sheriff (Mae, if Cora is dead), then watch the jail after 11 pm; Cora can wait with you until then.

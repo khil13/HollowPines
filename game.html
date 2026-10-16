@@ -37,10 +37,11 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .toast{background:rgba(29,42,37,.82);border-left:4px solid var(--ember);padding:5px 10px;border-radius:6px;font-weight:700;font-size:13px;animation:tin .25s ease-out}
 .toast.bad{border-color:var(--brick)} .toast.good{border-color:var(--sage)}
 @keyframes tin{from{transform:translateX(-14px);opacity:0}}
-#cross{left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px}
+#cross{left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;transform:scale(var(--s,1));transition:transform .05s}
+#cross.hit{transform:scale(calc(var(--s,1)*1.5)) rotate(45deg)}#cross.head::before,#cross.head::after{background:#ff3b30}
 #cross::before,#cross::after{content:"";position:absolute;background:var(--paper);box-shadow:0 0 2px #000}
 #cross::before{left:10px;top:0;width:2px;height:22px}#cross::after{top:10px;left:0;height:2px;width:22px}
-#cross.lock::before,#cross.lock::after{background:var(--ember)}
+#cross.lock::before,#cross.lock::after{background:#e5484d}
 #ammo{right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));font-weight:900;background:rgba(29,42,37,.6);padding:4px 10px;border-radius:10px;font-variant-numeric:tabular-nums}
 #tags{inset:0}
 .tag{position:absolute;transform:translate(-50%,-100%);font:900 15px var(--body);text-shadow:0 1px 3px #000;white-space:nowrap}
@@ -1382,13 +1383,26 @@ const FX = {
 
 /* ---------- Shooting (shared by player and NPCs) ---------- */
 function noiseEvent(x, z, r, src) { for (const a of Animal.all) if (a.alive && Math.hypot(a.pos.x - x, a.pos.z - z) < r) a.scare(x, z); for (const n of NPC.all) if (n.alive && n !== src && Math.hypot(n.pos.x - x, n.pos.z - z) < r) n.hearShot({ x, z }, src); if (Game.horse) Game.horse.spook(x, z, r); }
+/* Gunplay hit tests. People get a standing capsule split into head, body and legs; animals keep their hit sphere. */
+const GUN = { revolver: { dmg: 40, range: 45, cool: 0.38, spread: 0.004, bloom: 0.02, kick: 0.028 }, rifle: { dmg: 75, range: 90, cool: 1.0, spread: 0.0012, bloom: 0.03, kick: 0.05 }, ZONE: { head: 2.5, body: 1, legs: 0.65 } };
+function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground to 1.75 m): distance and which part was hit
+  const px = o.x - h.pos.x, pz = o.z - h.pos.z, a = d.x * d.x + d.z * d.z; if (a < 1e-8) return null; const b = px * d.x + pz * d.z, c = px * px + pz * pz - 0.36 * 0.36, disc = b * b - a * c; if (disc < 0) return null;
+  const sq = Math.sqrt(disc); for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - h.pos.y; if (y < 0 || y > (h.downed ? 0.5 : 1.75)) continue; return { t, zone: y > 1.42 ? 'head' : y < 0.85 ? 'legs' : 'body' }; } return null;
+}
+function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
+  let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
+    if (h instanceof Person) r = rayPerson(o, d, h); else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
+    if (r && r.t < range && (!best || r.t < best.t)) best = Object.assign(r, { h }); }
+  if (best) { const x = o.x + d.x * best.t, y = o.y + d.y * best.t, z = o.z + d.z * best.t; if (!Col.los(o.x, o.y, o.z, x - d.x * 0.3, y - d.y * 0.3, z - d.z * 0.3)) return null; }
+  return best;
+}
 function raySphere(o, d, c, r) { const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z; const b = ox * d.x + oy * d.y + oz * d.z, cc = ox * ox + oy * oy + oz * oz - r * r, h = b * b - cc; if (h < 0) return -1; const t = -b - Math.sqrt(h); return t > 0 ? t : -1; }
 
 /* ---------- Player ---------- */
 // controller tuning (m/s, m/s², seconds); STEP is the fixed physics sub-step
 const PLAYER = { WALK: 1.7, JOG: 3.9, SPRINT: 6.8, CROUCH: 1.5, ACCEL: 7.5, DECEL: 9.5, AIR_ACCEL: 2.2, TURN: 11, MAX_TURN: 12, GRAVITY: 23, JUMP_V: 7.4, JUMP_PREP: 0.09, COYOTE: 0.12, JUMP_BUFFER: 0.15, STEP: 1 / 120 };
 class Player {
-  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.loco = new LocoFSM(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
+  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.bloom = 0; this.aimWas = false; this.hover = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.loco = new LocoFSM(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
   buildRig() { if (this.rig) Game.scene.remove(this.rig.root); const o = OUTFITS[S.outfit] || OUTFITS.duster; this.rig = makeCharacter({ skin: '#e2a57c', shirt: o.shirt, sleeve: o.coat || o.shirt, coat: o.coat, vest: o.vest, pants: '#3e3a4a', hat: true, hatColor: o.hat, hair: '#7a3b1e', longHair: true, scarf: '#e8833a', scale: 1.05 }); Game.scene.add(this.rig.root); const old = this.anim; this.anim = makeAnimator(this.rig, this); if (old) { this.anim.cur = old.cur; if (old.dispose) old.dispose(); }
     this.gun = new THREE.Group(); this.gun.add(M(GEO.box, '#2b2b2b', 0.05, 0.08, 0.26, 0, 0, 0.1)); this.gun.add(M(GEO.box, '#6b4226', 0.05, 0.12, 0.06, 0, -0.07, -0.02)); this.gun.position.set(0, -0.08, 0.05); this.rig.R.hand.add(this.gun);
     this.rifle = new THREE.Group(); this.rifle.add(M(GEO.box, '#2b2b2b', 0.05, 0.06, 0.8, 0, 0, 0.3)); this.rifle.add(M(GEO.box, '#7a4a26', 0.07, 0.1, 0.4, 0, -0.04, -0.12)); this.rifle.position.set(0, -0.06, 0.05); this.rig.R.hand.add(this.rifle);
@@ -1426,7 +1440,7 @@ class Player {
     const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !aiming && this.state === 'ground';
     this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
-    this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0;
+    this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
     // physics in fixed sub-steps: speed, jump height and stopping distance are the same at 30, 60 or 144 fps
     if (this.state === 'ground' && Math.hypot(this.vel.x, this.vel.z) > 5.2 && I.mag < 0.1 && !(this.jumpT > 0) && !this.anim.playing('skid') && !this.anim.busy()) this.anim.play('skid'); // once per frame, never over a jump start
     const n = Math.max(1, Math.ceil(dt / PLAYER.STEP - 1e-6)), h = dt / n; this._turn = 0;
@@ -1507,19 +1521,42 @@ class Player {
     this.anim.play(nm, { on: { hit: () => { const f = fwd(this.yaw); let any = false; for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d < 1.75 && (dx * f.x + dz * f.z) / (d || 1) > 0.4 && Math.abs(h.pos.y - this.pos.y) < 1.2) { h.takeHit({ dmg: nm === 'uppercut' ? 28 : 17, from: this, melee: true, dir: f }); any = true; } } if (any) { Sfx.punch(); Game.shake(0.15); } else Sfx.burst(700, 0.08, 0.04); } } });
     this.vel.x += Math.sin(this.yaw) * 1.5; this.vel.z += Math.cos(this.yaw) * 1.5;
   }
+  // RDR2-style aiming: pressing aim snaps the reticle onto the nearest target in front (soft lock), the shot goes where
+  // the reticle points, and each shot kicks the view and widens the spread (bloom), which settles in a fraction of a second
+  aimTick(dt, aiming) {
+    this.bloom *= Math.exp(-5 * dt); if (this.bloom < 1e-4) this.bloom = 0;
+    if (aiming && !this.aimWas) { const t = this.softLockTarget(); if (t) Game.cam.snapTo(t); }
+    this.aimWas = aiming;
+    this.hover = aiming ? rayHit(Game.cam.pos, Game.cam.dir(), (GUN[this.weapon] || GUN.revolver).range, this) : null;
+  }
+  softLockTarget() { // hostiles first, then anyone (or any animal) near the middle of the screen
+    const cf = Game.cam.dir(), range = (GUN[this.weapon] || GUN.revolver).range; let best = null, bs = -1;
+    for (const h of HURTABLE) { if (h === this || !h.alive || h.downed || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > range) continue;
+      const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; if (dot < 0.9) continue; const sc = dot + (h.hostileToPlayer || h.state === 'combat' ? 0.1 : 0) - d * 0.0005; if (sc > bs && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { bs = sc; best = h; } }
+    return best;
+  }
+  spread() { const g = GUN[this.weapon] || GUN.revolver; return g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? 0.008 : 0); }
   shoot(aimed) {
     const w = this.weapon; if (this.reloading) return; if (S.ammoClip[w] <= 0) { Sfx.tone(1200, 0.03, 0.05, 'square'); this.reload(); return; }
-    S.ammoClip[w]--; this.cool = w === 'rifle' ? 1.0 : 0.38; this.anim.play('recoil'); Sfx.shot(w === 'rifle'); Game.shake(w === 'rifle' ? 0.35 : 0.2);
+    const g = GUN[w], boost = S.upgrades.barrel && w === 'revolver' ? 1.25 : 1, range = g.range * boost;
+    S.ammoClip[w]--; this.cool = g.cool; this.anim.play('recoil'); Sfx.shot(w === 'rifle');
     const muzzle = new THREE.Vector3(); this.rig.R.hand.getWorldPosition(muzzle);
-    let target = null, point = null; const range = (w === 'rifle' ? 90 : 45) * (S.upgrades.barrel && w === 'revolver' ? 1.25 : 1);
+    let hit = null, point = null;
     if (aimed) {
-      if (this.lock) { const d = Math.hypot(this.lock.pos.x - this.pos.x, this.lock.pos.z - this.pos.z); const acc = (w === 'rifle' ? 0.97 : 0.9) - d / range * 0.35 - (Math.hypot(this.vel.x, this.vel.z) > 2 ? 0.15 : 0); if (Math.random() < acc) target = this.lock; }
-      if (!target) { const o = Game.cam.pos.clone(), dir = Game.cam.dir(); let bt = range; for (const h of HURTABLE) { if (h === this || !h.alive) continue; const t = raySphere(o, dir, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR); if (t > 0 && t < bt) { bt = t; target = h; } } if (target && !Col.los(o.x, o.y, o.z, target.pos.x, target.pos.y + target.hitH, target.pos.z)) target = null; point = o.addScaledVector(dir, target ? bt : 40); }
-    } else { // hip fire: nearest thing in front
-      let best = 0.94; const f = fwd(this.yaw); for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d > range * 0.6) continue; const dot = (dx * f.x + dz * f.z) / d; if (dot > best && Col.los(this.pos.x, this.pos.y + 1.4, this.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; target = h; } }
-      if (target && Math.random() > 0.65) target = null; if (!point) { point = muzzle.clone().add(new THREE.Vector3(f.x * 30, 0, f.z * 30)); }
+      const o = Game.cam.pos.clone(), dir = Game.cam.dir().clone(), sp = this.spread(); // jitter inside the spread cone
+      if (sp > 0) { const a = Math.random() * TAU, r = Math.sqrt(Math.random()) * sp, up = Math.abs(dir.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0), u = new THREE.Vector3().crossVectors(dir, up).normalize(), v = new THREE.Vector3().crossVectors(u, dir); dir.addScaledVector(u, Math.cos(a) * r).addScaledVector(v, Math.sin(a) * r).normalize(); }
+      hit = rayHit(o, dir, range, this);
+      if (!hit && this.lock && this.lock.alive) { // a little bullet magnetism toward the locked target, like RDR2's aim assist
+        const c = new THREE.Vector3(this.lock.pos.x, this.lock.pos.y + this.lock.hitH, this.lock.pos.z), t = c.clone().sub(o).dot(dir);
+        if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + 0.12 + t * 0.003 && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
+      point = hit ? o.clone().addScaledVector(dir, hit.t) : o.clone().addScaledVector(dir, range);
+      this.bloom = Math.min(0.05, this.bloom + g.bloom); Game.cam.kick(g.kick);
+    } else { // hip fire: whatever is in front, likelier the closer it is
+      let best = 0.94, target = null; const f = fwd(this.yaw); for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d > range * 0.6) continue; const dot = (dx * f.x + dz * f.z) / d; if (dot > best && Col.los(this.pos.x, this.pos.y + 1.4, this.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; target = h; } }
+      if (target && Math.random() < clamp(0.85 - Math.hypot(target.pos.x - this.pos.x, target.pos.z - this.pos.z) / 30, 0.25, 0.85)) hit = { h: target, zone: 'body' };
+      point = hit ? new THREE.Vector3(hit.h.pos.x, hit.h.pos.y + hit.h.hitH, hit.h.pos.z) : muzzle.clone().add(new THREE.Vector3(f.x * 30, 0, f.z * 30)); Game.cam.kick(g.kick * 0.5);
     }
-    if (target) { point = new THREE.Vector3(target.pos.x, target.pos.y + target.hitH, target.pos.z); const dmg = (w === 'rifle' ? 75 : 40) * (S.upgrades.barrel && w === 'revolver' ? 1.25 : 1); target.takeHit({ dmg, from: this, gun: w, dir: fwd(this.yaw) }); UI.hitmark(); }
+    if (hit) { const dmg = g.dmg * boost * GUN.ZONE[hit.zone]; hit.h.takeHit({ dmg, from: this, gun: w, dir: fwd(this.yaw), zone: hit.zone }); UI.hitmark(hit.zone === 'head'); this.lastHit = { key: hit.h.key || hit.h.sp, zone: hit.zone, dmg }; }
     FX.tracer(muzzle, point); noiseEvent(this.pos.x, this.pos.z, w === 'rifle' ? 110 : 80, this);
   }
   takeHit(o) { this.hurt(o.dmg, o.from, o.melee ? 'melee' : 'gun'); }
@@ -1542,7 +1579,7 @@ class Player {
       const a = this.state === 'mount' ? side : seat, b = this.state === 'mount' ? seat : side; this.pos.lerpVectors(a, b, ease(u)); const sd = this.rig.isModel ? 0.24 : 0.64; this.pos.y += Math.sin(u * Math.PI) * 0.5 - (this.state === 'mount' ? sd * ease(u) : sd * (1 - ease(u))); this.yaw = dampAngle(this.yaw, H.yaw, 10, dt);
       this.anim.update(dt, { state: u > 0.6 && this.state === 'mount' ? 'ride' : 'ground', speed: 0 }); this.place();
       if (u >= 1) { if (this.state === 'mount') { this.state = 'ride'; H.rider = this; } else { this.state = 'ground'; this.pos.y = Col.ground(this.pos.x, this.pos.z, this.pos.y + 1); } } return; }
-    if (this.canAct()) { const aiming = this.weapon !== 'fists' && (Input.mouse.r || Input.aimToggle); this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0;
+    if (this.canAct()) { const aiming = this.weapon !== 'fists' && (Input.mouse.r || Input.aimToggle); this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
       if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon(); if (Input.hit('2') && S.weapons.revolver) this.setWeapon('revolver'); if (Input.hit('3') && S.weapons.rifle) this.setWeapon('rifle'); if (Input.hit('1')) this.setWeapon('fists');
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (this.weapon !== 'fists' && (Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && this.cool <= 0) { if (aiming) this.combat(dt, true); else this.shoot(false); } else if (aiming) this.combat(dt, true); }
@@ -3051,7 +3088,7 @@ const UI = {
   failScreen(title, why) { Input.uiOpen = true; this.panelOpen = true; if (document.pointerLockElement) document.exitPointerLock(); $('panel').hidden = false; $('pTitle').textContent = 'Mission failed'; $('pTabs').innerHTML = ''; $('pClose').hidden = true;
     $('pBody').innerHTML = `<div class="sec">${esc(title)}</div><p style="font-weight:800;font-size:16px">${esc(why)}</p><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn alt" id="fRetry">Retry from mission start</button><button class="btn" id="fAccept">Accept the outcome</button></div><p style="font-size:12.5px;color:#5b5a48;font-weight:700;margin-top:12px">Accepting keeps the failure in your story. Other missions and characters will react to it.</p>`;
     $('fRetry').onclick = () => { this.close(true); Missions.retry(); }; $('fAccept').onclick = () => { this.close(true); Missions.acceptFail(); }; },
-  hitmark() { const c = $('cross'); c.style.transform = 'scale(1.5) rotate(45deg)'; setTimeout(() => c.style.transform = '', 120); },
+  hitmark(head) { const c = $('cross'); c.classList.add('hit'); c.classList.toggle('head', !!head); clearTimeout(this._hm); this._hm = setTimeout(() => c.classList.remove('hit', 'head'), head ? 220 : 120); Sfx.tone(head ? 1500 : 1100, 0.04, 0.05, 'triangle'); },
   flash() { $('vignette').style.boxShadow = 'inset 0 0 140px 50px rgba(200,40,40,.55)'; setTimeout(() => $('vignette').style.boxShadow = '', 250); },
   /* ---------- panels ---------- */
   open(kind) { if (Missions.failing) return; this.panelOpen = true; Input.uiOpen = true; if (document.pointerLockElement) document.exitPointerLock(); $('panel').hidden = false; $('pClose').hidden = false; if (['items', 'journal', 'story', 'map', 'horse', 'system'].includes(kind)) this.tab = kind; this.kind = kind; this.render(); },
@@ -3188,7 +3225,7 @@ const UI = {
     const h = S.time.hour, hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 15) * 15; $('clock').textContent = `Day ${S.time.day} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} · ${{ clear: 'Clear', cloudy: 'Overcast', rain: 'Rain' }[Sky.weather]}`;
     const ob = $('objective'); if (Missions.active) { const objs = Missions.objectives().filter(o => !o.check(Missions.ctx) && !(o.optional && Missions.ctx.m.opt[o.id])); const main = objs.find(o => !o.optional) || objs[0]; ob.hidden = !main; if (main) ob.innerHTML = `<small>${esc(Missions.defs[Missions.active].title)}</small>${esc(typeof main.text === 'function' ? main.text(Missions.ctx) : main.text)}`; } else ob.hidden = true;
     const w = $('wanted'); w.hidden = !(S.wanted || S.bounty > 0); if (!w.hidden) w.textContent = S.wanted ? `WANTED · $${S.bounty.toFixed(2)}` : `Bounty $${S.bounty.toFixed(2)}`; w.style.background = S.wanted ? 'var(--brick)' : 'rgba(29,42,37,.7)';
-    $('cross').hidden = !P.aiming; $('cross').classList.toggle('lock', !!P.lock); const am = $('ammo'); am.hidden = P.weapon === 'fists'; if (!am.hidden) am.textContent = P.weapon === 'revolver' ? `${S.ammoClip.revolver} | ${Inv.count('ammo_rev')}` : `${S.ammoClip.rifle} | ${Inv.count('ammo_rifle')}`;
+    $('cross').hidden = !P.aiming; $('cross').classList.toggle('lock', !!(P.hover && P.hover.h)); if (P.aiming) $('cross').style.setProperty('--s', (1 + P.spread() * 45).toFixed(3)); // red over a target, wider while the spread blooms const am = $('ammo'); am.hidden = P.weapon === 'fists'; if (!am.hidden) am.textContent = P.weapon === 'revolver' ? `${S.ammoClip.revolver} | ${Inv.count('ammo_rev')}` : `${S.ammoClip.rifle} | ${Inv.count('ammo_rifle')}`;
     if (Input.touch) { const ctx = { reload: P.weapon !== 'fists' && S.ammoClip[P.weapon] < (P.weapon === 'rifle' ? 5 : 6) && Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev') > 0, weapon: !!(S.weapons.revolver || S.weapons.rifle), block: P.state === 'ground' && P.weapon === 'fists' && (this.threat() || P.blocking), dodge: P.state === 'ground' && this.threat(), whistle: P.state !== 'ride' && H.distP > 14 };
       for (const [k, v] of Object.entries(ctx)) { const b = document.querySelector(`#tctx [data-b="${k}"]`); if (b && b.hidden === v) b.hidden = !v; }
       const aimB = $('tAim'); if (aimB.hidden !== (P.weapon === 'fists')) aimB.hidden = P.weapon === 'fists'; if (P.weapon === 'fists' && Input.aimToggle) { Input.aimToggle = false; aimB.classList.remove('on'); }
@@ -3323,9 +3360,11 @@ const Game = {
 };
 
 class CamRig {
-  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; this.groundY = 0;
+  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; this.groundY = 0; this.kickR = 0; this.snapT = 0; this.snapTgt = null;
     this.v = [...Array(6)].map(() => new THREE.Vector3()); this._dir = new THREE.Vector3(); this._bl = []; this._cn = []; }
   dir() { return this.cam.getWorldDirection(this._dir); }
+  kick(a) { this.pitch -= a; this.kickR += a; } // gun recoil: the view jumps up, then settles back (see update)
+  snapTo(t) { this.snapTgt = t; this.snapT = 0.2; } // soft lock: swing the reticle onto a target over a moment
   blockers(base) { const out = this._bl; out.length = 0; for (const m of WallMeshes) { if (!m._wp) { m._wp = new THREE.Vector3(); m.getWorldPosition(m._wp); } if (m._wp.distanceToSquared(base) < 500) out.push(m); } return out; }
   // solid world colliders (buildings, rocks, wagons, wide trunks) block the camera; thin posts and trunks are ignored so the view doesn't pop
   solidAt(x, y, z) { for (const c of Col.near(x, z, 0.2, this._cn)) { if (!c.block || y < c.y0 || y > c.y1) continue; if (c.type === 'circle') { if (c.r >= 0.6 && Math.hypot(x - c.x, z - c.z) < c.r + 0.2) return true; } else if (x > c.minX - 0.2 && x < c.maxX + 0.2 && z > c.minZ - 0.2 && z < c.maxZ + 0.2 && Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.5) return true; } return false; }
@@ -3334,18 +3373,22 @@ class CamRig {
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) Settings.v.zoom = this.zoom; }
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
-    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25);
+    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } // zoomed in: same feel per degree
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
     if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') return this.convo(dt);
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
     // auto-recenter behind the direction of travel when the player isn't steering the camera
     const moveSp = riding ? H.speed : Math.hypot(P.vel.x, P.vel.z);
     if (Settings.v.autoCam && this.idleT > 1.4 && moveSp > 1.5 && !aim) { const heading = riding ? H.yaw : Math.atan2(P.vel.x, P.vel.z); const k = clamp(moveSp / 7, 0.15, 1) * (riding ? 1.6 : 0.9); if (Math.cos(angDiff(this.yaw, heading)) > -0.3) this.yaw = dampAngle(this.yaw, heading, k, dt); this.pitch = damp(this.pitch, riding ? 0.32 : 0.28, 0.6, dt); }
+    if (this.kickR > 0) { const r = this.kickR * (1 - Math.exp(-11 * dt)); this.pitch += r; this.kickR -= r; if (this.kickR < 1e-4) this.kickR = 0; }
+    if (this.snapT > 0) { this.snapT -= dt; const t = this.snapTgt; if (!aim || !t || !t.alive) this.snapT = 0; else { // steer the actual view ray onto the target's chest
+      const d = this.dir(), tx = t.pos.x - this.pos.x, ty = t.pos.y + t.hitH - this.pos.y, tz = t.pos.z - this.pos.z, k = 1 - Math.exp(-28 * dt);
+      this.yaw += angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)) * k; this.pitch = clamp(this.pitch - (Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1))) * k, -0.42, 1.15); } }
     if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
     const want = aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
-    this.dist = damp(this.dist, want, 6, dt);
+    this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
     if (P.state === 'air') ty = Math.min(ty, this.groundY + 0.35); else this.groundY = ty;
@@ -3361,10 +3404,10 @@ class CamRig {
     for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && this.solidAt(x, y, z))) { d = Math.max(0.5, t - d / 8); break; } }
     this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = V[4].copy(base).addScaledVector(toC, Math.min(this.collD, len));
     const gh = Terrain.height(p.x, p.z) + 0.35; if (p.y < gh) p.y = gh;
-    if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-18 * dt));
+    if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-(aim ? 60 : 18) * dt)); // no trailing while aiming: the reticle stays glued to the mouse
     this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
-    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), 6, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
+    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }
   convo(dt) { // two-shot conversation framing
     const P = Game.player, N = Dialog.npc.pos, dxx = N.x - P.pos.x, dzz = N.z - P.pos.z, L = Math.hypot(dxx, dzz) || 1, ux = dxx / L, uz = dzz / L; const mid = new THREE.Vector3((N.x + P.pos.x) / 2, Math.max(N.y, P.pos.y) + 1.45, (N.z + P.pos.z) / 2);

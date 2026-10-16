@@ -22,13 +22,26 @@ const FX = {
 
 /* ---------- Shooting (shared by player and NPCs) ---------- */
 function noiseEvent(x, z, r, src) { for (const a of Animal.all) if (a.alive && Math.hypot(a.pos.x - x, a.pos.z - z) < r) a.scare(x, z); for (const n of NPC.all) if (n.alive && n !== src && Math.hypot(n.pos.x - x, n.pos.z - z) < r) n.hearShot({ x, z }, src); if (Game.horse) Game.horse.spook(x, z, r); }
+/* Gunplay hit tests. People get a standing capsule split into head, body and legs; animals keep their hit sphere. */
+const GUN = { revolver: { dmg: 40, range: 45, cool: 0.38, spread: 0.004, bloom: 0.02, kick: 0.028 }, rifle: { dmg: 75, range: 90, cool: 1.0, spread: 0.0012, bloom: 0.03, kick: 0.05 }, ZONE: { head: 2.5, body: 1, legs: 0.65 } };
+function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground to 1.75 m): distance and which part was hit
+  const px = o.x - h.pos.x, pz = o.z - h.pos.z, a = d.x * d.x + d.z * d.z; if (a < 1e-8) return null; const b = px * d.x + pz * d.z, c = px * px + pz * pz - 0.36 * 0.36, disc = b * b - a * c; if (disc < 0) return null;
+  const sq = Math.sqrt(disc); for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - h.pos.y; if (y < 0 || y > (h.downed ? 0.5 : 1.75)) continue; return { t, zone: y > 1.42 ? 'head' : y < 0.85 ? 'legs' : 'body' }; } return null;
+}
+function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
+  let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
+    if (h instanceof Person) r = rayPerson(o, d, h); else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
+    if (r && r.t < range && (!best || r.t < best.t)) best = Object.assign(r, { h }); }
+  if (best) { const x = o.x + d.x * best.t, y = o.y + d.y * best.t, z = o.z + d.z * best.t; if (!Col.los(o.x, o.y, o.z, x - d.x * 0.3, y - d.y * 0.3, z - d.z * 0.3)) return null; }
+  return best;
+}
 function raySphere(o, d, c, r) { const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z; const b = ox * d.x + oy * d.y + oz * d.z, cc = ox * ox + oy * oy + oz * oz - r * r, h = b * b - cc; if (h < 0) return -1; const t = -b - Math.sqrt(h); return t > 0 ? t : -1; }
 
 /* ---------- Player ---------- */
 // controller tuning (m/s, m/s², seconds); STEP is the fixed physics sub-step
 const PLAYER = { WALK: 1.7, JOG: 3.9, SPRINT: 6.8, CROUCH: 1.5, ACCEL: 7.5, DECEL: 9.5, AIR_ACCEL: 2.2, TURN: 11, MAX_TURN: 12, GRAVITY: 23, JUMP_V: 7.4, JUMP_PREP: 0.09, COYOTE: 0.12, JUMP_BUFFER: 0.15, STEP: 1 / 120 };
 class Player {
-  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.loco = new LocoFSM(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
+  constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.bloom = 0; this.aimWas = false; this.hover = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.loco = new LocoFSM(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
   buildRig() { if (this.rig) Game.scene.remove(this.rig.root); const o = OUTFITS[S.outfit] || OUTFITS.duster; this.rig = makeCharacter({ skin: '#e2a57c', shirt: o.shirt, sleeve: o.coat || o.shirt, coat: o.coat, vest: o.vest, pants: '#3e3a4a', hat: true, hatColor: o.hat, hair: '#7a3b1e', longHair: true, scarf: '#e8833a', scale: 1.05 }); Game.scene.add(this.rig.root); const old = this.anim; this.anim = makeAnimator(this.rig, this); if (old) { this.anim.cur = old.cur; if (old.dispose) old.dispose(); }
     this.gun = new THREE.Group(); this.gun.add(M(GEO.box, '#2b2b2b', 0.05, 0.08, 0.26, 0, 0, 0.1)); this.gun.add(M(GEO.box, '#6b4226', 0.05, 0.12, 0.06, 0, -0.07, -0.02)); this.gun.position.set(0, -0.08, 0.05); this.rig.R.hand.add(this.gun);
     this.rifle = new THREE.Group(); this.rifle.add(M(GEO.box, '#2b2b2b', 0.05, 0.06, 0.8, 0, 0, 0.3)); this.rifle.add(M(GEO.box, '#7a4a26', 0.07, 0.1, 0.4, 0, -0.04, -0.12)); this.rifle.position.set(0, -0.06, 0.05); this.rig.R.hand.add(this.rifle);
@@ -66,7 +79,7 @@ class Player {
     const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !aiming && this.state === 'ground';
     this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
-    this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0;
+    this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
     // physics in fixed sub-steps: speed, jump height and stopping distance are the same at 30, 60 or 144 fps
     if (this.state === 'ground' && Math.hypot(this.vel.x, this.vel.z) > 5.2 && I.mag < 0.1 && !(this.jumpT > 0) && !this.anim.playing('skid') && !this.anim.busy()) this.anim.play('skid'); // once per frame, never over a jump start
     const n = Math.max(1, Math.ceil(dt / PLAYER.STEP - 1e-6)), h = dt / n; this._turn = 0;
@@ -147,19 +160,42 @@ class Player {
     this.anim.play(nm, { on: { hit: () => { const f = fwd(this.yaw); let any = false; for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d < 1.75 && (dx * f.x + dz * f.z) / (d || 1) > 0.4 && Math.abs(h.pos.y - this.pos.y) < 1.2) { h.takeHit({ dmg: nm === 'uppercut' ? 28 : 17, from: this, melee: true, dir: f }); any = true; } } if (any) { Sfx.punch(); Game.shake(0.15); } else Sfx.burst(700, 0.08, 0.04); } } });
     this.vel.x += Math.sin(this.yaw) * 1.5; this.vel.z += Math.cos(this.yaw) * 1.5;
   }
+  // RDR2-style aiming: pressing aim snaps the reticle onto the nearest target in front (soft lock), the shot goes where
+  // the reticle points, and each shot kicks the view and widens the spread (bloom), which settles in a fraction of a second
+  aimTick(dt, aiming) {
+    this.bloom *= Math.exp(-5 * dt); if (this.bloom < 1e-4) this.bloom = 0;
+    if (aiming && !this.aimWas) { const t = this.softLockTarget(); if (t) Game.cam.snapTo(t); }
+    this.aimWas = aiming;
+    this.hover = aiming ? rayHit(Game.cam.pos, Game.cam.dir(), (GUN[this.weapon] || GUN.revolver).range, this) : null;
+  }
+  softLockTarget() { // hostiles first, then anyone (or any animal) near the middle of the screen
+    const cf = Game.cam.dir(), range = (GUN[this.weapon] || GUN.revolver).range; let best = null, bs = -1;
+    for (const h of HURTABLE) { if (h === this || !h.alive || h.downed || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > range) continue;
+      const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; if (dot < 0.9) continue; const sc = dot + (h.hostileToPlayer || h.state === 'combat' ? 0.1 : 0) - d * 0.0005; if (sc > bs && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { bs = sc; best = h; } }
+    return best;
+  }
+  spread() { const g = GUN[this.weapon] || GUN.revolver; return g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? 0.008 : 0); }
   shoot(aimed) {
     const w = this.weapon; if (this.reloading) return; if (S.ammoClip[w] <= 0) { Sfx.tone(1200, 0.03, 0.05, 'square'); this.reload(); return; }
-    S.ammoClip[w]--; this.cool = w === 'rifle' ? 1.0 : 0.38; this.anim.play('recoil'); Sfx.shot(w === 'rifle'); Game.shake(w === 'rifle' ? 0.35 : 0.2);
+    const g = GUN[w], boost = S.upgrades.barrel && w === 'revolver' ? 1.25 : 1, range = g.range * boost;
+    S.ammoClip[w]--; this.cool = g.cool; this.anim.play('recoil'); Sfx.shot(w === 'rifle');
     const muzzle = new THREE.Vector3(); this.rig.R.hand.getWorldPosition(muzzle);
-    let target = null, point = null; const range = (w === 'rifle' ? 90 : 45) * (S.upgrades.barrel && w === 'revolver' ? 1.25 : 1);
+    let hit = null, point = null;
     if (aimed) {
-      if (this.lock) { const d = Math.hypot(this.lock.pos.x - this.pos.x, this.lock.pos.z - this.pos.z); const acc = (w === 'rifle' ? 0.97 : 0.9) - d / range * 0.35 - (Math.hypot(this.vel.x, this.vel.z) > 2 ? 0.15 : 0); if (Math.random() < acc) target = this.lock; }
-      if (!target) { const o = Game.cam.pos.clone(), dir = Game.cam.dir(); let bt = range; for (const h of HURTABLE) { if (h === this || !h.alive) continue; const t = raySphere(o, dir, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR); if (t > 0 && t < bt) { bt = t; target = h; } } if (target && !Col.los(o.x, o.y, o.z, target.pos.x, target.pos.y + target.hitH, target.pos.z)) target = null; point = o.addScaledVector(dir, target ? bt : 40); }
-    } else { // hip fire: nearest thing in front
-      let best = 0.94; const f = fwd(this.yaw); for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d > range * 0.6) continue; const dot = (dx * f.x + dz * f.z) / d; if (dot > best && Col.los(this.pos.x, this.pos.y + 1.4, this.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; target = h; } }
-      if (target && Math.random() > 0.65) target = null; if (!point) { point = muzzle.clone().add(new THREE.Vector3(f.x * 30, 0, f.z * 30)); }
+      const o = Game.cam.pos.clone(), dir = Game.cam.dir().clone(), sp = this.spread(); // jitter inside the spread cone
+      if (sp > 0) { const a = Math.random() * TAU, r = Math.sqrt(Math.random()) * sp, up = Math.abs(dir.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0), u = new THREE.Vector3().crossVectors(dir, up).normalize(), v = new THREE.Vector3().crossVectors(u, dir); dir.addScaledVector(u, Math.cos(a) * r).addScaledVector(v, Math.sin(a) * r).normalize(); }
+      hit = rayHit(o, dir, range, this);
+      if (!hit && this.lock && this.lock.alive) { // a little bullet magnetism toward the locked target, like RDR2's aim assist
+        const c = new THREE.Vector3(this.lock.pos.x, this.lock.pos.y + this.lock.hitH, this.lock.pos.z), t = c.clone().sub(o).dot(dir);
+        if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + 0.12 + t * 0.003 && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
+      point = hit ? o.clone().addScaledVector(dir, hit.t) : o.clone().addScaledVector(dir, range);
+      this.bloom = Math.min(0.05, this.bloom + g.bloom); Game.cam.kick(g.kick);
+    } else { // hip fire: whatever is in front, likelier the closer it is
+      let best = 0.94, target = null; const f = fwd(this.yaw); for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d > range * 0.6) continue; const dot = (dx * f.x + dz * f.z) / d; if (dot > best && Col.los(this.pos.x, this.pos.y + 1.4, this.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; target = h; } }
+      if (target && Math.random() < clamp(0.85 - Math.hypot(target.pos.x - this.pos.x, target.pos.z - this.pos.z) / 30, 0.25, 0.85)) hit = { h: target, zone: 'body' };
+      point = hit ? new THREE.Vector3(hit.h.pos.x, hit.h.pos.y + hit.h.hitH, hit.h.pos.z) : muzzle.clone().add(new THREE.Vector3(f.x * 30, 0, f.z * 30)); Game.cam.kick(g.kick * 0.5);
     }
-    if (target) { point = new THREE.Vector3(target.pos.x, target.pos.y + target.hitH, target.pos.z); const dmg = (w === 'rifle' ? 75 : 40) * (S.upgrades.barrel && w === 'revolver' ? 1.25 : 1); target.takeHit({ dmg, from: this, gun: w, dir: fwd(this.yaw) }); UI.hitmark(); }
+    if (hit) { const dmg = g.dmg * boost * GUN.ZONE[hit.zone]; hit.h.takeHit({ dmg, from: this, gun: w, dir: fwd(this.yaw), zone: hit.zone }); UI.hitmark(hit.zone === 'head'); this.lastHit = { key: hit.h.key || hit.h.sp, zone: hit.zone, dmg }; }
     FX.tracer(muzzle, point); noiseEvent(this.pos.x, this.pos.z, w === 'rifle' ? 110 : 80, this);
   }
   takeHit(o) { this.hurt(o.dmg, o.from, o.melee ? 'melee' : 'gun'); }
@@ -182,7 +218,7 @@ class Player {
       const a = this.state === 'mount' ? side : seat, b = this.state === 'mount' ? seat : side; this.pos.lerpVectors(a, b, ease(u)); const sd = this.rig.isModel ? 0.24 : 0.64; this.pos.y += Math.sin(u * Math.PI) * 0.5 - (this.state === 'mount' ? sd * ease(u) : sd * (1 - ease(u))); this.yaw = dampAngle(this.yaw, H.yaw, 10, dt);
       this.anim.update(dt, { state: u > 0.6 && this.state === 'mount' ? 'ride' : 'ground', speed: 0 }); this.place();
       if (u >= 1) { if (this.state === 'mount') { this.state = 'ride'; H.rider = this; } else { this.state = 'ground'; this.pos.y = Col.ground(this.pos.x, this.pos.z, this.pos.y + 1); } } return; }
-    if (this.canAct()) { const aiming = this.weapon !== 'fists' && (Input.mouse.r || Input.aimToggle); this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0;
+    if (this.canAct()) { const aiming = this.weapon !== 'fists' && (Input.mouse.r || Input.aimToggle); this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
       if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon(); if (Input.hit('2') && S.weapons.revolver) this.setWeapon('revolver'); if (Input.hit('3') && S.weapons.rifle) this.setWeapon('rifle'); if (Input.hit('1')) this.setWeapon('fists');
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (this.weapon !== 'fists' && (Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && this.cool <= 0) { if (aiming) this.combat(dt, true); else this.shoot(false); } else if (aiming) this.combat(dt, true); }
