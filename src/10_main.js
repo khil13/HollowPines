@@ -8,7 +8,7 @@ const Game = {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.quality === 'high' ? 1.6 : this.quality === 'medium' ? 1.25 : 0.9)); this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
     this.scene = new THREE.Scene(); this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 900); this.resize(); addEventListener('resize', () => this.resize());
     Input.init(canvas); this.cam = new CamRig(this.camera);
-    Terrain.build(this.scene); Sky.init(this.scene); FX.init(this.scene); World.build(); Fishing.init(); Ambient.init(); this.applyQuality();
+    Post.init(this.renderer); Terrain.build(this.scene); Sky.init(this.scene); FX.init(this.scene); World.build(); Grass.build(this.scene); Fishing.init(); Ambient.init(); this.applyQuality();
     this.player = new Player(); this.horse = new Horse(); UI.init();
     this.restoreFromState(true);
     $('loading').textContent = ''; $('bNew').onclick = () => this.start(false); $('bCont').disabled = !Save.has(); $('bCont').onclick = () => this.start(true);
@@ -19,9 +19,9 @@ const Game = {
     const q = Settings.v.quality === 'auto' ? (this.mobile ? 'medium' : 'high') : Settings.v.quality; this.quality = q;
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, q === 'high' ? 1.6 : q === 'medium' ? 1.25 : 0.9)); this.resize();
     this.renderer.shadowMap.enabled = q !== 'low'; const ms = q === 'high' ? 2048 : 1024; if (Sky.sun.shadow.mapSize.x !== ms) { Sky.sun.shadow.mapSize.set(ms, ms); if (Sky.sun.shadow.map) { Sky.sun.shadow.map.dispose(); Sky.sun.shadow.map = null; } }
-    for (const m of this.treeCasters) m.castShadow = q === 'high'; this.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+    Post.setQuality(q); Grass.setQuality(q); for (const m of this.treeCasters) m.castShadow = q === 'high'; this.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   },
-  resize() { const w = innerWidth, h = innerHeight; this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); },
+  resize() { const w = innerWidth, h = innerHeight; this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); if (typeof Post !== 'undefined' && Post.r) Post.resize(); },
   start(cont) {
     Sfx.init(); $('title').hidden = true; ['tl', 'tr'].forEach(id => $(id).hidden = false); this.running = true; Input.setTouch(Input.touch || matchMedia('(pointer:coarse)').matches);
     if (cont && Save.load()) return;
@@ -60,9 +60,9 @@ const Game = {
   frame(t) {
     const dt = Math.min(0.05, (t - this.last) / 1000); this.last = t; this.time += dt;
     try { if (this.paused) {} else if (this.running) this.update(dt); else this.titleUpdate(dt); } catch (e) { console.error(e); if (!this._errShown) { this._errShown = true; UI.toast('Something went wrong: ' + e.message, 'bad'); } }
-    this.renderer.render(this.scene, this.camera); Input.endFrame(); requestAnimationFrame(tt => this.frame(tt));
+    Post.render(this.scene, this.camera); Input.endFrame(); requestAnimationFrame(tt => this.frame(tt));
   },
-  titleUpdate(dt) { this.tT = (this.tT || 0) + dt; World.cullChunks(); Ambient.update(dt); Terrain.waterU.uTime.value = this.time; const a = this.tT * 0.05; this.camera.position.set(-40 + Math.cos(a) * 42, 16, 20 + Math.sin(a) * 42); this.camera.lookAt(-40, 3, 20); this.cam.pos.copy(this.camera.position); S.time.hour = 17.2; Sky.update(0); for (const n of NPC.all) n.update(dt, false); FX.update(dt); this.fireFlicker(); },
+  titleUpdate(dt) { this.tT = (this.tT || 0) + dt; World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); const a = this.tT * 0.05; this.camera.position.set(-40 + Math.cos(a) * 42, 16, 20 + Math.sin(a) * 42); this.camera.lookAt(-40, 3, 20); this.cam.pos.copy(this.camera.position); S.time.hour = 17.2; Sky.update(0); for (const n of NPC.all) n.update(dt, false); FX.update(dt); this.fireFlicker(); },
   fireFlicker() { for (const f of this.fires) { const k = 0.85 + Math.sin(this.time * 13 + f.x) * 0.1 + Math.random() * 0.08; f.fl.scale.set(0.3 * k, 0.7 * k * 1.1, 0.3 * k); f.light.intensity = 1.2 * k; } },
   update(dt) {
     const P = this.player, H = this.horse;
@@ -74,7 +74,7 @@ const Game = {
     for (const a of Animal.all) a.update(dt, a.distP > 150);
     DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); Riders.update(dt); this.wildlifeTick(dt); Dialog.update();
     if (!Dialog.open && !UI.panelOpen) Interact.update(P); else UI.prompts([]);
-    FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Ambient.update(dt); Terrain.waterU.uTime.value = this.time;
+    FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time);
     // discovery
     for (const p of POIS) if (!S.discovered[p.id] && Math.hypot(P.pos.x - p.x, P.pos.z - p.z) < p.r) { S.discovered[p.id] = true; UI.banner('Discovered', p.name); journal(`Found ${p.name}.`); Missions.emit('discover', { id: p.id }); }
     // ambience

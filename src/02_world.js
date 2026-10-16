@@ -88,12 +88,46 @@ const Terrain = {
     g.setAttribute('color', new THREE.BufferAttribute(col.slice(), 3)); g.computeVertexNormals();
     this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: groundTexture() });
     const mesh = new THREE.Mesh(g, this.mat); mesh.receiveShadow = true; scene.add(mesh); this.mesh = mesh;
-    // water
+    // water: a height texture tells every pixel how deep it is (clear shallows, dark depths, foam lapping the shore);
+    // ripple normals reflect the sky with a fresnel falloff and catch a hard sun glint; rain roughens the surface
+    const hd = new Float32Array(n * n * 4); for (let k = 0; k < n * n; k++) hd[k * 4] = H[k];
+    this.tH = new THREE.DataTexture(hd, n, n, THREE.RGBAFormat, THREE.FloatType); this.tH.needsUpdate = true;
     const wg = new THREE.PlaneGeometry(WORLD.size, WORLD.size, 1, 1); wg.rotateX(-Math.PI / 2);
-    const wm = new THREE.MeshLambertMaterial({ color: 0x4f9fc8, transparent: true, opacity: 0.82 }); this.waterU = { uTime: { value: 0 } };
-    wm.onBeforeCompile = sh => { sh.uniforms.uTime = this.waterU.uTime; sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWp;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWp = (modelMatrix * vec4(transformed,1.0)).xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uTime; varying vec3 vWp;').replace('#include <dithering_fragment>', 'float w = sin(vWp.x*0.9+uTime*1.3)*sin(vWp.z*0.7-uTime*1.1)+sin((vWp.x+vWp.z)*0.35+uTime*0.7)*0.6; gl_FragColor.rgb += vec3(0.07,0.09,0.1)*smoothstep(0.75,1.4,w); gl_FragColor.rgb -= vec3(0.02,0.015,0.0)*smoothstep(0.3,-0.8,w);\n#include <dithering_fragment>'); };
+    this.waterU = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), { uTime: { value: 0 }, uRain: { value: 0 }, uLight: { value: 1 }, tH: { value: this.tH }, uN: { value: n }, uHalf: { value: WORLD.half }, uRes: { value: WORLD.res }, uWY: { value: WORLD.waterY },
+      uTop: { value: new THREE.Color('#5fa7d9') }, uHor: { value: new THREE.Color('#cfe5ee') }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color('#fff2cc') }, uCamPos: { value: new THREE.Vector3() },
+      uShallow: { value: new THREE.Color('#79b8a6') }, uDeep: { value: new THREE.Color('#1f5e78') } });
+    const wm = new THREE.ShaderMaterial({ uniforms: this.waterU, transparent: true, fog: true,
+      vertexShader: 'varying vec3 vWp;\n#include <fog_pars_vertex>\nvoid main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vWp = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition;\n#include <fog_vertex>\n}',
+      fragmentShader: `uniform float uTime; uniform float uRain; uniform float uLight; uniform sampler2D tH; uniform float uN; uniform float uHalf; uniform float uRes; uniform float uWY;
+        uniform vec3 uTop; uniform vec3 uHor; uniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uCamPos; uniform vec3 uShallow; uniform vec3 uDeep; varying vec3 vWp;
+        #include <fog_pars_fragment>
+        float hAt(vec2 g){ vec2 i = floor(g), f = g - i; float a = texture2D(tH, (i + 0.5) / uN).r, b = texture2D(tH, (i + vec2(1.5, 0.5)) / uN).r, c = texture2D(tH, (i + vec2(0.5, 1.5)) / uN).r, d = texture2D(tH, (i + 1.5) / uN).r; return mix(mix(a, b, f.x), mix(c, d, f.x), f.y); }
+        vec2 wv(vec2 p, vec2 d, float f, float sp, float a){ return d * f * a * cos(dot(p, d) * f + uTime * sp); }
+        void main(){
+          vec2 p = vWp.xz; float depth = uWY - hAt((p + uHalf) / uRes);
+          vec2 gr = wv(p, vec2(0.958, 0.287), 0.9, 1.3, 0.05) + wv(p, vec2(-0.371, 0.928), 1.5, 1.8, 0.035) + wv(p, vec2(0.659, -0.753), 2.7, 2.5, 0.02) + wv(p, vec2(-0.977, -0.217), 4.6, 3.3, 0.012)
+                  + (wv(p, vec2(0.6, 0.8), 9.0, 7.0, 0.012) + wv(p, vec2(-0.8, 0.6), 11.0, 8.5, 0.01) + wv(p, vec2(0.28, -0.96), 14.0, 10.0, 0.008)) * (0.3 + uRain * 2.2);
+          vec3 N = normalize(vec3(-gr.x, 1.0, -gr.y)), V = normalize(uCamPos - vWp), Rf = reflect(-V, N); Rf.y = abs(Rf.y);
+          float fres = 0.12 + 0.88 * pow(1.0 - max(dot(N, V), 0.0), 4.0);
+          vec3 refl = mix(uHor, uTop, pow(clamp(Rf.y, 0.0, 1.0), 0.55));
+          vec3 base = mix(uShallow, uDeep, smoothstep(0.05, 2.6, depth)) * uLight;
+          vec3 col = mix(base, refl, fres * 0.85);
+          vec3 L = normalize(uSunDir); float sd = max(dot(Rf, L), 0.0); col += uSunCol * (pow(sd, 220.0) * 4.0 + pow(sd, 28.0) * 0.22) * (1.0 - uRain * 0.7);
+          float n1 = sin(p.x * 2.3 + uTime * 0.7) * sin(p.y * 1.9 - uTime * 0.55) * 0.5 + 0.5, n2 = sin(p.x * 5.1 - p.y * 4.3 + uTime * 1.3) * 0.5 + 0.5;
+          float lap = 0.18 + 0.12 * sin(uTime * 1.1 + p.x * 0.4 + p.y * 0.3);
+          float foam = (1.0 - smoothstep(0.0, 0.12 + n1 * 0.22, depth)) + smoothstep(0.06, 0.0, abs(depth - lap - n2 * 0.08)) * 0.55 * step(depth, 0.6);
+          foam = clamp(foam * (0.65 + n2 * 0.5), 0.0, 1.0);
+          col = mix(col, vec3(0.92, 0.95, 0.94) * uLight, foam * 0.8);
+          float alpha = mix(0.5, 0.93, smoothstep(0.0, 1.6, depth)); alpha = max(alpha, foam * 0.85);
+          gl_FragColor = vec4(col, alpha);
+          #include <fog_fragment>
+        }` });
     this.water = new THREE.Mesh(wg, wm); this.water.position.y = WORLD.waterY; scene.add(this.water);
+  },
+  waterUpdate(t) {
+    const u = this.waterU, d = Sky.domeU; u.uTime.value = t; u.uCamPos.value.copy(Game.camera.position);
+    if (d) { u.uTop.value.copy(d.top.value); u.uHor.value.copy(d.hor.value); u.uSunDir.value.copy(d.sunDir.value); u.uSunCol.value.copy(d.sunCol.value); const h = d.hor.value; u.uLight.value = clamp(0.2 + (h.r * 0.3 + h.g * 0.59 + h.b * 0.11) * 0.95, 0.25, 1.1); }
+    u.uRain.value = damp(u.uRain.value, Sky.raining && Sky.raining() ? 1 : 0, 0.5, 1 / 60);
   },
   height(x, z) {
     const n = this.n, fx = (x + WORLD.half) / WORLD.res, fz = (z + WORLD.half) / WORLD.res;
@@ -170,6 +204,26 @@ function labelTex(text, bg = '#6b3e1f', fg = '#f4ead3', w = 256, h = 64) {
 
 /* ---------- Structures ---------- */
 const Buildings = []; const Doors = []; const WallMeshes = [];
+/* ---------- procedural surface textures (generated on canvas; tinted by each material's colour) ---------- */
+const TEX = {}, TEXMAT = {};
+function canvasTex(name, size, draw) { if (TEX[name]) return TEX[name]; const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'); const R = mulberry(name.length * 7919 + size); draw(g, size, R); const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; return TEX[name] = t; }
+const SURF = {
+  siding: () => canvasTex('siding', 256, (g, S, R) => { const n = 8, bh = S / n; for (let i = 0; i < n; i++) { const v = 205 + R() * 40; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(0, i * bh, S, bh); for (let k = 0; k < 9; k++) { const y = i * bh + 3 + R() * (bh - 6), a = 0.06 + R() * 0.1; g.strokeStyle = `rgba(60,40,20,${a})`; g.lineWidth = 1; g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= S; x += 32) g.lineTo(x, y + Math.sin(x * 0.04 + k) * 1.2); g.stroke(); }
+      g.fillStyle = 'rgba(0,0,0,0.38)'; g.fillRect(0, i * bh + bh - 3, S, 3); g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(0, i * bh, S, 1.5); for (let x = 20 + R() * 40; x < S; x += 90 + R() * 60) { g.fillStyle = 'rgba(40,30,20,0.5)'; g.fillRect(x, i * bh + bh * 0.5, 2, 2); } } }),
+  panel: () => canvasTex('panel', 256, (g, S, R) => { const n = 6, bw = S / n; for (let i = 0; i < n; i++) { const v = 200 + R() * 45; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * bw, 0, bw, S); for (let k = 0; k < 7; k++) { const x = i * bw + 3 + R() * (bw - 6); g.strokeStyle = `rgba(60,40,20,${0.05 + R() * 0.1})`; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= S; y += 32) g.lineTo(x + Math.sin(y * 0.05 + k) * 1.3, y); g.stroke(); } g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(i * bw + bw - 2.5, 0, 2.5, S); } }),
+  floor: () => canvasTex('floor', 256, (g, S, R) => { const n = 5, bw = S / n; for (let i = 0; i < n; i++) { const v = 195 + R() * 45; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * bw, 0, bw, S); for (let k = 0; k < 8; k++) { const x = i * bw + 2 + R() * (bw - 4); g.strokeStyle = `rgba(50,30,15,${0.06 + R() * 0.12})`; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= S; y += 32) g.lineTo(x + Math.sin(y * 0.06 + k) * 1.5, y); g.stroke(); }
+      const cut = R() * S; g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(i * bw, cut, bw, 2); g.fillRect(i * bw + bw - 2, 0, 2, S); if (R() < 0.6) { g.fillStyle = 'rgba(70,45,25,0.45)'; g.beginPath(); g.ellipse(i * bw + bw * 0.5, R() * S, 4, 6, 0, 0, 6.3); g.fill(); } } }),
+  shingle: () => canvasTex('shingle', 256, (g, S, R) => { const n = 8, rw = S / n; // rows run down the slope's u axis, so courses lie along the ridge
+      for (let i = 0; i < n; i++) { const off = (i % 2) * 16; for (let y = -16; y < S; y += 32) { const v = 170 + R() * 60; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * rw, y + off, rw, 30); g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(i * rw, y + off + 30, rw, 2); }
+        g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(i * rw + rw - 5, 0, 5, S); g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(i * rw, 0, 2, S); } }),
+  stone: () => canvasTex('stone', 256, (g, S, R) => { g.fillStyle = '#6e6a63'; g.fillRect(0, 0, S, S); for (let y = 0; y < S; y += 32) for (let x = -(y % 64 ? 24 : 0); x < S; x += 48) { const v = 150 + R() * 70; g.fillStyle = `rgb(${v},${v - 4},${v - 10})`; g.beginPath(); g.roundRect ? g.roundRect(x + 2, y + 2, 44, 28, 6) : g.rect(x + 2, y + 2, 44, 28); g.fill(); } }),
+};
+function texMat(name, color, o = {}) { const k = name + color + (o.side || ''); if (TEXMAT[k]) return TEXMAT[k]; if (!GRAD) toon('#fff'); return TEXMAT[k] = new THREE.MeshToonMaterial(Object.assign({ color, map: SURF[name](), gradientMap: GRAD }, o)); }
+function uvBox(w, h, d, tile) { // a box whose texture coordinates are in metres/tile, so boards stay the same size on every wall
+  const g = new THREE.BoxGeometry(w, h, d), uv = g.attributes.uv, dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const i = f * 4 + v; uv.setXY(i, uv.getX(i) * dims[f][0] / tile, uv.getY(i) * dims[f][1] / tile); }
+  return g;
+}
 function building(o) {
   // o: x,z,w,d,door:'S'|'N'|'W',wall,roof,name,sign
   const g = new THREE.Group(); const gy = Terrain.height(o.x, o.z); g.position.set(o.x, gy, o.z); Game.scene.add(g);
@@ -177,9 +231,9 @@ function building(o) {
   const b = { o, g, x: o.x, z: o.z, y: gy, minX: o.x - W / 2, maxX: o.x + W / 2, minZ: o.z - D / 2, maxZ: o.z + D / 2, roofs: [], name: o.name, floor: gy + fy };
   Col.box(b.minX, b.maxX, b.minZ, b.maxZ, gy - 2, gy + fy, { walk: true });
   g.add(M(GEO.box, '#8b6a47', W, fy, D, 0, fy / 2, 0));
-  const plank = M(GEO.box, '#a7825a', W - 0.4, 0.02, D - 0.4, 0, fy + 0.01, 0); g.add(plank);
-  const wallMat = toon(o.wall || '#c98f5a');
-  const addWall = (lx0, lx1, lz0, lz1) => { const m = new THREE.Mesh(GEO.box, wallMat); m.scale.set(lx1 - lx0, H, lz1 - lz0); m.position.set((lx0 + lx1) / 2, fy + H / 2, (lz0 + lz1) / 2); m.castShadow = m.receiveShadow = true; g.add(m); WallMeshes.push(m);
+  const plank = new THREE.Mesh(uvBox(W - 0.4, 0.02, D - 0.4, 2.4), texMat('floor', '#b08a60')); plank.position.set(0, fy + 0.01, 0); plank.receiveShadow = true; g.add(plank);
+  const wallMat = texMat(o.surface || 'siding', o.wall || '#c98f5a');
+  const addWall = (lx0, lx1, lz0, lz1) => { const m = new THREE.Mesh(uvBox(lx1 - lx0, H, lz1 - lz0, 2.2), wallMat); m.position.set((lx0 + lx1) / 2, fy + H / 2, (lz0 + lz1) / 2); m.castShadow = m.receiveShadow = true; g.add(m); WallMeshes.push(m);
     Col.box(o.x + lx0, o.x + lx1, o.z + lz0, o.z + lz1, gy, gy + fy + H, { block: true }); };
   const hw = W / 2, hd = D / 2, side = o.door || 'S';
   // front/back walls along x, side walls along z, door gap in the door wall
@@ -195,20 +249,19 @@ function building(o) {
   // ceiling (it casts shadow, so rooms are shaded like real rooms once the roof hides when you step inside)
   if (o.interior !== false) {
     const iw = o.inside || '#b98f65', wain = o.wainscot || '#7a5232', inT = 0.02, ix = hw - t - inT, iz = hd - t - inT;
-    const panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; g.add(M(GEO.box, iw, w, H - 1.05, d, cx, fy + 1.05 + (H - 1.05) / 2, cz)); g.add(M(GEO.box, wain, w, 1.0, d, cx, fy + 0.5, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
+    const pm = texMat('panel', iw), wm2 = texMat('panel', wain), panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; const up = new THREE.Mesh(uvBox(w, H - 1.05, d, 1.6), pm); up.position.set(cx, fy + 1.05 + (H - 1.05) / 2, cz); up.receiveShadow = true; g.add(up); const lo = new THREE.Mesh(uvBox(w, 1.0, d, 0.9), wm2); lo.position.set(cx, fy + 0.5, cz); lo.receiveShadow = true; g.add(lo); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
     const doorZ = side === 'S' ? iz : -iz;
     for (const zc of [iz, -iz]) { const dzc = zc + (zc > 0 ? -inT : inT); if ((zc > 0) === (side === 'S') && side !== 'W') { panel(-ix, -dw / 2, dzc - inT, dzc + inT); panel(dw / 2, ix, dzc - inT, dzc + inT); } else panel(-ix, ix, dzc - inT, dzc + inT); }
     for (const xc of [ix, -ix]) panel(xc - inT, xc + inT, -iz, iz);
     const win = (x, z, ry) => { const f = new THREE.Group(); f.position.set(x, fy + 1.7, z); f.rotation.y = ry; f.add(M(GEO.box, '#9fc3d8', 1.0, 0.9, 0.02)); for (const [w, h, px, py] of [[1.16, 0.08, 0, 0.49], [1.16, 0.08, 0, -0.49], [0.08, 1.0, 0.54, 0], [0.08, 1.0, -0.54, 0], [0.05, 0.9, 0, 0], [1.0, 0.05, 0, 0]]) f.add(M(GEO.box, trim, w, h, 0.05, px, py, 0.02)); f.add(M(GEO.box, trim, 1.3, 0.08, 0.16, 0, -0.54, 0.06)); g.add(f); };
     win(ix - 0.03, 0, -Math.PI / 2); win(-ix + 0.03, 0, Math.PI / 2); if (W > 6) for (const sx of [-1, 1]) win(sx * hw * 0.55, doorZ + (side === 'S' ? -0.03 : 0.03), side === 'S' ? Math.PI : 0);
-    for (let k = -W / 2 + 0.6; k < W / 2 - 0.4; k += 0.55) g.add(M(GEO.box, '#8f6a45', 0.025, 0.005, D - 0.5, k, fy + 0.022, 0)); // floorboard seams
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W - 2 * t, D - 2 * t), toon(o.ceiling || '#8b6a47')); ceil.rotation.x = Math.PI / 2; ceil.position.y = fy + H - 0.02; ceil.castShadow = true; ceil.receiveShadow = true; g.add(ceil);
     for (let k = -W / 2 + 1.2; k < W / 2 - 0.8; k += 1.8) g.add(M(GEO.box, '#5a3a22', 0.18, 0.2, D - 2 * t, k, fy + H - 0.12, 0));
   }
   // false front (western facade) & roof
   const roof = new THREE.Group(); roof.position.y = fy + H; g.add(roof); b.roofs.push(roof);
   const rc = o.roof || '#7a4b3a', ang = 0.42, rl = (W / 2 + 0.4) / Math.cos(ang);
-  for (const s of [-1, 1]) { const r = M(GEO.box, rc, rl, 0.15, D + 0.8, s * (W / 4 + 0.1), Math.tan(ang) * W / 4, 0); r.rotation.z = -s * ang; roof.add(r); }
+  for (const s of [-1, 1]) { const r = new THREE.Mesh(uvBox(rl, 0.15, D + 0.8, 1.8), texMat('shingle', rc)); r.position.set(s * (W / 4 + 0.1), Math.tan(ang) * W / 4, 0); r.castShadow = r.receiveShadow = true; r.rotation.z = -s * ang; roof.add(r); }
   const gable = new THREE.Shape(); gable.moveTo(-hw, 0); gable.lineTo(hw, 0); gable.lineTo(0, Math.tan(ang) * hw); gable.lineTo(-hw, 0);
   const gg = new THREE.ShapeGeometry(gable); for (const s of [-1, 1]) { const m = new THREE.Mesh(gg, toon(o.wall || '#c98f5a', { side: THREE.DoubleSide })); m.position.z = s * (hd - 0.05); roof.add(m); }
   if (o.facade) { const f = M(GEO.box, o.wall || '#c98f5a', W + 0.2, 2.2, 0.25, 0, fy + H + 0.9, dz + (side === 'S' ? 0.1 : -0.1)); g.add(f); }

@@ -7,7 +7,8 @@ Stylized frontier open-world game. Three.js (r128), plain JavaScript, no build s
 ## Layout
 - `src/shell.html` — HUD, menus, touch controls, styles
 - `src/01_core.js` — utilities, noise, input (keyboard/mouse/touch), synthesized audio
-- `src/02_world.js` — terrain heightfield, colliders and line of sight, building generator
+- `src/02_world.js` — terrain heightfield, water shader, colliders and line of sight, procedural wood textures, building generator
+- `src/02c_grass.js` — the dense wind-blown grass field around the camera
 - `src/03_rig.js` — character and quadruped rigs, animator (blending, layered actions, foot IK, squash and stretch), horse gaits
 - `src/03b_gltf.js` — imported character model and `ClipAnimator` (AnimationMixer clips, crossfades, leg IK)
 - `src/03c_animstate.js` — locomotion state machine (`LocoFSM`) shared by the player and NPCs
@@ -22,6 +23,7 @@ Stylized frontier open-world game. Three.js (r128), plain JavaScript, no build s
 - `src/08d_side.js` — bounty board, stranger missions, road encounters, travelers, landmarks
 - `src/08e_riders.js` — NPCs on horseback: posses, fleeing outlaws, mounted ambushers
 - `src/09_ui.js` — HUD, panels, map, shop, camp, fishing
+- `src/09b_post.js` — post-processing: ambient occlusion, bloom, colour grade, vignette, grain, anti-aliasing
 - `src/10_main.js` — boot, camera (including the two-shot conversation camera), main loop, test hooks (`window.HP`)
 
 Placeholder art lives in the factory functions (`makeHumanoid`, `makeQuad`, `building`, `World.*`), so models can be swapped without touching gameplay code.
@@ -142,8 +144,30 @@ Missions are data: stages, objectives (`O.goto`, `O.talk`, `O.item`, `O.clues`, 
 ## Animation system
 Characters are `THREE.Bone` skeletons (17 bones) driving skinned meshes, so joints bend smoothly. `Animator` blends: a locomotion blend tree over authored walk/jog/run/sneak cycles (Catmull-Rom keyframes, stride derived from leg geometry so phase follows distance travelled), upper-body layers (aim, carry, block), one-shot clips with events (jump anticipation, landing, skid, punches, hits, pickup, search, mount…), two-bone leg IK with stance-foot weighting on slopes, head look-at, and spring secondary motion (hat, hair, coat, squash and stretch). The procedural rig is now the fallback.
 
+## Rendering
+All our own code, with no extra libraries, so the installed app still works offline:
+- **Post-processing** (`Post`): the scene renders into a colour and depth target. A composite pass then adds:
+  - normal-aware screen-space ambient occlusion, which darkens creases and contact shadows where crates, walls and steps meet the ground;
+  - bloom for lanterns at night and the low sun;
+  - a colour grade with contrast, richer colour, cool shadows and warm highlights (warmer at golden hour, cooler at night);
+  - a vignette, fine film grain and an FXAA-style edge smooth.
+- **Textures**: wall siding, interior panelling, floor planks and roof shingles are painted procedurally on canvases, then tinted by each building's colours. UVs are in metres so boards keep their size on any wall.
+- **Grass field** (`Grass`): up to 70,000 single blades in one draw call.
+  - Each blade has a fixed spot in the world, and the patch wraps around the camera.
+  - The shader reads terrain height, ground colour and a grass mask from small textures. The mask keeps grass off trails, water, buildings, porches, rocks and steep slopes, and the town is thinned out.
+  - Gusts roll across the field in waves, the player and horse push blades aside, and rain darkens it.
+- **Water**: a height texture gives every pixel its depth.
+  - Shallows are clear, the depths dark, and foam laps the shore.
+  - Ripple normals reflect the current sky with fresnel and catch a hard sun glint.
+  - Rain roughens the surface.
+
 ## Quality presets
-Settings → Quality: Low (no shadows, sparse grass), Medium (character and building shadows), High (tree shadows, 2048 shadow map). Auto picks Medium on phones and High on desktop. Grass is chunked and distance-culled; distant characters are hidden.
+Settings → Quality, which now applies immediately:
+- Low: no shadows, no post-processing, sparse grass.
+- Medium: character and building shadows, colour grade, bloom and a 26k-blade grass field.
+- High: tree shadows, a 2048 shadow map, ambient occlusion, FXAA and a 70k-blade grass field.
+
+ Auto picks Medium on phones and High on desktop. Grass is chunked and distance-culled; distant characters are hidden.
 
 ## Imported character model
 `assets/character.glb` (Quaternius-style rig: 23 bones, 17 clips) is embedded into game.html as base64 by build.py and cloned for every person (`makeModelHumanoid` in `src/03b_gltf.js`). `ClipAnimator` keeps the same interface as the procedural animator:

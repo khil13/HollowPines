@@ -116,6 +116,6 @@ const Settings = {
   KEY: 'hollowpines_settings', v: { mouseLock: true, sens: 1, invertY: false, zoom: 4.6, quality: 'auto', autoCam: true, sound: 0.6, hints: true },
   load() { try { Object.assign(this.v, JSON.parse(localStorage.getItem(this.KEY) || '{}')); } catch (e) {} },
   save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.v)); } catch (e) {} },
-  set(k, val) { this.v[k] = val; this.save(); if (k === 'quality' && window.Game && Game.applyQuality) Game.applyQuality(); if (k === 'sound' && Sfx.master) Sfx.master.gain.value = val; },
+  set(k, val) { this.v[k] = val; this.save(); if (k === 'quality' && typeof Game !== 'undefined' && Game.renderer) Game.applyQuality(); if (k === 'sound' && Sfx.master) Sfx.master.gain.value = val; },
 };
 Settings.load();
