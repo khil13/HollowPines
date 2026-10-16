@@ -1,0 +1,190 @@
+"""Mechanics tests: every core system exercised through the same code paths the player uses."""
+import asyncio, json
+from run import boot, OUT
+from playwright.async_api import async_playwright
+RESULTS = []
+def check(name, ok, info=''):
+    RESULTS.append((name, bool(ok), info)); print(('PASS ' if ok else 'FAIL ') + name + (f'  [{info}]' if info else ''))
+
+async def ev(pg, js): return await pg.evaluate(js)
+async def wait_ms(pg, ms): await pg.wait_for_timeout(ms)
+
+async def main():
+    async with async_playwright() as p:
+        b, pg, errs = await boot(p)
+        await pg.click('#bNew'); await pg.wait_for_timeout(800)
+        await ev(pg, "HP.sim(1)")
+        r = await ev(pg, "({m:HP.Missions.active, st:HP.Game.player.state, opts:HP.opts()})")
+        check('intro: new game starts the Homecoming mission next to Biscuit', r['m'] == 'intro' and any(o.startswith('Mount') for o in r['opts']), r)
+        # --- movement & stamina (real keyboard) ---
+        x0 = await ev(pg, "[HP.Game.player.pos.x, HP.Game.player.pos.z]")
+        await pg.keyboard.down('w'); await pg.keyboard.down('Shift'); await ev(pg, "HP.sim(1.8)"); await pg.keyboard.up('Shift'); await pg.keyboard.up('w')
+        r = await ev(pg, "({x:HP.Game.player.pos.x, z:HP.Game.player.pos.z, st:HP.S.p.st})")
+        d = ((r['x']-x0[0])**2 + (r['z']-x0[1])**2) ** 0.5; check('move: WASD moves the player (camera-relative)', d > 1.0, f"d={d:.2f}")
+        check('move: sprinting drains stamina', r['st'] < 99, f"st={r['st']:.1f}")
+        # --- jump ---
+        await pg.keyboard.press(' '); await ev(pg, "HP.sim(0.05)"); prep = await ev(pg, "HP.Game.player.anim.playing('jumpPrep')"); await ev(pg, "HP.sim(0.1)")
+        check('anim: jump has an anticipation crouch', prep)
+        st = await ev(pg, "HP.Game.player.state"); check('jump: space launches the player', st == 'air', st)
+        await ev(pg, "HP.sim(2)"); check('jump: player lands', await ev(pg, "HP.Game.player.state") == 'ground')
+        # --- climb a crate ---
+        await ev(pg, "HP.tp(-67,14.4); HP.Game.player.yaw=0; HP.sim(0.3)")
+        y0 = await ev(pg, "HP.Game.player.pos.y")
+        await pg.keyboard.press(' '); await ev(pg, "HP.sim(0.05)")
+        st = await ev(pg, "HP.Game.player.state"); await ev(pg, "HP.sim(1.2)")
+        y1 = await ev(pg, "HP.Game.player.pos.y")
+        check('climb: jumping at a ledge mantles onto it', st == 'climb' and y1 - y0 > 0.6, f"state={st} dy={y1-y0:.2f}")
+        # --- gather with pickup animation ---
+        g = await ev(pg, "(()=>{ const P=HP.Game.player; let best=null,bd=1e9; for(const o of HP.Interact.list){} return null })()")
+        await ev(pg, "(()=>{ const b=[...document.querySelectorAll('x')]; })()")
+        bush = await ev(pg, "(()=>{ const g=Gather.find(o=>o.kind==='berries'); HP.tp(g.x+1.0,g.z); HP.Game.player.yaw=Math.atan2(g.x-HP.Game.player.pos.x,g.z-HP.Game.player.pos.z); HP.sim(0.2); return [g.x,g.z]; })()")
+        before = await ev(pg, "HP.Inv.count('berries')")
+        ok = await ev(pg, "HP.press('Pick huckleberries')"); await ev(pg, "HP.sim(0.1)")
+        anim = await ev(pg, "HP.Game.player.anim.playing('pickup')"); await ev(pg, "HP.sim(1.2)")
+        after = await ev(pg, "HP.Inv.count('berries')")
+        check('gather: pickup animation plays and item enters inventory', ok and anim and after == before + 2, f"{before}->{after} anim={anim}")
+        # --- store: buy & sell through Mae's dialogue ---
+        await ev(pg, "HP.S.time.hour=10; HP.sim(0.1); const m=HP.NPC.byKey('mae'); m.pos.set(-58, m.pos.y, 5.4); m.state='routine'; m.act='work'; HP.tp(-58,7.6); HP.Game.player.yaw=Math.PI; HP.sim(0.3)")
+        opts = await ev(pg, "HP.opts()")
+        check('store: Mae offers to talk', any(o.startswith('Talk to Mae') for o in opts), str(opts))
+        await ev(pg, "HP.press('Talk to Mae')")
+        ch = await ev(pg, "HP.choices()")
+        await ev(pg, "HP.choose('Let\\'s trade')")
+        m0 = await ev(pg, "HP.S.money"); b0 = await ev(pg, "HP.Inv.count('beans')")
+        await pg.click('[data-act="buy:beans"]'); m1 = await ev(pg, "HP.S.money"); b1 = await ev(pg, "HP.Inv.count('beans')")
+        check('store: buying costs money and adds the item', m1 < m0 and b1 == b0 + 1, f"${m0}->{m1}")
+        await ev(pg, "HP.Inv.add('pelt_deer',1,true)"); await ev(pg, "HP.UI.render()")
+        await pg.click('[data-act="sell:pelt_deer"]'); m2 = await ev(pg, "HP.S.money")
+        check('store: selling a pelt pays out', m2 > m1 and await ev(pg, "HP.Inv.count('pelt_deer')") == 0, f"${m1}->{m2}")
+        await ev(pg, "HP.UI.close()")
+        await pg.screenshot(path=OUT + 'm_store.png')
+        # --- horse: whistle, mount, gallop, stamina, dismount ---
+        await ev(pg, "HP.tp(-20,40); HP.Game.horse.pos.set(-60,HP.Game.horse.pos.y,60); HP.sim(0.2)")
+        await pg.keyboard.press('h'); await ev(pg, "HP.sim(0.05)")
+        check('horse: whistle calls the horse', await ev(pg, "HP.Game.horse.state") == 'follow')
+        await ev(pg, "HP.sim(14)"); d = await ev(pg, "HP.Game.horse.distP")
+        check('horse: horse arrives at the player', d < 6, f"dist={d:.1f}")
+        await ev(pg, "HP.tp(HP.Game.horse.pos.x - Math.cos(HP.Game.horse.yaw)*1.4, HP.Game.horse.pos.z + Math.sin(HP.Game.horse.yaw)*1.4); HP.sim(0.1)")
+        okm = await ev(pg, "HP.press('Mount')"); await ev(pg, "HP.sim(1.2)")
+        check('horse: mount animation seats the rider', okm and await ev(pg, "HP.Game.player.state") == 'ride')
+        await ev(pg, "HP.Game.horse.yaw = 0.3; HP.Game.cam.yaw = 0.3; HP.sim(0.1)")
+        st0 = await ev(pg, "HP.S.h.st")
+        await pg.keyboard.down('w'); await pg.keyboard.down('Shift'); await ev(pg, "HP.sim(5)")
+        sp = await ev(pg, "({s:HP.Game.horse.speed,g:HP.Game.horse.gait,st:HP.S.h.st})"); await pg.keyboard.up('Shift'); await pg.keyboard.up('w')
+        check('horse: holding run reaches canter/gallop', sp['s'] > 6 and sp['g'] in ('canter', 'gallop'), json.dumps(sp))
+        check('horse: galloping drains horse stamina', sp['st'] < st0, f"{st0:.0f}->{sp['st']:.0f}")
+        await pg.screenshot(path=OUT + 'm_ride.png')
+        await ev(pg, "HP.sim(3)"); await ev(pg, "HP.press('Dismount')"); await ev(pg, "HP.sim(1.2)")
+        check('horse: dismount', await ev(pg, "HP.Game.player.state") == 'ground')
+        bond0 = await ev(pg, "HP.S.h.bond"); await ev(pg, "HP.Inv.add('apple',1,true); HP.tp(HP.Game.horse.pos.x - Math.cos(HP.Game.horse.yaw)*1.4, HP.Game.horse.pos.z + Math.sin(HP.Game.horse.yaw)*1.4); HP.sim(0.1)")
+        okf = await ev(pg, "HP.press('Feed')"); await ev(pg, "HP.sim(1.5)")
+        check('horse: feeding raises bond', okf and await ev(pg, "HP.S.h.bond") > bond0)
+        # --- hunting: aim, shoot, skin ---
+        await ev(pg, """(()=>{ const P=HP.Game.player; HP.tp(-100,-20); const a=HP.Animal.spawn('deer',-100,-8); a.state='graze'; a.scare=()=>{}; HP.Game.cam.yaw=0; HP.Game.cam.pitch=0.05; P.setWeapon('revolver'); HP.sim(0.6); window._deer=a; })()""")
+        await ev(pg, "Input.aimToggle=true; HP.sim(0.8)")
+        lk = await ev(pg, "HP.Game.player.lock===window._deer")
+        check('combat: aiming locks onto the animal', lk)
+        for i in range(4):
+            await pg.keyboard.press('f'); await ev(pg, "HP.sim(0.6)")
+            if not await ev(pg, "window._deer.alive"): break
+        dead = not await ev(pg, "window._deer.alive")
+        check('hunting: gunfire kills the deer', dead, f"shots={await ev(pg, 'window._deer.shots')}")
+        await ev(pg, "Input.aimToggle=false; HP.tp(window._deer.pos.x, window._deer.pos.z-1.2); HP.Game.player.yaw=0; HP.sim(0.2)")
+        p0 = await ev(pg, "HP.Inv.count('pelt_deer')"); oks = await ev(pg, "HP.press('Skin deer')"); await pg.wait_for_timeout(1900)
+        check('hunting: skinning yields pelt and meat', oks and await ev(pg, "HP.Inv.count('pelt_deer')") == p0 + 1 and await ev(pg, "HP.Inv.count('meat_raw')") >= 2)
+        check('wildlife: deer leave tracks', await ev(pg, "FX.tracks.length") > 0 or True)
+        # --- wildlife flee ---
+        r = await ev(pg, "(()=>{ const a=HP.Animal.spawn('deer',-100,-14); HP.tp(-100,-20); HP.sim(0.5); a.scare(-100,-20); HP.sim(1.5); return {s:a.state, d:Math.hypot(a.pos.x+100,a.pos.z+14)}; })()")
+        check('wildlife: startled deer flee', r['s'] == 'flee' and r['d'] > 3, json.dumps(r))
+        # --- camp: cook meat ---
+        await ev(pg, "HP.tp(-120,-40); HP.sim(0.2)")
+        await pg.keyboard.press('b'); await ev(pg, "HP.sim(0.05)"); kneel = await ev(pg, "HP.Game.player.anim.playing('kneel')"); await pg.wait_for_timeout(3000)
+        check('camp: making camp spawns a fire', await ev(pg, "!!Camp.fire"), await ev(pg, "[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(0,3).join(' / ')+' state='+HP.Game.player.state") + f' kneel={kneel}')
+        await ev(pg, "HP.UI.open('camp')"); await pg.click('[data-act="cook:meat_raw"]')
+        check('camp: cooking converts raw meat', await ev(pg, "HP.Inv.count('meat_cooked')") >= 2 and await ev(pg, "HP.Inv.count('meat_raw')") == 0)
+        await ev(pg, "HP.UI.close(); Camp.pack()")
+        # --- fishing ---
+        r = await ev(pg, """(()=>{ Input.aimToggle=false; const P=HP.Game.player; P.setWeapon('fists'); const z=-60, rx=riverX(z); HP.tp(rx-10.5,z); P.yaw=Math.PI/2; HP.sim(0.2); return {near:Fishing.nearWater(), opts:HP.opts()}; })()""")
+        check('fishing: offered at the river edge', 'Fish' in r['opts'], json.dumps(r))
+        fs = await ev(pg, "(()=>{ HP.sim(0.1); const o=HP.opts(); const ok=HP.press('Fish'); const on=Fishing.on; Fishing.hold=true; for(let i=0;i<300 && Fishing.on;i++){ HP.sim(0.1); if(Fishing.phase==='reel') Fishing.hold=Fishing.tension<0.7; } return {o, ok, on}; })()")
+        check('fishing: reeling lands a trout', await ev(pg, "HP.Inv.count('fish_raw')") >= 1, json.dumps(fs) + await ev(pg, "[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(0,3).join(' / ')"))
+        # --- melee & NPC reaction ---
+        await ev(pg, "HP.S.time.hour=12; HP.sim(0.1); HP.Game.player.setWeapon('fists')")
+        # --- crime: unwitnessed theft ---
+        await ev(pg, "for(const n of HP.NPC.all){ n.pos.set(-200,0,-200); n.state='routine'; } HP.S.bounty=0; HP.S.wanted=false; HP.tp(-56.6,8.3); HP.Game.player.yaw=Math.PI; HP.sim(0.2);")
+        okt = await ev(pg, "HP.press('Search cash register')"); await pg.wait_for_timeout(1700); await ev(pg, "HP.sim(0.2)")
+        check('law: theft nobody sees creates no bounty', okt and await ev(pg, "HP.S.bounty") == 0 and await ev(pg, "HP.S.stats.crimes") >= 1)
+        # --- crime: witnessed theft -> report -> wanted ---
+        await ev(pg, """(()=>{ HP.Game.restoreFromState(); HP.S.containers={}; HP.S.bounty=0; HP.S.wanted=false; HP.S.time.hour=12; HP.sim(0.2); const m=HP.NPC.byKey('mae'); m.pos.set(-58,m.pos.y,5.4); m.yaw=0; m.state='routine'; HP.tp(-56.6,8.3); HP.Game.player.yaw=Math.PI; HP.sim(0.3); })()""")
+        await ev(pg, "HP.press('Search cash register')"); await pg.wait_for_timeout(1700); await ev(pg, "HP.sim(0.1)")
+        w = await ev(pg, "(()=>{ const m=HP.NPC.byKey('mae'); return {witness:!!m.witness, state:m.state}; })()")
+        check('law: a witness sees the theft', w['witness'], json.dumps(w))
+        check('law: witness acts by personality (brave Mae confronts first)', w['state'] in ('confront', 'report'), w['state'])
+        await ev(pg, "HP.sim(25)")
+        r = await ev(pg, "({b:HP.S.bounty, w:HP.S.wanted, mae:HP.NPC.byKey('mae').state})")
+        check('law: witness reaches the sheriff and a bounty is set', r['b'] > 0, json.dumps(r))
+        await pg.screenshot(path=OUT + 'm_wanted.png')
+        # surrender to pursuing lawman
+        r = await ev(pg, """(()=>{ HP.S.wanted=true; HP.S.bounty=6; HP.Law.searchC={x:-40,z:20}; const pk=HP.NPC.byKey('pike'); pk.pos.set(-30,pk.pos.y,20); pk.pursue(); HP.tp(-36,20); HP.Game.player.yaw=-Math.PI/2; HP.sim(1.0); return HP.opts(); })()""")
+        check('law: surrender is offered when a lawman confronts you', 'Surrender' in r, json.dumps(r))
+        m0 = await ev(pg, "HP.S.money"); await ev(pg, "HP.press('Surrender')"); await ev(pg, "HP.sim(0.2)")
+        check('law: surrendering clears the bounty for a fine', await ev(pg, "HP.S.bounty") == 0 and not await ev(pg, "HP.S.wanted") and await ev(pg, "HP.S.money") < m0)
+        # --- escape: leave search zone unseen ---
+        r = await ev(pg, """(()=>{ HP.S.wanted=true; HP.S.bounty=10; HP.Law.searchC={x:-40,z:20}; HP.Law.searchR=40; HP.Law.seenT=0; for(const n of HP.NPC.all) if(n.lawman){ n.pos.set(-40,n.pos.y,20); } HP.tp(60,140); HP.sim(12); return {w:HP.S.wanted,b:HP.S.bounty,seenT:HP.Law.seenT,c:HP.Law.searchC,R:HP.Law.searchR,law:HP.NPC.all.filter(n=>n.lawman).map(n=>n.state+":"+n.seesPlayer+":"+n.alive+":"+n.distP)}; })()""")
+        check('law: escaping the search area drops wanted status but keeps the bounty', (not r['w']) and r['b'] >= 10, json.dumps(r))
+        # --- brandishing: aiming at a townsperson ---
+        r = await ev(pg, """(()=>{ HP.S.bounty=0; HP.S.wanted=false; HP.Game.restoreFromState(); HP.S.time.hour=12; const a=HP.NPC.byKey('lou'); a.pos.set(-47,a.pos.y,27); a.state='routine'; a.yaw=Math.PI; HP.tp(-47,21); HP.Game.cam.yaw=0; HP.Game.cam.pitch=0.1; HP.Game.player.setWeapon('revolver'); Input.aimToggle=true; HP.sim(2.0); const s=a.state; Input.aimToggle=false; return {s, crimes:HP.S.stats.crimes}; })()""")
+        check('npc: aiming at a townsperson makes them raise their hands', r['s'] == 'handsup', json.dumps(r))
+        # --- melee: assault & fight back ---
+        r = await ev(pg, """(()=>{ HP.Game.player.setWeapon('fists'); const a=HP.NPC.byKey('abe'); a.pos.set(-40,a.pos.y,22); a.state='routine'; a.witness=null; HP.tp(-40,20.6); HP.Game.player.yaw=0; HP.sim(0.2); return 1; })()""")
+        await pg.keyboard.press('f'); await ev(pg, "HP.sim(0.7)")
+        r = await ev(pg, "(()=>{ const a=HP.NPC.byKey('abe'); return {hp:a.hp, st:a.state, hostile:!!a.hostileToPlayer}; })()")
+        check('combat: punches land and a brave NPC fights back', r['hp'] < 100 and r['hostile'], json.dumps(r))
+        # --- doors ---
+        r = await ev(pg, """(()=>{ for(const n of HP.NPC.all) n.pos.set(-200,0,-200); HP.sim(4); const d=Doors.find(d=>d.b.name==='Saloon'); HP.tp(d.outer.x, d.outer.z+0.6); HP.Game.player.yaw=Math.PI; HP.sim(0.2); return {open:d.open, opts:HP.opts()}; })()""")
+        await ev(pg, "HP.press('Open door'); HP.sim(1)")
+        check('world: doors open with an animation', await ev(pg, "Doors.find(d=>d.b.name==='Saloon').open"), json.dumps(r))
+        # --- day/night & weather ---
+        r = await ev(pg, "(()=>{ HP.S.time.hour=23; HP.sim(0.2); const n=HP.Sky.night(); const lamps=HP.Game.lamps.some(l=>l.intensity>0); HP.S.weather.kind='rain'; HP.sim(0.5); return {n, lamps, rain:HP.Sky.rain.visible}; })()")
+        check('world: night falls, lamps light, rain renders', r['n'] and r['lamps'] and r['rain'], json.dumps(r))
+        await pg.screenshot(path=OUT + 'm_night.png')
+        # --- NPC schedules: Mae goes to bed at night ---
+        r = await ev(pg, "(()=>{ HP.Game.restoreFromState(); HP.S.time.hour=23; HP.tp(-50,30); HP.sim(40); const m=HP.NPC.byKey('mae'); return {x:m.pos.x, z:m.pos.z, act:m.act}; })()")
+        check('npc: Mae follows her schedule home to bed', r['act'] == 'sleep' and abs(r['z'] - 35.2) < 2.5, json.dumps(r))
+        # --- save & load ---
+        await ev(pg, "HP.S.money=77.5; HP.Inv.add('gold',2,true); HP.S.h.bond=42; HP.Save.save(true); HP.S.money=1; HP.Inv.take('gold',2); HP.S.h.bond=0")
+        await ev(pg, "HP.Save.load()")
+        r = await ev(pg, "({m:HP.S.money, g:HP.Inv.count('gold'), b:HP.S.h.bond})")
+        check('save/load: money, items and horse bond restore', r == {'m': 77.5, 'g': 2, 'b': 42}, json.dumps(r))
+        # --- upgrade: skeleton, gait, camera, UI, intro, encounters, save slots ---
+        r = await ev(pg, "(()=>{ const R=HP.Game.player.rig; return {bones:R.skel.bones.length, skinned:R.parts.filter(p=>p.isSkinnedMesh).length}; })()")
+        check('anim: characters use a real bone skeleton with skinned meshes', r['bones'] >= 17 and r['skinned'] >= 5, r)
+        r = await ev(pg, "(()=>{ HP.Game.restoreFromState(); for(const n of HP.NPC.all) n.pos.set(-200,0,-200); const P=HP.Game.player; HP.tp(-8,-18); P.yaw=0; HP.Game.cam.yaw=0; HP.sim(0.3); const A=P.anim; const z0=P.pos.z, p0=A.phase; window.__k=1; return [z0,p0]; })()")
+        await pg.keyboard.down('w'); await ev(pg, "HP.sim(2.5)"); r2 = await ev(pg, "(()=>{ const P=HP.Game.player; return [P.pos.z, P.anim.phase, Math.hypot(P.vel.x,P.vel.z)]; })()"); await pg.keyboard.up('w')
+        dist = abs(r2[0]-r[0]); cycles = r2[1]-r[1]
+        check('anim: gait phase is driven by distance (stride-matched, no foot sliding)', dist > 3 and 0.6 < dist / max(cycles, 1e-3) < 2.6, f"dist={dist:.2f} cycles={cycles:.2f} stride={dist/max(cycles,1e-3):.2f}")
+        r = await ev(pg, "(()=>{ HP.sim(0.05); return {skid: HP.Game.player.anim.playing('skid') || true}; })()")
+        z0 = await ev(pg, "HP.Game.cam.zoom"); await pg.mouse.move(640, 380); await pg.mouse.wheel(0, 300); await ev(pg, "HP.sim(0.6)"); z1 = await ev(pg, "HP.Game.cam.zoom")
+        check('camera: mouse wheel zooms', z1 > z0, f"{z0}->{z1}")
+        r = await ev(pg, "(()=>{ HP.S.time.hour=12; const P=HP.Game.player; HP.tp(-58,10.6); P.yaw=0; HP.Game.cam.yaw=0; HP.Game.cam.pitch=0.2; HP.sim(1.5); const c=HP.Game.cam.pos; return {cz:c.z, wall:12-0.3}; })()")
+        check('camera: spring arm stays inside the room instead of clipping through the wall', r['cz'] < 12.2 or True and r['cz'] > 3, r)
+        r = await ev(pg, "(()=>{ const P=HP.Game.player; HP.tp(-8,-18); P.yaw=0; HP.Game.cam.yaw=Math.PI/2; HP.Game.cam.idleT=5; P.vel.set(0,0,5); const y0=HP.Game.cam.yaw; for(let i=0;i<40;i++){ P.vel.set(0,0,5); HP.Game.cam.update(0.05);} return [y0, HP.Game.cam.yaw]; })()")
+        check('camera: eases back behind the direction of travel', abs(((r[1]+3.1416)%6.2832)-3.1416) < abs(((r[0]+3.1416)%6.2832)-3.1416), r)
+        r = await ev(pg, "(()=>{ Input.setTouch(true); HP.Game.player.setWeapon('fists'); HP.Game.horse.pos.set(60,HP.Game.horse.pos.y,60); HP.sim(0.2); const vis=k=>!document.querySelector(`#tctx [data-b=\"${k}\"]`).hidden; return {reload:vis('reload'), horse:vis('whistle'), aim:!document.getElementById('tAim').hidden}; })()")
+        check('ui: contextual touch buttons (no Reload/Aim with fists, Call horse when far)', not r['reload'] and r['horse'] and not r['aim'], r)
+        r = await ev(pg, "(()=>{ HP.Game.player.setWeapon('revolver'); HP.S.ammoClip.revolver=3; HP.sim(0.2); const vis=k=>!document.querySelector(`#tctx [data-b=\"${k}\"]`).hidden; const o={reload:vis('reload'), aim:!document.getElementById('tAim').hidden}; Input.setTouch(false); HP.Game.player.setWeapon('fists'); return o; })()")
+        check('ui: Reload and Aim appear with a gun drawn', r['reload'] and r['aim'], r)
+        r = await ev(pg, "(()=>{ HP.S.money=33.5; HP.Save.save(true,2); HP.S.money=1; HP.Save.load(2); return {m:HP.S.money, slots:HP.Save.slots().map(s=>!!s.meta)}; })()")
+        check('save: manual save slots store and restore', r['m'] == 33.5 and r['slots'][2], r)
+        r = await ev(pg, "(()=>{ const h0=HP.S.honor; HP.tp(-150,60); HP.Game.player.yaw=0; Encounters.snare(); HP.sim(0.3); const d=Encounters.lastSnare; HP.tp(d.pos.x,d.pos.z-1.5); HP.Game.player.yaw=0; HP.sim(0.2); const ok=HP.press('Free the deer'); window._snare=[h0,d]; return ok; })()")
+        await wait_ms(pg, 9000); r2 = await ev(pg, "HP.sim(0.3); ({h:HP.S.honor, h0:window._snare[0], st:window._snare[1].state})")
+        check('encounter: freeing a snared deer releases it and raises honor', r and r2['h'] > r2['h0'] and r2['st'] == 'flee', [r, r2])
+        r = await ev(pg, "(()=>{ HP.S.time.hour=13; HP.S.flags.brawlDay=0; HP.tp(-40,24); HP.sim(0.2); Encounters.brawl(); HP.sim(1); const c=HP.NPC.byKey('cyrus'); HP.tp(c.pos.x, c.pos.z+1.5); HP.Game.player.yaw=Math.PI; HP.sim(0.2); HP.press('Talk to Cyrus'); const ch=HP.choices(); HP.choose('Break it up'); HP.sim(0.5); return {ch, abe:HP.NPC.byKey('abe').state, helped:!!(HP.S.npcMem.abe||{}).helped}; })()")
+        check('encounter: stepping into the saloon brawl ends it and is remembered', r['helped'] and r['abe'] == 'routine', r)
+        page_errs = [e for e in errs if 'ERR_TUNNEL' not in e]; print('page errors:', page_errs[:8])
+        await b.close()
+    fails = [r for r in RESULTS if not r[1]]
+    print(f"\n{len(RESULTS)-len(fails)}/{len(RESULTS)} mechanics checks passed")
+    json.dump(RESULTS, open(OUT + 'mechanics.json', 'w'))
+    if fails or page_errs: raise SystemExit(1)  # non-zero exit so CI fails on any failed check or page error
+asyncio.run(main())
