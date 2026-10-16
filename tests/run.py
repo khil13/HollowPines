@@ -5,7 +5,7 @@ ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 URL='file://'+os.path.join(ROOT,'test.html')
 OUT=os.path.join(ROOT,'tests')+os.sep
 async def boot(p, w=1280, h=760, mobile=False, quality='low'):
-    b = await p.chromium.launch(args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'])
+    b = await p.chromium.launch(executable_path=os.environ.get('PW_CHROMIUM') or None, args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'])
     ctx = await b.new_context(viewport={'width':w,'height':h}, has_touch=mobile, is_mobile=mobile)
     if quality: await ctx.add_init_script(f"try{{localStorage.setItem('hollowpines_settings', JSON.stringify({{quality:'{quality}'}}))}}catch(e){{}}")
     pg = await ctx.new_page(); errs=[]; pg.set_default_timeout(120000)
