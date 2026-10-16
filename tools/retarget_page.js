@@ -50,12 +50,13 @@ window.RT = (() => {
   function bake(name, o = {}) {
     const ctx = setup(!!o.align), { T, S, tb, sb, ref, sref, C, F, k } = ctx, clip = src.animations.find(a => a.name === name); if (!clip) throw new Error('no clip ' + name);
     const sm = new THREE.AnimationMixer(S), act = sm.clipAction(clip); act.play();
-    const fps = o.fps || 30, n = Math.max(2, Math.round(clip.duration * fps) + 1), out = {}; for (const b of ORDER) out[b] = { q: [] };
+    // range: bake only part of the clip, as fractions of its length (e.g. the working loop of a long kneel)
+    const fps = o.fps || 30, t0 = (o.range ? o.range[0] : 0) * clip.duration, t1 = (o.range ? o.range[1] : 1) * clip.duration, n = Math.max(2, Math.round((t1 - t0) * fps) + 1), out = {}; for (const b of ORDER) out[b] = { q: [] };
     out.Body_1.p = []; out.FootL.p = []; out.FootR.p = [];
     const sp0 = sref.pelvis.p.clone(); let root0 = null;
     const footOff = {}; { const tm = new THREE.AnimationMixer(T), ia = tm.clipAction(Assets.clips.Idle); ia.play(); tm.update(0); T.updateMatrixWorld(true); for (const f of ['FootL', 'FootR']) footOff[f] = tb[f === 'FootL' ? 'LowerLegL' : 'LowerLegR'].worldToLocal(wp(tb[f])); ia.stop(); tm.uncacheRoot(T); }
     for (let i = 0; i < n; i++) {
-      act.time = Math.min(clip.duration, i / fps); sm.update(0); S.updateMatrixWorld(true);
+      act.time = Math.min(t1, t0 + i / fps); sm.update(0); S.updateMatrixWorld(true);
       const sw = {}; for (const b of ORDER) { const s = sb[MAP[b]]; sw[b] = { q: wq(s).premultiply(F), p: wp(s).applyQuaternion(F) }; }
       // root motion: keep the clip in place (the game moves the character itself)
       const drift = V(); if (o.inPlace) { const pp = sw.Body_1.p; if (!root0) root0 = pp.clone(); drift.set(pp.x - root0.x, o.inPlace === 'xyz' ? pp.y - root0.y : 0, pp.z - root0.z); } // inPlace 'xyz' also drops vertical travel
@@ -67,7 +68,7 @@ window.RT = (() => {
         // mesh never stretches away from the leg; the game's leg IK then re-plants them on the ground
         if (b === 'FootL' || b === 'FootR') { const leg = tb[b === 'FootL' ? 'LowerLegL' : 'LowerLegR']; bone.position.copy(bone.parent.worldToLocal(leg.localToWorld(footOff[b].clone()))); }
         bone.updateMatrixWorld(true);
-        out[b].q.push(...bone.quaternion.toArray().map(v => +v.toFixed(4))); if (out[b].p) out[b].p.push(...bone.position.toArray().map(v => +v.toFixed(4)));
+        out[b].q.push(...bone.quaternion.toArray().map(v => +v.toFixed(3))); if (out[b].p) out[b].p.push(...bone.position.toArray().map(v => +v.toFixed(3)));
       }
     }
     return { duration: +((n - 1) / fps).toFixed(4), fps, frames: n, tracks: out };

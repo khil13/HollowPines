@@ -11,9 +11,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if os.path.isdir('/opt/pw-browsers'): os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', '/opt/pw-browsers')
 
 # relaxed standing frame of each pack, used as the reference pose for measuring rotation changes
-REF = {'UAL2_Standard': ['Idle_No_Loop', 0]}
+REF = {'UAL1_Standard': ['Idle_Loop', 0], 'UAL2_Standard': ['Idle_No_Loop', 0]}
 # source clip -> options. inPlace strips root motion (the game moves the character itself)
 CLIPS = {
+    'UAL1_Standard': {
+        'Crouch_Idle_Loop': {}, 'Crouch_Fwd_Loop': {}, 'Swim_Fwd_Loop': {}, 'Swim_Idle_Loop': {}, 'Sitting_Idle_Loop': {},
+        'Sitting_Talking_Loop': {}, 'Idle_Talking_Loop': {}, 'Fixing_Kneeling': {'range': [0.3, 0.5]}, 'Interact': {}, 'Punch_Jab': {}, 'Hit_Chest': {},
+        # reviewed and left out: Walk/Jog/Sprint (a hunched knees-up scramble at chibi proportions; the rig's own Walk/Run
+        # read better), Jump_* and Roll (no better than what's in use), Pistol_* (hands end at the chin), Punch_Cross,
+        # PickUp_Table; the rest (dance, driving, spells, swords) don't fit the game
+    },
     'UAL2_Standard': {
         'NinjaJump_Start': {}, 'NinjaJump_Land': {}, 'ClimbUp_1m_RM': {'inPlace': 'xyz'}, 'LayToIdle': {}, 'Consume': {},
         'Chest_Open': {}, 'Farm_Harvest': {},

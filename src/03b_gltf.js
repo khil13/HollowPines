@@ -32,7 +32,8 @@ const Assets = {
   measure() { // stride per cycle for locomotion clips, and upper-body pose snapshots
     const tmp = THREE.SkeletonUtils.clone(this.gltf.scene), mixer = new THREE.AnimationMixer(tmp), foot = tmp.getObjectByName('FootL'), hips = tmp.getObjectByName('Hips');
     const sample = (name, f) => { mixer.stopAllAction(); const a = mixer.clipAction(this.clips[name]); a.reset().play(); a.paused = true; a.time = this.clips[name].duration * f; mixer.update(0); tmp.updateMatrixWorld(true); };
-    for (const n of ['Walk', 'Run', 'Walk_Carry', 'Run_Carry']) { let mn = 1e9, mx = -1e9; for (let i = 0; i <= 40; i++) { sample(n, i / 40); const fp = new THREE.Vector3(), hp = new THREE.Vector3(); foot.getWorldPosition(fp); hips.getWorldPosition(hp); mn = Math.min(mn, fp.z - hp.z); mx = Math.max(mx, fp.z - hp.z); } this.speeds[n] = { stride: (mx - mn) * 2 / 1.0, dur: this.clips[n].duration }; }
+    // stride per cycle, and the cycle position where the left foot is furthest forward (so cycles stay in step when blended)
+    for (const n of ['Walk', 'Run', 'Walk_Carry', 'Run_Carry', 'Crouch_Fwd_Loop'].filter(n => this.clips[n])) { let mn = 1e9, mx = -1e9, off = 0; for (let i = 0; i <= 40; i++) { sample(n, i / 40); const fp = new THREE.Vector3(), hp = new THREE.Vector3(); foot.getWorldPosition(fp); hips.getWorldPosition(hp); mn = Math.min(mn, fp.z - hp.z); if (fp.z - hp.z > mx) { mx = fp.z - hp.z; off = i / 40; } } this.speeds[n] = { stride: (mx - mn) * 2 / 1.0, dur: this.clips[n].duration, off }; }
     const UPPER = ['Abdomen', 'Torso', 'Neck', 'Head', 'ShoulderL', 'UpperArmL', 'LowerArmL', 'FistL', 'ShoulderR', 'UpperArmR', 'LowerArmR', 'FistR'];
     const snap = (key, clip, f, bones = UPPER) => { sample(clip, f); const m = {}; for (const b of bones) { const o = tmp.getObjectByName(b); if (o) m[b] = o.quaternion.clone(); } this.snaps[key] = m; };
     snap('aim', 'Shoot_OneHanded', 0.3); snap('carry', 'Walk_Carry', 0.25); snap('handsup', 'Victory', 0.45); snap('reins', 'Walk_Carry', 0.25, ['ShoulderL', 'UpperArmL', 'LowerArmL', 'FistL', 'ShoulderR', 'UpperArmR', 'LowerArmR', 'FistR']);
@@ -70,7 +71,9 @@ function makeModelHumanoid(o = {}) {
 const CLIPMAP = { pickup: ['PickUp', 0, 1], search: ['PickUp', 0.25, 0.6], kneel: ['PickUp', 0.3, 0.55], dig: ['PickUp', 0.2, 0.6], punch: ['Punch', 0, 1], hook: ['Punch', 0, 1], uppercut: ['SwordSlash', 0.1, 0.9], dodge: ['Roll', 0, 1], hit: ['RecieveHit', 0, 1], hitB: ['RecieveHit', 0, 1], climb: ['Jump', 0.1, 0.75], mount: ['Jump', 0.05, 0.5], jumpPrep: ['Jump', 0, 0.16], land: ['Jump', 0.78, 1], standup: ['StandUp', 0, 1] };
 // retargeted Universal Animation Library clips used instead when loaded: [clip, from, to, pingpong, new action duration]
 const CLIP_UPGRADES = { eat: ['Consume', 0, 1], search: ['Chest_Open', 0.12, 0.5, true], standup: ['LayToIdle', 0.08, 1, false, 1.4], climb: ['ClimbUp_1m_RM', 0, 1],
-  jumpPrep: ['NinjaJump_Start', 0, 0.12], land: ['NinjaJump_Land', 0.18, 0.5] };
+  jumpPrep: ['NinjaJump_Start', 0, 0.12], land: ['NinjaJump_Land', 0.18, 0.5], kneel: ['Fixing_Kneeling', 0.25, 0.75, true], door: ['Interact', 0.2, 0.55], punch: ['Punch_Jab', 0, 0.6], hit: ['Hit_Chest', 0, 1] };
+// root offset while swimming with clips (the swim clips are already horizontal): treading water, swimming forward
+const SWIM_Y = { idle: 0.0, fwd: 0.35 };
 // gestures for actions without a clip: [bone, axis, angle(u)] in character space; axis p = pitch (+ forward/up), r = roll (+ toward character's left), y = yaw
 const GESTURES = {
   eat: u => { const k = Math.min(1, Math.sin(u * Math.PI) * 1.6); return [['UpperArmR', 'p', 1.3 * k], ['LowerArmR', 'p', 1.7 * k]]; },
@@ -118,27 +121,33 @@ class ClipAnimator {
   // target clip weights for the base layer; clip times are written to this.clipT
   baseTargets(st, T) {
     const R = this.rig, state = st.state, carry = this.lw.carry > 0.5, walkN = carry ? 'Walk_Carry' : 'Walk', runN = carry ? 'Run_Carry' : 'Run', CT = this.clipT, dur = n => Assets.clips[n].duration;
-    const idleT = (this.t % dur('Idle')) / dur('Idle');
+    const idleT = (this.t % dur('Idle')) / dur('Idle'), has = n => !!Assets.clips[n], loopT = n => (this.t % dur(n)) / dur(n);
+    const use = (n, w, t) => { this.baseSet.add(n); T[n] = (T[n] || 0) + w; CT[n] = t; }; // retargeted loops join the crossfaded base set
     if (state === 'ground' || state === 'chat' || state === 'work' || state === 'handsup') {
       const L = st.loco || this.fsm, ls = state === 'ground' ? L.state : 'idle', sp = state === 'ground' ? st.speed : 0, crouch = ls === 'crouchIdle' || ls === 'crouchWalk';
       // gait phase follows distance travelled; stride from the clips (measured at load), shortened when crouched
       const rw = this.runW = ls === 'sprint' ? 1 : ls === 'jog' ? clamp((sp - 1.7) / 3.7, 0.25, 0.85) : ls === 'walk' || ls === 'startWalk' || ls === 'crouchWalk' ? 0 : this.runW;
-      const sw = Assets.speeds[walkN], sr = Assets.speeds[runN], sc = R.scale; let stride = lerp(sw.stride * sc * (crouch ? 0.75 : 1), sr.stride * sc, rw); stride = Math.max(stride, sp / (rw > 0.5 ? 2.3 : 1.7));
+      const sw = Assets.speeds[walkN], sr = Assets.speeds[runN], sc = R.scale, cs = crouch && Assets.speeds.Crouch_Fwd_Loop; let stride = cs ? cs.stride * sc : lerp(sw.stride * sc * (crouch ? 0.75 : 1), sr.stride * sc, rw); stride = Math.max(stride, sp / (rw > 0.5 ? 2.3 : 1.7));
       const turnStep = Math.abs(this.turnRate) > 1.2 && sp < 0.6 ? Math.abs(this.turnRate) * 0.12 : 0, prev = this.phase; this.phase += (sp / Math.max(0.3, stride) + turnStep) * this.dt;
       if (Math.floor(prev * 2) !== Math.floor(this.phase * 2) && state === 'ground' && this.owner.onStep && (sp > 0.3 || turnStep)) this.owner.onStep();
-      const ph = ((this.phase % 1) + 1) % 1; CT[walkN] = CT[runN] = ph; CT.Idle = idleT;
+      const ph = ((this.phase % 1) + 1) % 1, po = n => ((ph + (Assets.speeds[n] ? Assets.speeds[n].off : 0) - sw.off) % 1 + 1) % 1; CT[walkN] = po(walkN); CT[runN] = po(runN); CT.Idle = idleT;
       const pose = st.poseClip && Assets.clips[st.poseClip] ? st.poseClip : null; // a place-specific loop (harvesting, arms folded)
       if (pose && (state === 'work' || (state === 'ground' && ls === 'idle' && !turnStep))) { this.baseSet.add(pose); T[pose] = 1; CT[pose] = (this.t % dur(pose)) / dur(pose); }
       else if (state === 'work') { T.PickUp = 1; CT.PickUp = 0.35 + 0.08 * Math.sin(this.t * 3); }
+      else if (state === 'chat' && has('Idle_Talking_Loop')) use('Idle_Talking_Loop', 1, loopT('Idle_Talking_Loop'));
       else if (ls === 'jumpStart') { T.Jump = 1; CT.Jump = lerp(0, 0.16, clamp(L.t / 0.1, 0, 1)); }
       else if (ls === 'landing') { T.Jump = 1; CT.Jump = lerp(0.78, 1, clamp(L.t / 0.25, 0, 1)); }
+      else if (ls === 'crouchIdle' && has('Crouch_Idle_Loop')) use('Crouch_Idle_Loop', 1, loopT('Crouch_Idle_Loop'));
       else if (ls === 'idle' || ls === 'crouchIdle') { if (turnStep) { T.Idle = 0.5; T[walkN] = 0.5; } else T.Idle = 1; }
       else if (ls === 'startWalk') { const k = clamp(sp / 1.2, 0, 1); T.Idle = 1 - k; T[walkN] = k; }
       else if (ls === 'dodge') T[runN] = 1; // the Roll clip plays on the action layer on top of this
-      else { T[walkN] = 1 - rw; T[runN] = rw; } // walk / jog / sprint / crouchWalk
-      this.lw.crouch = damp(this.lw.crouch, crouch ? 1 : 0, 10, this.dt); this.lw.handsup = damp(this.lw.handsup, state === 'handsup' ? 1 : 0, 10, this.dt);
+      else if (ls === 'crouchWalk' && has('Crouch_Fwd_Loop')) use('Crouch_Fwd_Loop', 1, po('Crouch_Fwd_Loop'));
+      else { T[walkN] = 1 - rw; T[runN] = rw; } // walk / jog / sprint (and crouchWalk without the clip)
+      this.lw.crouch = damp(this.lw.crouch, crouch && !has('Crouch_Idle_Loop') ? 1 : 0, 10, this.dt); // procedural crouch only without crouch clips this.lw.handsup = damp(this.lw.handsup, state === 'handsup' ? 1 : 0, 10, this.dt);
     } else if (state === 'air') { T.Jump = 1; CT.Jump = st.vy > 0 ? lerp(0.42, 0.3, clamp(st.vy / 7, 0, 1)) : lerp(0.48, 0.62, clamp(-st.vy / 10, 0, 1)); this.lw.crouch = damp(this.lw.crouch, 0, 10, this.dt); }
+    else if (state === 'swim' && has('Swim_Fwd_Loop')) { const k = this.swimK = clamp(st.speed / 1.6, 0, 1); this.phase += this.dt * lerp(0.4, 0.9, k); use('Swim_Fwd_Loop', k, (this.phase % 1 + 1) % 1); use('Swim_Idle_Loop', 1 - k, loopT('Swim_Idle_Loop')); }
     else if (state === 'swim') { this.phase += this.dt * (st.speed > 0.3 ? 1.4 : 0.5); T[runN] = 1; CT[runN] = (this.phase % 1 + 1) % 1; }
+    else if (state === 'sit' && (has(st.poseClip) || has('Sitting_Idle_Loop'))) { const n = has(st.poseClip) ? st.poseClip : 'Sitting_Idle_Loop'; use(n, 1, loopT(n)); }
     else if (state === 'ride' || state === 'sit') { T.SitDown = 1; CT.SitDown = 1; }
     else if (state === 'lie' || state === 'down') { T.Death = 1; CT.Death = 1; }
   }
@@ -184,7 +193,7 @@ class ClipAnimator {
     if (this.lw.aim > 0.01) { rot(R.chest, 'p', -this.lookPitch * 0.8 * this.lw.aim); if (this.lw.rifle > 0.5) { rot(BN.UpperArmL, 'p', 1.2 * this.lw.aim); rot(BN.LowerArmL, 'r', 0.6 * this.lw.aim); } }
     if (this.lw.block > 0.01) { const w = this.lw.block; rot(BN.UpperArmL, 'p', 1.6 * w); rot(BN.UpperArmR, 'p', 1.6 * w); rot(BN.LowerArmL, 'p', 1.4 * w); rot(BN.LowerArmR, 'p', 1.4 * w); }
     for (const [list, w] of gestures) for (const [b, ax, ang] of list) rot(BN[b], ax, ang * w);
-    if (state === 'chat') { rot(BN.UpperArmR, 'p', 0.5 + 0.3 * Math.sin(this.t * 3)); rot(BN.LowerArmR, 'p', 0.8); rot(BN.Head, 'y', 0.1 * Math.sin(this.t * 1.7)); }
+    if (state === 'chat' && !Assets.clips.Idle_Talking_Loop) { rot(BN.UpperArmR, 'p', 0.5 + 0.3 * Math.sin(this.t * 3)); rot(BN.LowerArmR, 'p', 0.8); rot(BN.Head, 'y', 0.1 * Math.sin(this.t * 1.7)); }
     // lean into acceleration (start-walk and sprint starts lean further forward)
     if (state === 'ground' && !st.crouch) rot(R.spine, 'p', clamp(this.accel * 0.02, -0.2, 0.2) + (this.fsm.state === 'startWalk' ? 0.06 : this.fsm.state === 'sprint' ? 0.08 : 0));
     if (this.lookAt && state !== 'swim' && state !== 'down' && state !== 'lie') { const a = angDiff(r.yaw, Math.atan2(this.lookAt.x - r.pos.x, this.lookAt.z - r.pos.z)); if (Math.abs(a) < 1.9) { const k2 = clamp(a, -1.0, 1.0); rot(R.neck, 'y', k2 * 0.35); rot(R.headBone, 'y', k2 * 0.5); } }
@@ -192,7 +201,7 @@ class ClipAnimator {
     if ((state === 'ground' || state === 'ride' || state === 'chat' || state === 'work' || state === 'handsup') && actW < 0.6) this.legIK(st, state, dt);
     // ---- squash & stretch, secondary motion
     const acc = -160 * (this.sq - 1) - 14 * this.sqv; this.sqv += acc * dt; this.sq += this.sqv * dt; this.sq = clamp(this.sq, 0.75, 1.25);
-    R.vis.scale.set(R.scale / Math.sqrt(this.sq), R.scale * this.sq, R.scale / Math.sqrt(this.sq)); R.vis.rotation.z = clamp(-this.turnRate * 0.03 * st.speed, -0.2, 0.2); R.vis.rotation.x = state === 'swim' ? 1.1 : 0; R.vis.position.y = state === 'swim' ? -0.4 : 0;
+    R.vis.scale.set(R.scale / Math.sqrt(this.sq), R.scale * this.sq, R.scale / Math.sqrt(this.sq)); R.vis.rotation.z = clamp(-this.turnRate * 0.03 * st.speed, -0.2, 0.2); const swimClip = state === 'swim' && !!Assets.clips.Swim_Fwd_Loop; R.vis.rotation.x = state === 'swim' && !swimClip ? 1.1 : 0; R.vis.position.y = state === 'swim' ? (swimClip ? lerp(SWIM_Y.idle, SWIM_Y.fwd, this.swimK || 0) : -0.4) : 0;
     R.hat.rotation.x = this.hatS.step(clamp(-this.accel * 0.012 + (st.vy || 0) * -0.01, -0.3, 0.3), dt); R.hat.rotation.z = R.baseHatZ + this.hatZ.step(clamp(this.turnRate * 0.03, -0.2, 0.2), dt);
   }
   lowerHips(m) { if (!m) return; const b = this.rig.hips, p = b.getWorldPosition(_cv[1]); p.y -= m; b.position.copy(b.parent.worldToLocal(p)); this.rig.model.updateMatrixWorld(true); }

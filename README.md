@@ -62,12 +62,22 @@ Input is released when the window loses focus or is hidden, and when a touch is 
 | jog | Walk + Run clips blended by speed (no jog clip in the model) |
 | sprint | Run clip, plus a procedural forward lean |
 | jumpStart / rising / falling / landing | sections of the Jump clip |
-| crouchIdle / crouchWalk | Idle / Walk clips with procedural crouch (hips lowered, spine bent, legs re-solved by IK); no crouch clips in the model |
+| crouchIdle / crouchWalk | Crouch_Idle_Loop / Crouch_Fwd_Loop (retargeted from the Universal Animation Library); procedural crouch only if those are missing |
 | dodge | Roll clip |
 
-Retargeted clips (Quaternius Universal Animation Library 2, CC0) replace originals where they read better: jump take-off and landing use the NinjaJump crouches, eating standing still uses Consume, searching uses Chest_Open, mantling uses ClimbUp, getting up after a knockout uses LayToIdle, and Ezra harvests his field with Farm_Harvest. If the extra data is missing, every action falls back to the original clip.
+Retargeted clips (Quaternius Universal Animation Library 1 and 2, CC0) are used where they read better:
+- crouching and sneaking: Crouch_Idle_Loop and Crouch_Fwd_Loop
+- swimming: Swim_Idle_Loop and Swim_Fwd_Loop, blended by speed
+- seated NPCs: Sitting_Idle_Loop, with Sitting_Talking_Loop at one saloon seat
+- NPCs chatting or in dialogue: Idle_Talking_Loop
+- kneeling (clues, skinning, hogtying): Fixing_Kneeling; doors: Interact; jab: Punch_Jab; hit reaction: Hit_Chest
+- jump take-off and landing: the NinjaJump crouches
+- eating while standing: Consume; searching: Chest_Open; mantling: ClimbUp; getting up: LayToIdle
+- Ezra's field work: Farm_Harvest
 
-Gait phase follows distance travelled using the stride measured from the clips, and two-bone leg IK keeps feet on slopes. Missing assets that would improve this: dedicated jog, crouch-idle/crouch-walk, jump start/land, turn-in-place and start/stop clips for the same 23-bone rig.
+If the extra data is missing, every one falls back to the original clip or procedural pose.
+
+Gait phase follows distance travelled using the stride measured from the clips, and two-bone leg IK keeps feet on slopes. Still missing: a jog that suits chibi proportions (the library's walk, jog and sprint retarget into a hunched scramble, so the rig's own Walk/Run blend stays), plus turn-in-place and start/stop clips.
 
 ## Run locally
 ```
@@ -80,9 +90,9 @@ python3 -m http.server 8000         # then open http://localhost:8000/game.html
 ```
 python3 build.py                                          # test.html is needed by the tool
 python3 tools/retarget.py UAL2_Standard.glb --preview     # contact sheets in tools/out/ (game character above, source below)
-python3 tools/retarget.py UAL2_Standard.glb --write       # writes assets/anim/UAL2_Standard.json
+python3 tools/retarget.py UAL2_Standard.glb --write       # writes assets/anim/UAL2_Standard.json (same for UAL1_Standard.glb)
 python3 build.py
 ```
 How it works: each target bone takes the source bone's rotation change, measured from matching relaxed standing poses (the character's Idle and a standing frame of the pack), so the chibi keeps its own posture. Hips use source motion scaled by hip height, and the IK foot targets sit at the end of each retargeted leg. Each pack needs a reference frame in `REF` and a reviewed clip list in `CLIPS`. Some clips don't survive the change in proportions; the list notes which ones were left out and why. The source packs aren't committed (they are 8 MB or more); download them from quaternius.com.
 
-Credits: animations from the Universal Animation Library 2 by Quaternius (quaternius.com), CC0 1.0.
+Credits: animations from the Universal Animation Library and Universal Animation Library 2 by Quaternius (quaternius.com), CC0 1.0.
