@@ -239,4 +239,5 @@ async def main():
     fails = [x for x in RESULTS if not x[1]]
     print(f"\n{len(RESULTS)-len(fails)}/{len(RESULTS)} story checks passed")
     json.dump(RESULTS, open(OUT + 'story.json', 'w'))
+    if fails or A_err + B_err: raise SystemExit(1)  # non-zero exit so CI fails on any failed check or page error
 asyncio.run(main())

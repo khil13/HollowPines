@@ -181,9 +181,10 @@ async def main():
         check('encounter: freeing a snared deer releases it and raises honor', r and r2['h'] > r2['h0'] and r2['st'] == 'flee', [r, r2])
         r = await ev(pg, "(()=>{ HP.S.time.hour=13; HP.S.flags.brawlDay=0; HP.tp(-40,24); HP.sim(0.2); Encounters.brawl(); HP.sim(1); const c=HP.NPC.byKey('cyrus'); HP.tp(c.pos.x, c.pos.z+1.5); HP.Game.player.yaw=Math.PI; HP.sim(0.2); HP.press('Talk to Cyrus'); const ch=HP.choices(); HP.choose('Break it up'); HP.sim(0.5); return {ch, abe:HP.NPC.byKey('abe').state, helped:!!(HP.S.npcMem.abe||{}).helped}; })()")
         check('encounter: stepping into the saloon brawl ends it and is remembered', r['helped'] and r['abe'] == 'routine', r)
-        print('page errors:', [e for e in errs if 'ERR_TUNNEL' not in e][:8])
+        page_errs = [e for e in errs if 'ERR_TUNNEL' not in e]; print('page errors:', page_errs[:8])
         await b.close()
     fails = [r for r in RESULTS if not r[1]]
     print(f"\n{len(RESULTS)-len(fails)}/{len(RESULTS)} mechanics checks passed")
     json.dump(RESULTS, open(OUT + 'mechanics.json', 'w'))
+    if fails or page_errs: raise SystemExit(1)  # non-zero exit so CI fails on any failed check or page error
 asyncio.run(main())
