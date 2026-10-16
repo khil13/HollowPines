@@ -33,6 +33,7 @@ const ITEMS = {
   journal_copy: { name: 'Copied journal pages', cat: 'quest', col: '#cfc3a6', d: 'Mae copied the key pages for you.' },
   letter: { name: "Eli's letter to Mae", cat: 'quest', col: '#e8dcc0', d: 'Unsent. Mentions "the cave above the cabin."' },
   deed: { name: 'Greer homestead deed', cat: 'quest', col: '#efe1bd', d: 'Proof the Greers own their land.' },
+  vane_ledger: { name: "Vane's ledger", cat: 'quest', col: '#5a3a22', d: 'Payments to Sheriff Pike and the Crane gang, in Silas Vane\'s own hand.' },
   hank_map: { name: "Hank's claim map", cat: 'quest', col: '#d6c49a', d: 'An X near Lookout Ridge.' },
 };
 const OUTFITS = { duster: { name: 'Trail duster', price: 0, shirt: '#4f7ca8', coat: '#8a6a4a', hat: '#6b4a2f' }, poncho: { name: 'Red poncho', price: 15, shirt: '#b23a2e', coat: '#c8443a', hat: '#3b2a1e' }, vest: { name: 'Town vest', price: 10, shirt: '#e6dcc5', coat: null, vest: '#2f4f4f', hat: '#2b2b2b' } };

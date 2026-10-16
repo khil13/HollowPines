@@ -37,10 +37,11 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .toast{background:rgba(29,42,37,.82);border-left:4px solid var(--ember);padding:5px 10px;border-radius:6px;font-weight:700;font-size:13px;animation:tin .25s ease-out}
 .toast.bad{border-color:var(--brick)} .toast.good{border-color:var(--sage)}
 @keyframes tin{from{transform:translateX(-14px);opacity:0}}
-#cross{left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px}
+#cross{left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;transform:scale(var(--s,1));transition:transform .05s}
+#cross.hit{transform:scale(calc(var(--s,1)*1.5)) rotate(45deg)}#cross.head::before,#cross.head::after{background:#ff3b30}
 #cross::before,#cross::after{content:"";position:absolute;background:var(--paper);box-shadow:0 0 2px #000}
 #cross::before{left:10px;top:0;width:2px;height:22px}#cross::after{top:10px;left:0;height:2px;width:22px}
-#cross.lock::before,#cross.lock::after{background:var(--ember)}
+#cross.lock::before,#cross.lock::after{background:#e5484d}
 #ammo{right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));font-weight:900;background:rgba(29,42,37,.6);padding:4px 10px;border-radius:10px;font-variant-numeric:tabular-nums}
 #tags{inset:0}
 .tag{position:absolute;transform:translate(-50%,-100%);font:900 15px var(--body);text-shadow:0 1px 3px #000;white-space:nowrap}

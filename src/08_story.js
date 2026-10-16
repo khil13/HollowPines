@@ -2,7 +2,7 @@
    Hollow Pines — five chapters. Wren Calloway comes home to Juniper Gap because her brother Eli, a railroad
    surveyor, stopped writing. Eli found out the Halvorsen Railroad's land agent, Silas Vane, is using the Crane
    gang to scare homesteaders off land the new line will cross, and that someone in town is helping.
-   Chapters 1–3 are playable. Chapters 4–5 are designed and gated on the same world state. */
+   Chapters 1–4 are playable (Chapter 4 lives in 08b_ch4.js). Chapter 5 is designed and gated on the same world state. */
 const CAST = {
   wren: { name: 'Wren Calloway', role: 'Protagonist', bio: 'Former railroad survey hand, eight years gone from the valley. Steady, dry, and too proud to ask for help. Wants her brother home, and wants to know who sold him out.' },
   eli: { name: 'Eli Calloway', role: 'The missing brother', bio: 'Wren\'s younger brother, surveying for the Halvorsen line. Stubborn and honest to a fault. He wrote everything down.' },
@@ -12,7 +12,7 @@ const CAST = {
   nell: { name: 'Nell Greer', role: 'Homesteader', bio: 'Ezra\'s wife. Keeps the books, and knows exactly how bad things are. Wants her family safe more than the land.' },
   fenwick: { name: 'Fenwick Crane', role: 'Outlaw boss (rival faction)', bio: 'Leads the Crane gang. Hired muscle for the railroad, and resents being treated like it. Wants a bigger cut, or to cut Vane out entirely.' },
   dutchy: { name: 'Dutchy Moss', role: 'Gang lookout · possible ally', bio: 'Nineteen and in over his head. Joined the Cranes for meals, stayed out of fear. Wants a way out that won\'t get him shot.' },
-  vane: { name: 'Silas Vane', role: 'Railroad land agent (antagonist)', bio: 'Soft-spoken and always smiling. Buys land cheap after the Cranes make owners desperate. Wants the line built on his maps, and the profit in his name. (Appears in person in Chapter 4.)' },
+  vane: { name: 'Silas Vane', role: 'Railroad land agent (antagonist)', bio: 'Soft-spoken and always smiling. Buys land cheap after the Cranes make owners desperate. Wants the line built on his maps, and the profit in his name. (First seen in person at Willow Bridge.)' },
   brock: { name: 'Brock Harlan', role: 'Vane\'s foreman', bio: 'Collects "debts" for the railroad with a ledger and two hired guns.' },
   cora: { name: 'Cora Vance', role: 'Saloon keeper', bio: 'Hears everything said over her bar and sells some of it. Fond of people who tip and people who tell the truth.' },
   hank: { name: 'Hank Dorsey', role: 'Old prospector', bio: 'Forty years looking for the big strike. Talks to his mule, who is not present.' },
@@ -22,7 +22,7 @@ const CHAPTERS = [
   { n: 1, title: 'The Long Way Home', playable: true, text: 'Wren rides into Juniper Gap. Mae\'s strongbox, holding Eli\'s papers, has been stolen by the Crane gang.' },
   { n: 2, title: 'Cold Trail', playable: true, text: 'Eli\'s survey page points to Hollow Cabin. His tracks lead to Bluecap Cave and his field journal, and the Cranes want it too.' },
   { n: 3, title: "Greer's Stand", playable: true, text: 'Eli\'s journal lists the Greers as Vane\'s next mark. Railroad men arrive at their farm with a "debt" to collect.' },
-  { n: 4, title: 'Night at Willow Bridge', playable: false, text: 'Planned: follow Sheriff Pike to a midnight meeting with Silas Vane. What you gave Pike in Chapter 2 decides what he brings to it.' },
+  { n: 4, title: 'Night at Willow Bridge', playable: true, text: 'Sheriff Pike walks out of town at midnight. Follow him unseen to Willow Bridge and hear what he and Silas Vane have to say. What you gave Pike in Chapter 2 decides what he brings to it.' },
   { n: 5, title: 'The Ledger', playable: false, text: 'Planned: find Eli in Vane\'s railroad camp. Expose Vane to the territorial marshal (needs the journal or Mae\'s copy and the Greers on their land), ride with the Cranes against him (needs Dutchy as an ally), or take Vane\'s payout and leave the valley.' },
 ];
 
@@ -68,6 +68,8 @@ const STORY = {
     else if (S.missions.m3?.status === 'done') L.push('Ezra Greer\'s telling everybody you stood up for him.');
     if (S.chars.fenwick === 'dead') L.push('Fenwick Crane\'s dead, they say. His boys won\'t take that quiet.');
     if (S.chars.rook === 'jailed') L.push('Rook Malloy\'s cooling his heels in the cell. Nice work.');
+    if (S.chars.pike === 'turned') L.push('They say Sheriff Pike sits up all night with a shotgun across his knees. Waiting on somebody.');
+    if (S.chars.pike === 'left') L.push('Sheriff Pike rode out after some shooting at Willow Bridge. Deputy Bramble\'s wearing the star now.');
     if (S.flags.ida_helped) L.push('A traveler named Ida keeps telling folks you saved her bacon on the trail.');
     if (S.honor >= 40) L.push('You\'ve got a good name around here.'); if (S.honor <= -40) L.push('Folks lock their doors when you ride in.');
     return L.filter(Boolean);
@@ -97,6 +99,7 @@ const STORY = {
         { text: 'Give Eli\'s journal to you for safekeeping', hide: () => !(m2.status === 'active' && !S.decisions.journal && Inv.count('journal')), do: () => { S.decisions.journal = 'mae'; }, next: 'start' },
         { text: 'Let\'s trade.', hide: () => !open, do: () => UI.open('shop'), next: null },
         { text: 'Who is Silas Vane?', hide: () => !S.evidence.journal_read, next: 'vane' },
+        { text: 'Has the sheriff been acting strange?', hide: () => !(S.chars.cora === 'dead' && Missions.st('ch4').status === 'available'), do: () => Missions.start('ch4'), next: 'ch4' },
         { text: 'Goodbye.', next: null },
       ] },
       m1go: { text: 'Coyote Mill, past the bridge. Fenwick Crane runs that bunch. His lookout is a jumpy kid named Dutchy. Bring back that box, Wren. The money matters less than the papers.', on: () => { S.flags.met_mae = true; } },
@@ -105,6 +108,7 @@ const STORY = {
       m2warm: { text: 'Here\'s his letter. He wrote about "the blue cave above the cabin." If he left the cabin in a hurry, his tracks may still be there. Go soon, before the rain takes them.', on: () => { if (!Inv.count('letter')) Inv.add('letter'); S.flags.m2_trusted = true; } },
       m2cold: { text: 'I\'m not handing Eli\'s last letter to someone who skims a widow\'s till. Hollow Cabin. Find your own way.', on: () => { S.flags.m2_trusted = false; } },
       copied: { text: 'Done. Every name and every figure. If anything happens to that journal, we still have this. Silas Vane... I\'ve sold that man coffee.' },
+      ch4: { text: 'Amos bought lamp oil and a flask of whiskey this afternoon and asked if I\'d be up past midnight. Somebody\'s meeting him tonight. Watch the jail after eleven.' },
       vane: { text: 'Land agent for the Halvorsen Railroad. Smiles too much. Buys homesteads cheap from folks who\'ve just had a run of terrible luck. I always thought it was luck.' },
     };
     return T;
@@ -119,7 +123,7 @@ const STORY = {
   talkPike(n) {
     const bm = Missions.st('bounty_rook'); const P = Game.player; const hasRook = P.carry && P.carry.npc && P.carry.npc.key === 'rook';
     return {
-      start: { text: () => { if (hasRook) return 'Well, I\'ll be. Rook Malloy, trussed like a Sunday ham.'; if (S.wanted) return 'You\'ve got a nerve, talking to me with paper on you.'; if (S.decisions.journal === 'pike') return 'That journal\'s safe with me, Miss Calloway. Safer than with you.'; if (S.decisions.journal && S.decisions.journal !== 'pike') return 'Withholding evidence from the law. I won\'t forget it.'; return STORY.smalltalk(n, ['Keep your iron holstered in my town.', 'Eli? Folks wander off. Doesn\'t always mean something.', 'The railroad\'s good for this valley, whatever folks say.']); },
+      start: { text: () => { if (hasRook) return 'Well, I\'ll be. Rook Malloy, trussed like a Sunday ham.'; if (S.wanted) return 'You\'ve got a nerve, talking to me with paper on you.'; if (S.chars.pike === 'turned') return 'I\'ll say it all to the marshal, Calloway. If Vane lets me live that long.'; if (S.decisions.ch4 === 'bought') return 'Vane says you\'re leaving by Sunday. Good.'; if (S.decisions.journal === 'pike') return 'That journal\'s safe with me, Miss Calloway. Safer than with you.'; if (S.decisions.journal && S.decisions.journal !== 'pike') return 'Withholding evidence from the law. I won\'t forget it.'; return STORY.smalltalk(n, ['Keep your iron holstered in my town.', 'Eli? Folks wander off. Doesn\'t always mean something.', 'The railroad\'s good for this valley, whatever folks say.']); },
         choices: [
           { text: 'Turn in Rook Malloy (alive)', hide: () => !hasRook, do: () => STORY.turnInRook(true), next: 'paid' },
           { text: 'Rook Malloy is dead. Here\'s his gun belt.', hide: () => !(bm.status === 'active' && S.flags.rook_proof && !hasRook), do: () => STORY.turnInRook(false), next: 'paid' },
@@ -131,7 +135,7 @@ const STORY = {
       paid: { text: 'Bounty\'s paid. The valley\'s a little quieter for it.' },
     };
   },
-  talkCora(n) { return { start: { text: () => STORY.smalltalk(n, S.chapter >= 2 ? ['Brock Harlan\'s been in, buying rounds and asking about the Greer place.', 'Sheriff Pike drinks alone lately. Pays with new bills.'] : ['First drink\'s fifty cents. Gossip costs extra.', 'Eli used to sit right there and write in that little book of his.']), choices: [{ text: 'Buy a drink ($0.50)', cond: () => S.money >= 0.5, do: () => { Inv.money(-0.5); S.p.stCore = Math.min(100, S.p.stCore + 20); Rep.rel('cora', 2); }, next: 'drink' }, { text: 'Heard anything about Eli? ($2)', cond: () => S.money >= 2, do: () => { Inv.money(-2); S.flags.cora_tip = true; }, next: 'tip' }, { text: 'Goodbye', next: null }] }, drink: { text: 'There you go. On the house next time if you keep your boots off my tables.' }, tip: { text: 'He came in the night before he vanished, white as milk. Said "the sheriff\'s in on it" and asked me if I trusted Amos Pike. I said I trust nobody. He left at dawn.', on: () => { if (!S.evidence.cora_tip) { S.evidence.cora_tip = true; journal('Cora says Eli suspected Sheriff Pike before he disappeared.', 'evidence'); } } } }; },
+  talkCora(n) { return { start: { text: () => STORY.smalltalk(n, S.chapter >= 2 ? ['Brock Harlan\'s been in, buying rounds and asking about the Greer place.', 'Sheriff Pike drinks alone lately. Pays with new bills.'] : ['First drink\'s fifty cents. Gossip costs extra.', 'Eli used to sit right there and write in that little book of his.']), choices: [{ text: 'Buy a drink ($0.50)', cond: () => S.money >= 0.5, do: () => { Inv.money(-0.5); S.p.stCore = Math.min(100, S.p.stCore + 20); Rep.rel('cora', 2); }, next: 'drink' }, { text: 'Anything about the sheriff?', hide: () => Missions.st('ch4').status !== 'available', do: () => Missions.start('ch4'), next: 'ch4' }, { text: 'Wait here with you until eleven', hide: () => !(CH4.stage() === 'night' && !CH4.inWindow()), do: () => CH4.waitForMidnight(), next: 'waited' }, { text: 'Heard anything about Eli? ($2)', cond: () => S.money >= 2, do: () => { Inv.money(-2); S.flags.cora_tip = true; }, next: 'tip' }, { text: 'Goodbye', next: null }] }, ch4: { text: 'Funny you ask. Amos had me fill his flask and asked for a cold supper at eleven. He never eats late. He\'s meeting somebody tonight, after midnight, and he didn\'t want me knowing who. Watch the jail.' }, waited: { text: 'Eleven. His lamp\'s still lit across the street. Go on.' }, drink: { text: 'There you go. On the house next time if you keep your boots off my tables.' }, tip: { text: 'He came in the night before he vanished, white as milk. Said "the sheriff\'s in on it" and asked me if I trusted Amos Pike. I said I trust nobody. He left at dawn.', on: () => { if (!S.evidence.cora_tip) { S.evidence.cora_tip = true; journal('Cora says Eli suspected Sheriff Pike before he disappeared.', 'evidence'); } } } }; },
   talkDoc(n) { return { start: { text: () => S.p.hp < S.p.maxHp * 0.7 ? 'You\'re bleeding on my floor. Sit.' : STORY.smalltalk(n, ['Eat something warm. You look peaky.', 'Stay out of the saloon brawls and we\'ll get along.']), choices: [{ text: 'Patch me up ($3)', cond: () => S.money >= 3, do: () => { Inv.money(-3, 'doctor'); S.p.hp = S.p.maxHp; S.p.hpCore = 100; }, next: null }, { text: 'Buy a tonic ($6)', cond: () => S.money >= 6, do: () => { Inv.money(-6); Inv.add('tonic'); }, next: null }, { text: 'Goodbye', next: null }] } }; },
   talkHank(n) { return { start: { text: () => STORY.smalltalk(n, ['Bluecap Cave! Glows at night. Spirits, or ore. Either way I ain\'t going in.', 'My mule says the railroad\'s gonna run right through Greer\'s corn. My mule\'s usually right.', 'Gold in them hills. Probably. Some.']), choices: [{ text: 'Goodbye', next: null }] } }; },
   talkEzra(n) {
@@ -303,7 +307,6 @@ Missions.def({ id: 'bounty_rook', type: 'bounty', title: 'Wanted: Rook Malloy', 
 });
 Missions.defs.bounty_rook.stages.forEach(s => s.fail = [{ check: () => S.chars.pike === 'dead', why: 'There is no sheriff to pay the bounty.' }]);
 
-Missions.def({ id: 'ch4', type: 'main', chapter: 4, title: 'Night at Willow Bridge', giver: 'none', summary: 'Coming in the next build: follow Sheriff Pike to a midnight meeting.', prereq: () => Missions.st('m3').status === 'done' || Missions.st('m3').status === 'failed', stages: [{ id: 'x', objectives: [] }] });
 
 /* ---------- Mission helpers ---------- */
 Object.assign(STORY, {

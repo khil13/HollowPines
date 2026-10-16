@@ -85,9 +85,11 @@ const Game = {
 };
 
 class CamRig {
-  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; this.groundY = 0;
+  constructor(cam) { this.cam = cam; this.yaw = Math.PI; this.pitch = 0.3; this.dist = 4.6; this.zoom = Settings.v.zoom; this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.idleT = 0; this.snap = true; this.ray = new THREE.Raycaster(); this.lookOff = new THREE.Vector3(); this.collD = 99; this.groundY = 0; this.kickR = 0; this.snapT = 0; this.snapTgt = null;
     this.v = [...Array(6)].map(() => new THREE.Vector3()); this._dir = new THREE.Vector3(); this._bl = []; this._cn = []; }
   dir() { return this.cam.getWorldDirection(this._dir); }
+  kick(a) { this.pitch -= a; this.kickR += a; } // gun recoil: the view jumps up, then settles back (see update)
+  snapTo(t) { this.snapTgt = t; this.snapT = 0.2; } // soft lock: swing the reticle onto a target over a moment
   blockers(base) { const out = this._bl; out.length = 0; for (const m of WallMeshes) { if (!m._wp) { m._wp = new THREE.Vector3(); m.getWorldPosition(m._wp); } if (m._wp.distanceToSquared(base) < 500) out.push(m); } return out; }
   // solid world colliders (buildings, rocks, wagons, wide trunks) block the camera; thin posts and trunks are ignored so the view doesn't pop
   solidAt(x, y, z) { for (const c of Col.near(x, z, 0.2, this._cn)) { if (!c.block || y < c.y0 || y > c.y1) continue; if (c.type === 'circle') { if (c.r >= 0.6 && Math.hypot(x - c.x, z - c.z) < c.r + 0.2) return true; } else if (x > c.minX - 0.2 && x < c.maxX + 0.2 && z > c.minZ - 0.2 && z < c.maxZ + 0.2 && Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.5) return true; } return false; }
@@ -96,18 +98,22 @@ class CamRig {
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) Settings.v.zoom = this.zoom; }
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
-    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25);
+    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } // zoomed in: same feel per degree
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
     if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') return this.convo(dt);
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
     // auto-recenter behind the direction of travel when the player isn't steering the camera
     const moveSp = riding ? H.speed : Math.hypot(P.vel.x, P.vel.z);
     if (Settings.v.autoCam && this.idleT > 1.4 && moveSp > 1.5 && !aim) { const heading = riding ? H.yaw : Math.atan2(P.vel.x, P.vel.z); const k = clamp(moveSp / 7, 0.15, 1) * (riding ? 1.6 : 0.9); if (Math.cos(angDiff(this.yaw, heading)) > -0.3) this.yaw = dampAngle(this.yaw, heading, k, dt); this.pitch = damp(this.pitch, riding ? 0.32 : 0.28, 0.6, dt); }
+    if (this.kickR > 0) { const r = this.kickR * (1 - Math.exp(-11 * dt)); this.pitch += r; this.kickR -= r; if (this.kickR < 1e-4) this.kickR = 0; }
+    if (this.snapT > 0) { this.snapT -= dt; const t = this.snapTgt; if (!aim || !t || !t.alive) this.snapT = 0; else { // steer the actual view ray onto the target's chest
+      const d = this.dir(), tx = t.pos.x - this.pos.x, ty = t.pos.y + t.hitH - this.pos.y, tz = t.pos.z - this.pos.z, k = 1 - Math.exp(-28 * dt);
+      this.yaw += angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)) * k; this.pitch = clamp(this.pitch - (Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1))) * k, -0.42, 1.15); } }
     if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
     const want = aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
-    this.dist = damp(this.dist, want, 6, dt);
+    this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
     if (P.state === 'air') ty = Math.min(ty, this.groundY + 0.35); else this.groundY = ty;
@@ -123,10 +129,10 @@ class CamRig {
     for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && this.solidAt(x, y, z))) { d = Math.max(0.5, t - d / 8); break; } }
     this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = V[4].copy(base).addScaledVector(toC, Math.min(this.collD, len));
     const gh = Terrain.height(p.x, p.z) + 0.35; if (p.y < gh) p.y = gh;
-    if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-18 * dt));
+    if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-(aim ? 60 : 18) * dt)); // no trailing while aiming: the reticle stays glued to the mouse
     this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
-    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), 6, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
+    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }
   convo(dt) { // two-shot conversation framing
     const P = Game.player, N = Dialog.npc.pos, dxx = N.x - P.pos.x, dzz = N.z - P.pos.z, L = Math.hypot(dxx, dzz) || 1, ux = dxx / L, uz = dzz / L; const mid = new THREE.Vector3((N.x + P.pos.x) / 2, Math.max(N.y, P.pos.y) + 1.45, (N.z + P.pos.z) / 2);
