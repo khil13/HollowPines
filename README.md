@@ -14,6 +14,7 @@ Stylized frontier open-world game: rounded, expressive characters with procedura
 - `src/06_entities.js` — player, horse, NPC AI (schedules, witnesses, combat, cover), wildlife
 - `src/07_content.js` — sky, time and weather, world layout, containers, clues, doors
 - `src/08_story.js` — cast, reactive dialogue, missions, encounters
+- `src/08b_ch4.js` — Chapter 4, Night at Willow Bridge (tail, eavesdrop, confrontation)
 - `src/09_ui.js` — HUD, panels, map, shop, camp, fishing
 - `src/10_main.js` — boot, camera (including the two-shot conversation camera), main loop, test hooks (`window.HP`)
 
@@ -28,6 +29,7 @@ python3 test_story.py                # 91 checks: two full playthroughs with opp
 python3 test_controller.py           # 54 checks: movement, frame-rate independence, animation states and crossfades, camera, collision, real touch input, retargeted clips
 python3 test_pwa.py                  # 6 checks: manifest, icons, installability, offline play
 python3 test_camps.py                # 15 checks: traveler camps (routine, night theft, waking sleepers, hold-ups) and outlaw hideouts (takedowns, clearing, loot, reoccupation)
+python3 test_ch4.py                  # 34 checks: Chapter 4 start, unseen tail, eavesdropping, four endings, failure, retry and reload
 ```
 Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a specific browser build) and `three.min.js` (r128) next to `test.html`. Each playthrough saves, reloads the page, presses Continue, and verifies the decisions survived.
 
@@ -35,6 +37,13 @@ Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a 
 Gameplay follows Red Dead Redemption 2; only the animation style takes after Sneaky Sasquatch. `src/07b_camps.js`:
 - **Traveler camps** (Teague's Camp, Holt Hunting Camp): trappers work near camp by day, sit at the fire in the evening and sleep at night. Greet them, ask about the area (they'll mark the outlaw hideout on your map), or rob them. Sneak in crouched to loot their satchel and lockbox: sleepers only notice someone standing right beside them, and walking upright past a bedroll wakes them. Anyone who sees a theft is a witness, which brings honor loss and a bounty through the normal law system. Aim at someone until their hands go up, then choose **Rob** (a witnessed robbery: honor -8, bounty). They remember you.
 - **Outlaw hideout** (Rattlesnake Hollow, Crane gang): two sentries patrol and two outlaws sit at the fire facing inward. Crouched, you aren't noticed from behind, so a punch from behind is a silent takedown; otherwise it's a shootout using the cover AI. Downed outlaws stay down. When nobody's left standing the hideout is cleared and its lockbox (gold, cash, ammo) is free loot; breaking it open while the gang is still around makes them suspicious. Killing outlaws costs no honor. Cleared hideouts are reoccupied after five days.
+
+## Chapter 4: Night at Willow Bridge
+Unlocks after Chapter 3. Ask Cora about the sheriff (Mae, if Cora is dead), then watch the jail after 11 pm; Cora can wait with you until then.
+- **Tail.** Pike walks out of town, down the road and over Willow Bridge, stopping now and then to look back. Stay out of his sight and hearing: crouch, keep your distance, don't ride up behind him. Being seen up close fills his suspicion and fails the tail. So does falling more than 55 m behind for ten seconds, or drawing on him.
+- **Eavesdrop.** Silas Vane and two railroad guns wait on the east bank. They only talk while you're within earshot (20 m), so creep in through the brush. What they say depends on earlier choices: whether Pike brings Vane Eli's journal, how Brock Harlan was faced down, whether the Greers kept their farm, and whether Dutchy is riding with you. Vane lets slip that Eli is alive at Tamarack Pass. Halfway through, the two lean on the bridge rail with their backs to the bank, which is your window to lift Vane's ledger off the crate. If you're spotted, the meeting breaks up and Vane calls you over.
+- **Settle it.** Show Vane Eli's journal (Pike turns on him; this needs the journal or Mae's copy, so it's impossible if you gave the journal to Pike), take Vane's $100 to leave the valley, draw on them (his men fight, Pike fights too if he brought the journal, Vane always runs), back away, or slip off with the ledger. If Dutchy is your ally he waits on the west bank and can spook their horses to pull the guards away.
+- A reload mid-mission restarts the night at the jail. The result is recorded in `S.decisions.ch4`, `S.chars.pike` (`turned`, `left`, `dead`), `S.evidence.ledger` and `S.evidence.eli_alive` for Chapter 5.
 
 ## Mission framework
 Missions are data: stages, objectives (`O.goto`, `O.talk`, `O.item`, `O.clues`, `O.defeat`, `O.check`), optional objectives, fail rules, branching `next`, `prereq` and `blocked` conditions, and `complete`/`failOutcome` hooks that write to world state. Mission types: main, side, hunt, bounty, plus dynamic encounters. A failed mission offers Retry (restores a checkpoint taken at mission start) or Accept (the failure becomes part of the story).
