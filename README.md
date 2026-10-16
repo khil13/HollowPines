@@ -65,6 +65,8 @@ Input is released when the window loses focus or is hidden, and when a touch is 
 | crouchIdle / crouchWalk | Idle / Walk clips with procedural crouch (hips lowered, spine bent, legs re-solved by IK); no crouch clips in the model |
 | dodge | Roll clip |
 
+Retargeted clips (Quaternius Universal Animation Library 2, CC0) replace originals where they read better: jump take-off and landing use the NinjaJump crouches, eating standing still uses Consume, searching uses Chest_Open, mantling uses ClimbUp, getting up after a knockout uses LayToIdle, and Ezra harvests his field with Farm_Harvest. If the extra data is missing, every action falls back to the original clip.
+
 Gait phase follows distance travelled using the stride measured from the clips, and two-bone leg IK keeps feet on slopes. Missing assets that would improve this: dedicated jog, crouch-idle/crouch-walk, jump start/land, turn-in-place and start/stop clips for the same 23-bone rig.
 
 ## Run locally
@@ -72,3 +74,15 @@ Gait phase follows distance travelled using the stride measured from the clips, 
 python3 build.py
 python3 -m http.server 8000         # then open http://localhost:8000/game.html
 ```
+
+## Retargeted animation clips
+`tools/retarget.py` moves clips from Quaternius's Universal Animation Library (a UE5-style 65-bone skeleton) onto the game's 23-bone character and writes `assets/anim/<pack>.json`; `build.py` embeds every file there as `window.EXTRA_ANIMS`.
+```
+python3 build.py                                          # test.html is needed by the tool
+python3 tools/retarget.py UAL2_Standard.glb --preview     # contact sheets in tools/out/ (game character above, source below)
+python3 tools/retarget.py UAL2_Standard.glb --write       # writes assets/anim/UAL2_Standard.json
+python3 build.py
+```
+How it works: each target bone takes the source bone's rotation change, measured from matching relaxed standing poses (the character's Idle and a standing frame of the pack), so the chibi keeps its own posture. Hips use source motion scaled by hip height, and the IK foot targets sit at the end of each retargeted leg. Each pack needs a reference frame in `REF` and a reviewed clip list in `CLIPS`. Some clips don't survive the change in proportions; the list notes which ones were left out and why. The source packs aren't committed (they are 8 MB or more); download them from quaternius.com.
+
+Credits: animations from the Universal Animation Library 2 by Quaternius (quaternius.com), CC0 1.0.

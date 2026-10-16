@@ -98,7 +98,9 @@ async def main():
         check('wildlife: startled deer flee', r['s'] == 'flee' and r['d'] > 3, json.dumps(r))
         # --- camp: cook meat ---
         await ev(pg, "HP.tp(-120,-40); HP.sim(0.2)")
-        await pg.keyboard.press('b'); await ev(pg, "HP.sim(0.05)"); kneel = await ev(pg, "HP.Game.player.anim.playing('kneel')"); await pg.wait_for_timeout(3000)
+        await pg.keyboard.press('b'); await ev(pg, "HP.sim(0.05)"); kneel = await ev(pg, "HP.Game.player.anim.playing('kneel')")
+        try: await pg.wait_for_function('!!Camp.fire', timeout=15000)  # camp spawns on a 1.2s real-time timer; a fixed sleep was flaky under load
+        except Exception: pass
         check('camp: making camp spawns a fire', await ev(pg, "!!Camp.fire"), await ev(pg, "[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(0,3).join(' / ')+' state='+HP.Game.player.state") + f' kneel={kneel}')
         await ev(pg, "HP.UI.open('camp')"); await pg.click('[data-act="cook:meat_raw"]')
         check('camp: cooking converts raw meat', await ev(pg, "HP.Inv.count('meat_cooked')") >= 2 and await ev(pg, "HP.Inv.count('meat_raw')") == 0)

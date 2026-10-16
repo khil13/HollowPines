@@ -117,6 +117,26 @@ async def main():
         print(f"INFO  simulation cost in town (all NPCs, no rendering): {ms:.2f} ms per 60fps frame")
         for nm, js in [('c_idle', "T.reset(); HP.sim(0.6)"), ('c_jog', "T.reset(); T.run(['w'],1.2,1/60)"), ('c_sprint', "T.reset(); T.run(['w','shift'],1.5,1/60)"), ('c_jump', "T.reset(); Input.pressed.add(' '); T.run([],0.32,1/60)"), ('c_crouch', "T.reset(); Input.pressed.add('c'); T.run(['w'],1.2,1/60)")]:
             await ev(pg, js + "; HP.Game.cam.yaw=HP.Game.player.yaw+2.1; HP.Game.cam.idleT=-999; HP.Game.cam.snap=true; HP.Game.cam.update(0)"); await pg.wait_for_timeout(1500); await pg.screenshot(path=OUT + nm + '.png')
+        # --- retargeted Universal Animation Library clips ---
+        r = await ev(pg, "(()=>{ const n=['NinjaJump_Start','NinjaJump_Land','ClimbUp_1m_RM','LayToIdle','Consume','Chest_Open','Farm_Harvest']; return {missing:n.filter(c=>!Assets.clips[c]), tracks:Assets.clips.Consume ? Assets.clips.Consume.tracks.length : 0, map:[CLIPMAP.eat[0], CLIPMAP.search[0], CLIPMAP.standup[0], CLIPMAP.climb[0], CLIPMAP.land[0], CLIPMAP.hook[0]]}; })()")
+        check('clips: retargeted clips load and replace the originals for eat/search/standup/climb/land (hook keeps Punch)', not r['missing'] and r['tracks'] > 20 and r['map'] == ['Consume', 'Chest_Open', 'LayToIdle', 'ClimbUp_1m_RM', 'NinjaJump_Land', 'Punch'], str(r))
+        w = lambda clip: f"(HP.Game.player.anim.acts['{clip}'] ? HP.Game.player.anim.acts['{clip}'].getEffectiveWeight() : 0)"
+        r = await ev(pg, f"(()=>{{ T.reset(); const P=HP.Game.player; P.anim.play('eat'); let still=0; for(let i=0;i<40;i++){{ T.run([],1/60,1/60); still=Math.max(still,{w('Consume')}); }} T.reset(); Input.keys.add('w'); T.run([],0.6,1/60); P.anim.play('eat'); let moving=0, walk=0; for(let i=0;i<40;i++){{ T.run([],1/60,1/60); moving=Math.max(moving,{w('Consume')}); walk=Math.max(walk,P.anim.W.Run||0); }} Input.keys.clear(); return [still, moving, walk]; }})()")
+        check('clips: eating standing still plays Consume; eating on the move keeps the legs walking', r[0] > 0.8 and r[1] < 0.01 and r[2] > 0.3, f"still={r[0]:.2f} moving={r[1]:.2f} run={r[2]:.2f}")
+        r = await ev(pg, f"(()=>{{ T.reset(-67,14.4,0); HP.sim(0.3); Input.pressed.add(' '); let st='', mx=0; for(let i=0;i<50;i++){{ T.run([],1/60,1/60); if(HP.Game.player.state==='climb') st='climb'; mx=Math.max(mx,{w('ClimbUp_1m_RM')}); }} return [st, mx]; }})()")
+        check('clips: mantling a ledge plays the ClimbUp clip', r[0] == 'climb' and r[1] > 0.8, str(r))
+        r = await ev(pg, f"(()=>{{ T.reset(); Input.pressed.add(' '); let land=0, prep=0; for(let i=0;i<120;i++){{ T.run([],1/60,1/60); prep=Math.max(prep,{w('NinjaJump_Start')}); if(HP.Game.player.loco.state==='landing') land=Math.max(land,{w('NinjaJump_Land')}); }} return [prep, land]; }})()")
+        check('clips: jump take-off and landing use the NinjaJump crouches', r[0] > 0.5 and r[1] > 0.5, f"start={r[0]:.2f} land={r[1]:.2f}")
+        r = await ev(pg, f"(()=>{{ T.reset(); const P=HP.Game.player; P.anim.play('standup'); let mx=0; for(let i=0;i<100;i++){{ T.run([],1/60,1/60); mx=Math.max(mx,{w('LayToIdle')}); }} return [mx, P.anim.playing('standup')]; }})()")
+        check('clips: getting up after a knockout plays LayToIdle and finishes', r[0] > 0.8 and not r[1], str(r))
+        r = await ev(pg, """(()=>{ HP.Game.restoreFromState(); HP.S.time.hour=8; const e=HP.NPC.byKey('ezra'), pl=PLACES.field;
+            e.pos.set(pl.x, Col.ground(pl.x,pl.z,99), pl.z); e.state='routine'; e.goal=null; e.path=null; HP.tp(pl.x+4, pl.z+4); HP.sim(1.5,1/60);
+            const ew = e.anim.acts.Farm_Harvest ? e.anim.acts.Farm_Harvest.getEffectiveWeight() : 0; const esum=[...e.anim.baseSet].reduce((a,n)=>a+(e.anim.W[n]||0),0);
+            return {ew, esum, ezra:e.poseClip}; })()""")
+        check('clips: Ezra harvests in his field with normalized weights', r['ew'] > 0.8 and abs(r['esum'] - 1) < 1e-3 and r['ezra'] == 'Farm_Harvest', str(r))
+        for nm, js in [('u_eat', "T.reset(); HP.Game.player.anim.play('eat'); T.run([],0.55,1/60)"), ('u_climb', "T.reset(-67,14.4,0); HP.sim(0.3); Input.pressed.add(' '); T.run([],0.35,1/60)"), ('u_land', "T.reset(); Input.pressed.add(' '); for(let i=0;i<120 && HP.Game.player.loco.state!=='landing';i++) T.run([],1/60,1/60); T.run([],0.08,1/60)")]:
+            await ev(pg, js + "; HP.Game.cam.yaw=HP.Game.player.yaw+2.1; HP.Game.cam.idleT=-999; HP.Game.cam.snap=true; HP.Game.cam.update(0)"); await pg.wait_for_timeout(1200); await pg.screenshot(path=OUT + nm + '.png')
+        await ev(pg, "HP.Game.restoreFromState(); HP.S.time.hour=8; const e=HP.NPC.byKey('ezra'); const pl=PLACES.field; e.pos.set(pl.x, Col.ground(pl.x,pl.z,99), pl.z); e.state='routine'; e.goal=null; e.path=null; HP.tp(pl.x+2.5, pl.z+1.5); HP.sim(1.2,1/60); HP.Game.cam.yaw=Math.atan2(pl.x-HP.Game.player.pos.x, pl.z-HP.Game.player.pos.z); HP.Game.cam.pitch=0.15; HP.Game.cam.zoom=3.5; HP.Game.cam.idleT=-999; HP.Game.cam.snap=true; HP.Game.cam.update(0)"); await pg.wait_for_timeout(1200); await pg.screenshot(path=OUT + 'u_ezra.png')
         desk_errs = [e for e in errs]
         await b.close()
 

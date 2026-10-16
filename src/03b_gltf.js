@@ -16,9 +16,18 @@ const Assets = {
       const bin = atob(window.CHARACTER_GLB), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
       this.gltf = await new Promise((res, rej) => new THREE.GLTFLoader().parse(u.buffer, '', res, rej));
       for (const c of this.gltf.animations) this.clips[c.name] = c;
+      this.loadExtras();
       const sc = this.gltf.scene; const rootNode = sc.getObjectByName('Scene'); if (rootNode) rootNode.position.set(0, rootNode.position.y, 0);
       this.measure(); this.ready = true; return true;
     } catch (e) { console.warn('Character model failed to load, using procedural characters', e); return false; }
+  },
+  // retargeted clips embedded by build.py (assets/anim/*.json, made by tools/retarget.py): sampled local quaternion
+  // and position tracks keyed by bone name. Where a clip exists, it replaces the original in CLIPMAP.
+  loadExtras() {
+    for (const pack of Object.values(window.EXTRA_ANIMS || {})) for (const n in pack.clips) { const d = pack.clips[n], times = Array.from({ length: d.frames }, (_, i) => i / d.fps), tr = [];
+      for (const b in d.tracks) { tr.push(new THREE.QuaternionKeyframeTrack(b + '.quaternion', times, d.tracks[b].q)); if (d.tracks[b].p) tr.push(new THREE.VectorKeyframeTrack(b + '.position', times, d.tracks[b].p)); }
+      this.clips[n] = new THREE.AnimationClip(n, d.duration, tr); }
+    for (const a in CLIP_UPGRADES) { const u = CLIP_UPGRADES[a]; if (this.clips[u[0]]) { CLIPMAP[a] = u; if (u[4] && ACTIONS[a]) ACTIONS[a].dur = u[4]; } }
   },
   measure() { // stride per cycle for locomotion clips, and upper-body pose snapshots
     const tmp = THREE.SkeletonUtils.clone(this.gltf.scene), mixer = new THREE.AnimationMixer(tmp), foot = tmp.getObjectByName('FootL'), hips = tmp.getObjectByName('Hips');
@@ -57,8 +66,11 @@ function makeModelHumanoid(o = {}) {
   return rig;
 }
 
-/* clip mapping for gameplay actions; dur/events still come from ACTIONS so gameplay timing is unchanged */
+/* clip mapping for gameplay actions: [clip, from, to, pingpong]; dur/events still come from ACTIONS so gameplay timing is unchanged */
 const CLIPMAP = { pickup: ['PickUp', 0, 1], search: ['PickUp', 0.25, 0.6], kneel: ['PickUp', 0.3, 0.55], dig: ['PickUp', 0.2, 0.6], punch: ['Punch', 0, 1], hook: ['Punch', 0, 1], uppercut: ['SwordSlash', 0.1, 0.9], dodge: ['Roll', 0, 1], hit: ['RecieveHit', 0, 1], hitB: ['RecieveHit', 0, 1], climb: ['Jump', 0.1, 0.75], mount: ['Jump', 0.05, 0.5], jumpPrep: ['Jump', 0, 0.16], land: ['Jump', 0.78, 1], standup: ['StandUp', 0, 1] };
+// retargeted Universal Animation Library clips used instead when loaded: [clip, from, to, pingpong, new action duration]
+const CLIP_UPGRADES = { eat: ['Consume', 0, 1], search: ['Chest_Open', 0.12, 0.5, true], standup: ['LayToIdle', 0.08, 1, false, 1.4], climb: ['ClimbUp_1m_RM', 0, 1],
+  jumpPrep: ['NinjaJump_Start', 0, 0.12], land: ['NinjaJump_Land', 0.18, 0.5] };
 // gestures for actions without a clip: [bone, axis, angle(u)] in character space; axis p = pitch (+ forward/up), r = roll (+ toward character's left), y = yaw
 const GESTURES = {
   eat: u => { const k = Math.min(1, Math.sin(u * Math.PI) * 1.6); return [['UpperArmR', 'p', 1.3 * k], ['LowerArmR', 'p', 1.7 * k]]; },
@@ -89,7 +101,7 @@ class ClipAnimator {
   constructor(rig, owner) {
     this.rig = rig; this.owner = owner; this.mixer = new THREE.AnimationMixer(rig.model); this.acts = {}; this.phase = 0; this.t = 0; this.actions = []; this.layers = { aim: 0, carry: 0, block: 0, rifle: 0 }; this.lw = { aim: 0, carry: 0, block: 0, rifle: 0, handsup: 0, crouch: 0, ride: 0 };
     this.sq = 1; this.sqv = 0; this.expr = 'calm'; this.look = 0; this.lookPitch = 0; this.lookAt = null; this.idleT = 0; this.runW = 0; this.lastSpeed = 0; this.accel = 0; this.turnRate = 0; this.prevYaw = owner.yaw || 0; this.base = {}; this.cur = zeroPose(); this.hatS = new Spring(90, 9); this.hatZ = new Spring(90, 9); this.drop = 0;
-    this.fsm = new LocoFSM(); this.bw = {}; this.W = {}; this.clipT = {}; // base-layer weights (smoothed), final weights, clip times
+    this.fsm = new LocoFSM(); this.bw = {}; this.W = {}; this.clipT = {}; this.baseSet = new Set(BASE_CLIPS); // base-layer weights (smoothed), final weights, clip times
     this.bone = {}; rig.model.traverse(o => { if (o.isBone) this.bone[o.name] = o; }); // name -> bone, built once
     for (const n of BASE_CLIPS.concat('Defeat')) this.act(n);
     this.tg = [new THREE.Vector3(), new THREE.Vector3()]; this.rq = new THREE.Quaternion(); this.feet = [[rig.LL, 1], [rig.RL, -1]];
@@ -115,7 +127,9 @@ class ClipAnimator {
       const turnStep = Math.abs(this.turnRate) > 1.2 && sp < 0.6 ? Math.abs(this.turnRate) * 0.12 : 0, prev = this.phase; this.phase += (sp / Math.max(0.3, stride) + turnStep) * this.dt;
       if (Math.floor(prev * 2) !== Math.floor(this.phase * 2) && state === 'ground' && this.owner.onStep && (sp > 0.3 || turnStep)) this.owner.onStep();
       const ph = ((this.phase % 1) + 1) % 1; CT[walkN] = CT[runN] = ph; CT.Idle = idleT;
-      if (state === 'work') { T.PickUp = 1; CT.PickUp = 0.35 + 0.08 * Math.sin(this.t * 3); }
+      const pose = st.poseClip && Assets.clips[st.poseClip] ? st.poseClip : null; // a place-specific loop (harvesting, arms folded)
+      if (pose && (state === 'work' || (state === 'ground' && ls === 'idle' && !turnStep))) { this.baseSet.add(pose); T[pose] = 1; CT[pose] = (this.t % dur(pose)) / dur(pose); }
+      else if (state === 'work') { T.PickUp = 1; CT.PickUp = 0.35 + 0.08 * Math.sin(this.t * 3); }
       else if (ls === 'jumpStart') { T.Jump = 1; CT.Jump = lerp(0, 0.16, clamp(L.t / 0.1, 0, 1)); }
       else if (ls === 'landing') { T.Jump = 1; CT.Jump = lerp(0.78, 1, clamp(L.t / 0.25, 0, 1)); }
       else if (ls === 'idle' || ls === 'crouchIdle') { if (turnStep) { T.Idle = 0.5; T[walkN] = 0.5; } else T.Idle = 1; }
@@ -141,9 +155,9 @@ class ClipAnimator {
     // ---- base layer: crossfade every clip toward the current state's target weights over LOCO.FADE[state]
     const T = this._T || (this._T = {}); for (const n in T) T[n] = 0; this.baseTargets(st, T);
     const fade = state === 'ground' ? (LOCO.FADE[this.fsm.state] || 0.2) : state === 'air' ? 0.1 : 0.2, k = 1 - Math.exp(-dt * 3 / fade);
-    const bw = this.bw; let sum = 0; for (const n of BASE_CLIPS) { bw[n] = (bw[n] || 0) + ((T[n] || 0) - (bw[n] || 0)) * k; if (bw[n] < 1e-3 && !T[n]) bw[n] = 0; sum += bw[n]; }
-    const W = this.W; for (const n in W) W[n] = 0; for (const n of BASE_CLIPS) W[n] = sum > 0 ? bw[n] / sum : 0; // normalized: no blend toward the bind pose
-    for (const n of BASE_CLIPS) if (W[n] > 0 && this.clipT[n] !== undefined) this.act(n).time = this.clipT[n] * Assets.clips[n].duration;
+    const bw = this.bw, BS = this.baseSet; let sum = 0; for (const n of BS) { bw[n] = (bw[n] || 0) + ((T[n] || 0) - (bw[n] || 0)) * k; if (bw[n] < 1e-3 && !T[n]) bw[n] = 0; sum += bw[n]; }
+    const W = this.W; for (const n in W) W[n] = 0; for (const n of BS) W[n] = sum > 0 ? bw[n] / sum : 0; // normalized: no blend toward the bind pose
+    for (const n of BS) if (W[n] > 0 && this.clipT[n] !== undefined) this.act(n).time = this.clipT[n] * Assets.clips[n].duration;
     // ---- one-shot actions (clip-mapped ones take over the whole body while they play)
     let actW = 0, actClip = null; const gestures = this._gest || (this._gest = []); gestures.length = 0;
     for (const a of this.actions) {
@@ -151,7 +165,8 @@ class ClipAnimator {
       if (u >= 1) { if (a.loop) { a.t -= a.dur; a.fired.clear(); u = a.t / a.dur; } else { a.done = true; if (a.cb.end) a.cb.end(); continue; } }
       for (const ev in a.def.ev || {}) if (!a.fired.has(ev) && u >= a.def.ev[ev]) { a.fired.add(ev); if (a.cb[ev]) a.cb[ev](); }
       const bi = a.def.bi ?? 0.12, bo = a.def.bo ?? 0.15; const w = ease(clamp(a.loop ? Math.min(1, a.age / bi) : Math.min(1, a.age / bi, (a.dur - a.t) / bo), 0, 1));
-      const cm = CLIPMAP[a.name]; if (cm && (state === 'ground' || state === 'air')) { const f = lerp(cm[1], cm[2], a.loop && cm[0] === 'PickUp' ? 0.5 + 0.5 * Math.sin(u * TAU) : u); const ww = a.name === 'hit' || a.name === 'hitB' ? w * 0.7 : w; this.act(cm[0]).time = f * Assets.clips[cm[0]].duration; if (ww > actW) { actW = ww; actClip = cm[0]; } W[cm[0]] = Math.max(W[cm[0]] || 0, ww); }
+      // full-body clips only for full-body actions, or upper-body ones (eating) while standing still, so legs never freeze mid-stride
+      const cm = CLIPMAP[a.name]; if (cm && (state === 'ground' || state === 'air') && (a.def.mask !== 'upper' || st.speed < 0.3)) { const f = lerp(cm[1], cm[2], a.loop && (cm[3] || cm[0] === 'PickUp') ? 0.5 + 0.5 * Math.sin(u * TAU) : u); const ww = a.name === 'hit' || a.name === 'hitB' ? w * 0.7 : w; this.act(cm[0]).time = f * Assets.clips[cm[0]].duration; if (ww > actW) { actW = ww; actClip = cm[0]; } W[cm[0]] = Math.max(W[cm[0]] || 0, ww); }
       else if (GESTURES[a.name]) gestures.push([GESTURES[a.name](u), w]);
     }
     this.actions = this.actions.filter(a => !a.done);
