@@ -73,7 +73,7 @@ const CH5 = {
     if (td > 17) me.moveTo(t.pos.x, t.pos.z, 4.4, dt, 14); else { me.sp = damp(me.sp, 0, 6, dt); me.face(t.pos); }
     me.allyAim = true; me.anim.layers.aim = 1; me.anim.layers.rifle = me.gun === 'rifle' ? 1 : 0; if (me.gunM && me.gun && !me.fists) me.gunM.visible = true;
     me.shootT = (me.shootT ?? rand(0.6, 1.4)) - dt;
-    if (me.shootT <= 0 && td < 32 && me.gun && !me.fists) { // a disarmed ally can't shoot me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
+    if (me.shootT <= 0 && td < 32 && me.gun && !me.fists) { /* a disarmed ally can't shoot */ me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
       const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); const hit = Math.random() < 0.45; FX.tracer(m, new THREE.Vector3(t.pos.x + (hit ? 0 : rand(-1.2, 1.2)), t.pos.y + 1.2, t.pos.z + (hit ? 0 : rand(-1.2, 1.2)))); Sfx.shot(me.gun === 'rifle'); me.anim.play('recoil');
       if (hit) t.takeHit({ dmg: me.gun === 'rifle' ? 45 : 32, from: me, gun: me.gun, dir: fwd(me.yaw) }); }
   },

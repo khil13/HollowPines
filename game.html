@@ -1927,10 +1927,10 @@ class Horse {
     const hitF = Col.resolve(front, 0.45, this.pos.y, 1.6); if (hitF) { this.pos.x += (front.x - (this.pos.x + f.x)) ; this.pos.z += (front.z - (this.pos.z + f.z)); if (this.speed > 7 && this.rider) Game.shake(0.2); this.speed *= 0.7; }
     Col.resolve(this.pos, 0.55, this.pos.y, 1.6); this.pos.x = clamp(this.pos.x, -WORLD.half + 6, WORLD.half - 6); this.pos.z = clamp(this.pos.z, -WORLD.half + 6, WORLD.half - 6);
     const g = Col.ground(this.pos.x, this.pos.z, this.pos.y), depth = WORLD.waterY - Terrain.height(this.pos.x, this.pos.z);
-    this.swim = depth > 1.5; if (this.swim) { this.pos.y = damp(this.pos.y, WORLD.waterY - 1.35, 5, dt); this.speed = Math.min(this.speed, 2.6); this.onG = true; this.vy = 0; }
+    this.swim = depth > 1.5 && g < WORLD.waterY + 0.2; if (this.swim) { /* deep water with no deck underfoot: a bridge keeps the horse up */ this.pos.y = damp(this.pos.y, WORLD.waterY - 1.35, 5, dt); this.speed = Math.min(this.speed, 2.6); this.onG = true; this.vy = 0; }
     else if (!this.onG || this.vy > 0 || this.pos.y - g > 0.5) { this.vy -= 22 * dt; this.pos.y += this.vy * dt; this.onG = false; if (this.pos.y <= g) { this.pos.y = g; this.vy = 0; this.onG = true; Sfx.hoof(0.15); } }
     else { this.pos.y = damp(this.pos.y, g, 18, dt); this.onG = true; }
-    const gb = Terrain.height(this.pos.x - f.x * 0.9, this.pos.z - f.z * 0.9), gf2 = Terrain.height(this.pos.x + f.x * 0.9, this.pos.z + f.z * 0.9);
+    const gb = Col.ground(this.pos.x - f.x * 0.9, this.pos.z - f.z * 0.9, this.pos.y), gf2 = Col.ground(this.pos.x + f.x * 0.9, this.pos.z + f.z * 0.9, this.pos.y); // body pitch follows the deck, not the riverbed under it
     this.anim.update(dt, { speed: this.speed, gait: this.gait, graze: this.state === 'graze' && !this.rider ? 1 : 0, rear: this.rearT > 0 ? 1 : 0, slope: this.swim ? -0.25 : clamp(-Math.atan2(gf2 - gb, 1.8), -0.5, 0.5), alert: this.fear > 0.3, roll: -this.turnRate * 0.03 * clamp(this.speed / 8, 0, 1), lookYaw: this.rider ? clamp(this.turnRate * 0.15, -0.4, 0.4) : 0 });
     this.rig.root.position.copy(this.pos); this.rig.root.rotation.y = this.yaw; this.rig.saddle.visible = true;
     if (this.speed > 6 && this.onG && !this.swim) { this.dustT = (this.dustT || 0) - dt; if (this.dustT <= 0) { this.dustT = this.speed > 10 ? 0.06 : 0.1; const b = fwd(this.yaw); FX.puff(this.pos.x - b.x * 0.9 + rand(-0.3, 0.3), this.pos.y + 0.15, this.pos.z - b.z * 0.9 + rand(-0.3, 0.3), { color: Sky.wet > 0.4 ? 0x7d6646 : 0xc9b48a, n: 1, size: 0.55, life: 1.1, rise: 0.35, burst: 0.3, op: 0.42, grow: 2.4 }); } } // hooves kick up trail dust
@@ -3656,7 +3656,7 @@ const CH5 = {
     if (td > 17) me.moveTo(t.pos.x, t.pos.z, 4.4, dt, 14); else { me.sp = damp(me.sp, 0, 6, dt); me.face(t.pos); }
     me.allyAim = true; me.anim.layers.aim = 1; me.anim.layers.rifle = me.gun === 'rifle' ? 1 : 0; if (me.gunM && me.gun && !me.fists) me.gunM.visible = true;
     me.shootT = (me.shootT ?? rand(0.6, 1.4)) - dt;
-    if (me.shootT <= 0 && td < 32 && me.gun && !me.fists) { // a disarmed ally can't shoot me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
+    if (me.shootT <= 0 && td < 32 && me.gun && !me.fists) { /* a disarmed ally can't shoot */ me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
       const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); const hit = Math.random() < 0.45; FX.tracer(m, new THREE.Vector3(t.pos.x + (hit ? 0 : rand(-1.2, 1.2)), t.pos.y + 1.2, t.pos.z + (hit ? 0 : rand(-1.2, 1.2)))); Sfx.shot(me.gun === 'rifle'); me.anim.play('recoil');
       if (hit) t.takeHit({ dmg: me.gun === 'rifle' ? 45 : 32, from: me, gun: me.gun, dir: fwd(me.yaw) }); }
   },
@@ -4072,7 +4072,7 @@ class NPCHorse {
   }
   move(dt) {
     const f = fwd(this.yaw); this.pos.x += f.x * this.speed * dt; this.pos.z += f.z * this.speed * dt;
-    if (Col.resolve(this.pos, 0.55, this.pos.y, 1.6)) this.speed *= 0.85; if (WORLD.waterY - Terrain.height(this.pos.x, this.pos.z) > 1.4) this.speed = Math.min(this.speed, 2.6);
+    if (Col.resolve(this.pos, 0.55, this.pos.y, 1.6)) this.speed *= 0.85; if (WORLD.waterY - Terrain.height(this.pos.x, this.pos.z) > 1.4 && Col.ground(this.pos.x, this.pos.z, this.pos.y + 1) < WORLD.waterY + 0.2) this.speed = Math.min(this.speed, 2.6); /* swimming pace only off the bridge */
     this.pos.x = clamp(this.pos.x, -WORLD.half + 8, WORLD.half - 8); this.pos.z = clamp(this.pos.z, -WORLD.half + 8, WORLD.half - 8); this.pos.y = damp(this.pos.y, Col.ground(this.pos.x, this.pos.z, this.pos.y + 1), 14, dt);
     this.gait = this.speed < 3.2 ? 'walk' : this.speed < 6.4 ? 'trot' : this.speed < 10.5 ? 'canter' : 'gallop';
   }

@@ -64,6 +64,10 @@ async def main():
         r = await ev(pg, """(()=>{ X.reset(); const P = HP.Game.player; P.inv = 0; const n = X.foe('poH', 6, { gun: 'revolver' }); HP.sim(0.2, X.F); const z0 = P.pos.z; P.hurt(10, n, 'gun'); const st = P.stagger; HP.sim(0.3, X.F); const back = z0 - P.pos.z;
             HP.S.p.hp = HP.S.p.maxHp * 0.2; Input.keys.add('w'); Input.keys.add('shift'); HP.sim(1.5, X.F); const sp = Math.hypot(P.vel.x, P.vel.z); Input.keys.clear(); HP.S.p.hp = HP.S.p.maxHp; return { st: +st.toFixed(2), back: +back.toFixed(2), limp: +sp.toFixed(2), jog: PLAYER.JOG }; })()""")
         check('wren: a hit knocks her back a step and staggers her; badly hurt, she limps and can\'t run', r['st'] > 0.3 and r['back'] > 0.2 and r['limp'] <= r['jog'] * 0.81, r)
+        r = await ev(pg, """(()=>{ X.reset(); const P = HP.Game.player, H = HP.Game.horse, bx = riverX(0); const ride = (from, yaw) => { HP.tp(bx + from, 0.4); HP.sim(0.3, X.F); H.pos.set(bx + from + Math.sign(-from), Col.ground(bx + from, 0.4, 99), 0.4); H.yaw = yaw; H.speed = 0; P.mount(H); HP.sim(1.5, X.F);
+              Input.keys.add('w'); Input.keys.add('shift'); let minY = 99; for (let i = 0; i < 130; i++) { HP.Game.cam.yaw = yaw; HP.sim(X.F, X.F); if (Math.abs(H.pos.x - bx) < 13) minY = Math.min(minY, H.pos.y); } Input.keys.clear(); HP.sim(0.5, X.F); const end = H.pos.x - bx; P.dismount && P.dismount(); HP.sim(1, X.F); return { minY: +minY.toFixed(2), end: +end.toFixed(1) }; };
+            const east = ride(-22, Math.PI / 2), west = ride(22, -Math.PI / 2); H.pos.set(riverX(60), WORLD.waterY - 1, 60); H.onG = true; H.speed = 0; HP.sim(0.5, X.F); return { east, west, swimsInRiver: H.swim }; })()""")
+        check('horse: crosses Willow Bridge both ways on the deck (it used to drop through into the river), and still swims in open water', r['east']['minY'] > 0.5 and r['east']['end'] > 14 and r['west']['minY'] > 0.5 and r['west']['end'] < -14 and r['swimsInRiver'], r)
         await ev(pg, "X.reset()")
 
         bad = [e for e in errs if 'favicon' not in e]
