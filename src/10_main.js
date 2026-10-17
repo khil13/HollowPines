@@ -113,15 +113,19 @@ class CamRig {
     if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
-    const want = aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
+    // close-quarters framing (grab, counter, duel, a fistfight at arm's length): tighter, over the shoulder, both fighters in view
+    const lc = Brawl.lastCounter, close = aim || riding ? null : P.grab || (lc && Game.time - lc.t < 1.4 && lc.n.alive ? lc.n : null) || (Duel.on ? Duel.n : null) || (foe && fd < 2.6 && P.weapon === 'fists' && foe instanceof Person && (foe.fists || !foe.gun) ? foe : null);
+    this.cine = damp(this.cine || 0, close ? 1 : 0, 4, dt); this.closeFoe = close;
+    if (close && this.idleT > 0.35) { const a = Math.atan2(close.pos.x - P.pos.x, close.pos.z - P.pos.z) + 0.38; this.yaw = dampAngle(this.yaw, a, 5 * this.cine, dt); this.pitch = damp(this.pitch, 0.14, 3 * this.cine, dt); }
+    const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
     if (P.state === 'air') ty = Math.min(ty, this.groundY + 0.35); else this.groundY = ty;
     const tgt = V[0].set(P.pos.x, ty, P.pos.z);
     if (this.snap) this.tgt.copy(tgt); else { this.tgt.x = damp(this.tgt.x, tgt.x, 12, dt); this.tgt.z = damp(this.tgt.z, tgt.z, 12, dt); this.tgt.y = damp(this.tgt.y, tgt.y, P.state === 'air' ? 5 : 8, dt); }
-    const lo = V[1].set(0, 0, 0); if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
-    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35;
+    const lo = V[1].set(0, 0, 0); if (close) lo.set((close.pos.x - P.pos.x) * 0.5, 0, (close.pos.z - P.pos.z) * 0.5).clampLength(0, 2); else if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
+    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35 + (this.cine || 0) * 0.3;
     const base = V[2].set(this.tgt.x + rx * sh, this.tgt.y, this.tgt.z + rz * sh);
     const cp = Math.cos(this.pitch), toC = V[3].set(-f.x * cp, Math.sin(this.pitch), -f.z * cp); const len = this.dist; // unit vector from the target out to the camera
     // spring arm: walls (raycast), solid colliders and terrain (sampled along the arm); pull in fast, ease back out slowly

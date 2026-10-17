@@ -125,7 +125,7 @@ class Player {
     this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8; if (Sky.raining()) this.noise *= 0.6; // rain muffles footsteps
     let la = null, ld = 7; for (const nn of NPC.all) { if (!nn.alive || nn.downed) continue; const d = Math.hypot(nn.pos.x - this.pos.x, nn.pos.z - this.pos.z); if (d < ld) { ld = d; la = nn.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
     this.feedLoco(dt, hs, I.mag > 0.1);
-    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn: this._turn, tired: S.p.st < 1 && hs > 1, loco: this.loco });
+    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: COL_GROUND, turn: this._turn, tired: (S.p.st < 1 || S.p.hp < S.p.maxHp * 0.25) && hs > 1, loco: this.loco });
     this.place();
     S.p.x = this.pos.x; S.p.z = this.pos.z; S.p.yaw = this.yaw;
   }
@@ -135,7 +135,8 @@ class Player {
     if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = PLAYER.SPRINT * (1 + S.p.xpSt * 0.0004); S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
     if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.grab) spd = 0; if (this.anim.busy() || !this.canAct()) spd = 0;
     if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
-    this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45; // brief recovery after a hard landing
+    this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45;
+    this.stagger = Math.max(0, (this.stagger || 0) - dt); if (this.stagger > 0 && !swimming) spd *= 0.35; if (S.p.hp < S.p.maxHp * 0.25 && !swimming) spd = Math.min(spd, PLAYER.JOG * 0.8); // badly hurt: a limp, no running // brief recovery after a hard landing
     const onG = this.state === 'ground'; const wantSp = Math.hypot(I.x, I.z) * spd, curSp = Math.hypot(this.vel.x, this.vel.z); const accel = swimming ? 6 : onG ? (wantSp > curSp ? PLAYER.ACCEL : PLAYER.DECEL) : PLAYER.AIR_ACCEL;
     if (this.dodgeT <= 0) { this.vel.x = damp(this.vel.x, I.x * spd, accel, dt); this.vel.z = damp(this.vel.z, I.z * spd, accel, dt); }
     // facing: toward the movement direction (camera direction while aiming or blocking)
@@ -234,6 +235,7 @@ class Player {
   takeHit(o) { this.hurt(o.dmg, o.from, o.melee ? 'melee' : 'gun'); }
   hurt(d, from, kind) {
     if (this.inv > 0 || this.state === 'down') return; if (this.grab && kind !== 'fall') Brawl.release(this); if (kind === 'gun') FX.impact({ x: this.pos.x, y: this.pos.y + 1.15, z: this.pos.z }, 'blood'); if (this.blocking && kind === 'melee') { d *= 0.2; Sfx.burst(900, 0.1, 0.2); } S.p.hp -= d; S.p.xpHp += d * 0.05; this.hurtT = 0; Haptic.buzz(kind === 'gun' ? 70 : 35);
+    if ((kind === 'gun' || kind === 'melee') && this.state === 'ground' && !this.grab) { const a = from && from.pos ? Math.atan2(this.pos.x - from.pos.x, this.pos.z - from.pos.z) : this.yaw + Math.PI, k = kind === 'gun' ? 2.4 : 3.2; this.vel.x += Math.sin(a) * k; this.vel.z += Math.cos(a) * k; this.stagger = kind === 'gun' ? 0.4 : 0.3; } // knocked back a step, a moment to recover
     if (this.state !== 'ride') { const back = from && from.pos && Math.cos(angDiff(this.yaw, Math.atan2(from.pos.x - this.pos.x, from.pos.z - this.pos.z))) < 0; this.anim.play(back ? 'hitB' : 'hit', { replace: false }); } UI.flash(); Game.shake(0.25); this.anim.expr = 'alarm'; setTimeout(() => this.anim.expr = 'calm', 900);
     if (S.p.hp <= 0) this.knockout(from);
   }
@@ -497,7 +499,7 @@ class Person {
     if (this.state !== 'pursue' && this.state !== 'combat' && !this.allyAim) this.anim.layers.aim = 0;
     if (this.state !== 'ride') { const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt); }
     this.anim.lookAt = (this.distP < 6 && Game.player.alive && !this.hostileToPlayer && animState !== 'lie') ? Game.player.pos : null;
-    this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: (x, z, y) => Col.ground(x, z, y), poseClip: this.poseClip });
+    this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: COL_GROUND, poseClip: this.poseClip });
     this.place();
   }
   place() { const r = this.rig.root; const cp = Game.cam.pos; r.visible = (this.pos.x - cp.x) ** 2 + (this.pos.z - cp.z) ** 2 < 125 * 125; if (this.carried) { const P = Game.player, f = fwd(P.yaw); r.position.set(P.pos.x + f.x * 0.1, P.pos.y + 1.15, P.pos.z + f.z * 0.1); r.rotation.set(0, P.yaw + Math.PI / 2, Math.PI / 2); this.pos.copy(r.position); return; } r.position.copy(this.pos); r.rotation.set(0, this.yaw, 0); }

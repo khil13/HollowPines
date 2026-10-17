@@ -107,6 +107,14 @@ A full review of every system fixed about 50 issues.
   - Only the bounty hunters themselves can haul you in.
   - Road events stay on dry, open trail.
   - Wren's poster hangs on the street side.
+- **Combat feel:**
+  - Grabs, counters, duels and close fistfights pull the camera in over Wren's shoulder with both fighters in frame, unless you're steering it yourself.
+  - Hits knock Wren back a step and stagger her.
+  - Badly hurt, she limps and can't run, while the colour drains and the screen edges pulse red.
+- **Performance:**
+  - Rain darkens the ground in the shader instead of re-uploading the terrain colours.
+  - The animators share one ground probe.
+  - Chimney smoke puffs fade on their own.
 - **Look and feel:**
   - Nights are moonlit rather than black.
   - The camera stops at tree canopies and never looks out from inside Wren's head.

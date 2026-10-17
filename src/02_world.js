@@ -95,7 +95,8 @@ const Terrain = {
         .replace('#include <color_fragment>', `#include <color_fragment>
           if (uWet > 0.01) { float n = vn3(vec3(vGp.xz * 0.32, 1.7)) * 0.7 + vn3(vec3(vGp.xz * 1.1, 4.1)) * 0.3;
             pud = smoothstep(0.62, 0.68, n + vDirt * 0.22 - (1.0 - uWet) * 0.5) * smoothstep(0.25, 0.6, vDirt) * uWet;
-            diffuseColor.rgb *= (1.0 - uWet * 0.3 * vDirt) * (1.0 - pud * 0.7); }`)
+            diffuseColor.rgb *= (1.0 - uWet * 0.3 * vDirt) * (1.0 - pud * 0.7); }
+          diffuseColor.rgb *= 1.0 - uWet * 0.28; /* everything darkens a little when wet */`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
           if (pud > 0.0) { vec2 cell = floor(vGp.xz * 1.4), f = fract(vGp.xz * 1.4) - 0.5; float hs = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5), ph = fract(uRainT * 0.9 + hs); f -= (vec2(hs, fract(hs * 7.31)) - 0.5) * 0.5; float ring = smoothstep(0.03, 0.0, abs(length(f) - ph * 0.35)) * (1.0 - ph) * uRain * step(0.35, fract(hs * 3.7));
             totalEmissiveRadiance += uSkyC * pud * (0.24 + ring * 0.22); }`); };
@@ -154,6 +155,7 @@ const Terrain = {
 };
 
 /* ---------- Colliders (spatial hash) ---------- */
+const COL_GROUND = (x, z, y) => Col.ground(x, z, y); // one shared ground probe for the animators (no closure per character per frame)
 const Col = {
   cell: 8, map: new Map(), all: [],
   key(i, j) { return i * 10007 + j; },

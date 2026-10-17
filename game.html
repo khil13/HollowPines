@@ -413,7 +413,8 @@ const Terrain = {
         .replace('#include <color_fragment>', `#include <color_fragment>
           if (uWet > 0.01) { float n = vn3(vec3(vGp.xz * 0.32, 1.7)) * 0.7 + vn3(vec3(vGp.xz * 1.1, 4.1)) * 0.3;
             pud = smoothstep(0.62, 0.68, n + vDirt * 0.22 - (1.0 - uWet) * 0.5) * smoothstep(0.25, 0.6, vDirt) * uWet;
-            diffuseColor.rgb *= (1.0 - uWet * 0.3 * vDirt) * (1.0 - pud * 0.7); }`)
+            diffuseColor.rgb *= (1.0 - uWet * 0.3 * vDirt) * (1.0 - pud * 0.7); }
+          diffuseColor.rgb *= 1.0 - uWet * 0.28; /* everything darkens a little when wet */`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
           if (pud > 0.0) { vec2 cell = floor(vGp.xz * 1.4), f = fract(vGp.xz * 1.4) - 0.5; float hs = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5), ph = fract(uRainT * 0.9 + hs); f -= (vec2(hs, fract(hs * 7.31)) - 0.5) * 0.5; float ring = smoothstep(0.03, 0.0, abs(length(f) - ph * 0.35)) * (1.0 - ph) * uRain * step(0.35, fract(hs * 3.7));
             totalEmissiveRadiance += uSkyC * pud * (0.24 + ring * 0.22); }`); };
@@ -472,6 +473,7 @@ const Terrain = {
 };
 
 /* ---------- Colliders (spatial hash) ---------- */
+const COL_GROUND = (x, z, y) => Col.ground(x, z, y); // one shared ground probe for the animators (no closure per character per frame)
 const Col = {
   cell: 8, map: new Map(), all: [],
   key(i, j) { return i * 10007 + j; },
@@ -1721,7 +1723,7 @@ class Player {
     this.noise = this.crouch ? 0.35 : hs > 5 ? 1.3 : 1; if (Sky.night()) this.noise *= 0.8; if (Sky.raining()) this.noise *= 0.6; // rain muffles footsteps
     let la = null, ld = 7; for (const nn of NPC.all) { if (!nn.alive || nn.downed) continue; const d = Math.hypot(nn.pos.x - this.pos.x, nn.pos.z - this.pos.z); if (d < ld) { ld = d; la = nn.pos; } } if (!la && Interact.cur) la = Interact.cur.o.pos(); this.anim.lookAt = aiming ? null : la;
     this.feedLoco(dt, hs, I.mag > 0.1);
-    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: (x, z, y) => Col.ground(x, z, y), turn: this._turn, tired: S.p.st < 1 && hs > 1, loco: this.loco });
+    this.anim.update(dt, { state: swimming ? 'swim' : this.state === 'air' ? 'air' : 'ground', speed: hs, vy: this.vel.y, fallH: this.pos.y - g, crouch: this.crouch, ground: COL_GROUND, turn: this._turn, tired: (S.p.st < 1 || S.p.hp < S.p.maxHp * 0.25) && hs > 1, loco: this.loco });
     this.place();
     S.p.x = this.pos.x; S.p.z = this.pos.z; S.p.yaw = this.yaw;
   }
@@ -1731,7 +1733,8 @@ class Player {
     if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = PLAYER.SPRINT * (1 + S.p.xpSt * 0.0004); S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
     if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.grab) spd = 0; if (this.anim.busy() || !this.canAct()) spd = 0;
     if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
-    this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45; // brief recovery after a hard landing
+    this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45;
+    this.stagger = Math.max(0, (this.stagger || 0) - dt); if (this.stagger > 0 && !swimming) spd *= 0.35; if (S.p.hp < S.p.maxHp * 0.25 && !swimming) spd = Math.min(spd, PLAYER.JOG * 0.8); // badly hurt: a limp, no running // brief recovery after a hard landing
     const onG = this.state === 'ground'; const wantSp = Math.hypot(I.x, I.z) * spd, curSp = Math.hypot(this.vel.x, this.vel.z); const accel = swimming ? 6 : onG ? (wantSp > curSp ? PLAYER.ACCEL : PLAYER.DECEL) : PLAYER.AIR_ACCEL;
     if (this.dodgeT <= 0) { this.vel.x = damp(this.vel.x, I.x * spd, accel, dt); this.vel.z = damp(this.vel.z, I.z * spd, accel, dt); }
     // facing: toward the movement direction (camera direction while aiming or blocking)
@@ -1830,6 +1833,7 @@ class Player {
   takeHit(o) { this.hurt(o.dmg, o.from, o.melee ? 'melee' : 'gun'); }
   hurt(d, from, kind) {
     if (this.inv > 0 || this.state === 'down') return; if (this.grab && kind !== 'fall') Brawl.release(this); if (kind === 'gun') FX.impact({ x: this.pos.x, y: this.pos.y + 1.15, z: this.pos.z }, 'blood'); if (this.blocking && kind === 'melee') { d *= 0.2; Sfx.burst(900, 0.1, 0.2); } S.p.hp -= d; S.p.xpHp += d * 0.05; this.hurtT = 0; Haptic.buzz(kind === 'gun' ? 70 : 35);
+    if ((kind === 'gun' || kind === 'melee') && this.state === 'ground' && !this.grab) { const a = from && from.pos ? Math.atan2(this.pos.x - from.pos.x, this.pos.z - from.pos.z) : this.yaw + Math.PI, k = kind === 'gun' ? 2.4 : 3.2; this.vel.x += Math.sin(a) * k; this.vel.z += Math.cos(a) * k; this.stagger = kind === 'gun' ? 0.4 : 0.3; } // knocked back a step, a moment to recover
     if (this.state !== 'ride') { const back = from && from.pos && Math.cos(angDiff(this.yaw, Math.atan2(from.pos.x - this.pos.x, from.pos.z - this.pos.z))) < 0; this.anim.play(back ? 'hitB' : 'hit', { replace: false }); } UI.flash(); Game.shake(0.25); this.anim.expr = 'alarm'; setTimeout(() => this.anim.expr = 'calm', 900);
     if (S.p.hp <= 0) this.knockout(from);
   }
@@ -2093,7 +2097,7 @@ class Person {
     if (this.state !== 'pursue' && this.state !== 'combat' && !this.allyAim) this.anim.layers.aim = 0;
     if (this.state !== 'ride') { const g = Col.ground(this.pos.x, this.pos.z, this.pos.y); this.pos.y = damp(this.pos.y, g, 20, dt); }
     this.anim.lookAt = (this.distP < 6 && Game.player.alive && !this.hostileToPlayer && animState !== 'lie') ? Game.player.pos : null;
-    this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: (x, z, y) => Col.ground(x, z, y), poseClip: this.poseClip });
+    this.anim.update(dt, { state: animState, speed: this.sp, crouch: this.crouchC, ground: COL_GROUND, poseClip: this.poseClip });
     this.place();
   }
   place() { const r = this.rig.root; const cp = Game.cam.pos; r.visible = (this.pos.x - cp.x) ** 2 + (this.pos.z - cp.z) ** 2 < 125 * 125; if (this.carried) { const P = Game.player, f = fwd(P.yaw); r.position.set(P.pos.x + f.x * 0.1, P.pos.y + 1.15, P.pos.z + f.z * 0.1); r.rotation.set(0, P.yaw + Math.PI / 2, Math.PI / 2); this.pos.copy(r.position); return; } r.position.copy(this.pos); r.rotation.set(0, this.yaw, 0); }
@@ -2200,7 +2204,7 @@ const Brawl = {
   counter(P, n) { // called when an enemy punch lands: true if Wren countered it
     if (!P.blocking || P.blockT > (Skills.has('brawl', 3) ? 0.6 : 0.45) || P.grab) return false;
     const a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.pos.x += Math.sin(a) * 0.5; n.pos.z += Math.cos(a) * 0.5; Col.resolve(n.pos, 0.34, n.pos.y, 1.6); n.stunT = 1.4; n.stunKnee = false; n.anim.play('hit', { replace: false }); n.anim.expr = 'alarm';
-    P.yaw = a; P.blockT = 9; P.anim.play('hook', { on: { hit: () => { if (n.alive && !n.downed) { n.takeHit({ dmg: 14, from: P, melee: true, dir: fwd(P.yaw) }); Sfx.punch(); } } } });
+    P.yaw = a; P.blockT = 9; this.lastCounter = { n, t: Game.time }; P.anim.play('hook', { on: { hit: () => { if (n.alive && !n.downed) { n.takeHit({ dmg: 14, from: P, melee: true, dir: fwd(P.yaw) }); Sfx.punch(); } } } });
     Sfx.burst(1300, 0.07, 0.12, 'bandpass', 2); Game.shake(0.2); UI.hitmark(true); S.stats.counters = (S.stats.counters || 0) + 1; Skills.gain('brawl', 3); Haptic.buzz([30, 40, 30]); return true;
   },
   canGrab(n) { return n.alive && !n.downed && !n.carried && !n.grabbed && n.state !== 'ride' && n.state !== 'tied' && !n.hogtied; },
@@ -2331,7 +2335,7 @@ const Sky = {
     S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(), h0 = S.time.hour; const k = r < 0.45 ? 'clear' : r < 0.67 ? 'cloudy' : r < 0.81 ? 'rain' : r < 0.9 ? 'storm' : (h0 > 3 && h0 < 11 ? 'fog' : 'cloudy'); S.weather.kind = k; S.weather.next = rand(3, 8); }
     this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : this.weather === 'fog' ? 0.7 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
     const raining = this.raining(), storm = this.weather === 'storm', fog = this.weather === 'fog'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
-    if (Math.abs(this.wet - (this._lw || 0)) > 0.04) { this._lw = this.wet; Terrain.setWet(this.wet); }
+    /* wet ground darkens in the terrain shader (Terrain.groundU.uWet), no buffer re-uploads */
     const h = S.time.hour; const th = (h - 5.5) / 14.5 * Math.PI; const sy = Math.sin(th), sx = Math.cos(th); // sunrise ~5:30, sunset ~20:00 (night() and the street lamps agree)
     const day = smoothstep(-0.1, 0.22, sy); const dusk = (sy > -0.08 ? 1 - smoothstep(0.02, 0.45, sy) : 0) * (1 - this.cloud * 0.7); this.golden = dusk; // a long golden hour, RDR2-style
     const mist = (smoothstep(4.6, 5.8, h) * (1 - smoothstep(7.4, 9.6, h)) + (raining ? 0.5 : 0) + (fog ? 1.1 : 0)) * (fog ? 1 : 1 - this.cloud * 0.3); this.mistAmt = mist;
@@ -2653,8 +2657,8 @@ const Ambient = {
     const spots = World.flowerSpots || []; for (const f of this.flies) { f.t += dt; if (!f.base || Math.hypot(f.base[0] - P.x, f.base[2] - P.z) > 40) { const near = spots.filter(s => Math.hypot(s[0] - P.x, s[2] - P.z) < 35); f.base = near.length ? pick(near) : null; } f.m.visible = !!f.base && !night && Sky.weather !== 'rain'; if (!f.m.visible) continue; f.m.position.set(f.base[0] + Math.sin(f.t * 0.7) * 1.5, f.base[1] + 0.6 + Math.abs(Math.sin(f.t * 3)) * 0.5, f.base[2] + Math.cos(f.t * 0.9) * 1.5); f.m.rotation.set(0, f.t, Math.sin(f.t * 25) * 0.9); }
     this.ff.visible = night && !Sky.raining(); if (this.ff.visible) { const a = this.ff.geometry.attributes.position.array; this.ffSeed.forEach(([x, y, z, ph], i) => { a[i * 3] = P.x + x + Math.sin(t * 0.4 + ph) * 1.5; a[i * 3 + 1] = Terrain.height(P.x + x, P.z + z) + y + Math.sin(t + ph) * 0.3; a[i * 3 + 2] = P.z + z + Math.cos(t * 0.3 + ph) * 1.5; }); this.ff.geometry.attributes.position.needsUpdate = true; this.ff.material.opacity = 0.5 + Math.sin(t * 3) * 0.4; }
     // chimney smoke
-    this.smokeT -= dt; if (this.smokeT <= 0 && World.chimneys) { this.smokeT = 0.35; for (const c of World.chimneys) if (Math.hypot(c.x - P.x, c.z - P.z) < 90) { const m = new THREE.Mesh(GEO.sphLo, toon('#d8d4cc', { transparent: true, opacity: 0.55 })); m.position.set(c.x, c.y, c.z); m.scale.setScalar(0.3); Game.scene.add(m); this.smoke.push({ m, life: 4 }); } }
-    this.smoke = this.smoke.filter(p => { p.life -= dt; p.m.position.y += dt * 0.9; p.m.position.x += dt * 0.4 * WIND.uStrength.value; p.m.scale.setScalar(0.3 + (4 - p.life) * 0.25); p.m.material.opacity = p.life / 8; if (p.life <= 0) { Game.scene.remove(p.m); return false; } return true; });
+    this.smokeT -= dt; if (this.smokeT <= 0 && World.chimneys) { this.smokeT = 0.35; for (const c of World.chimneys) if (Math.hypot(c.x - P.x, c.z - P.z) < 90) { const m = new THREE.Mesh(GEO.sphLo, toon('#d8d4cc', { transparent: true, opacity: 0.55 }).clone()); /* own material: each puff fades on its own */ m.position.set(c.x, c.y, c.z); m.scale.setScalar(0.3); Game.scene.add(m); this.smoke.push({ m, life: 4 }); } }
+    this.smoke = this.smoke.filter(p => { p.life -= dt; p.m.position.y += dt * 0.9; p.m.position.x += dt * 0.4 * WIND.uStrength.value; p.m.scale.setScalar(0.3 + (4 - p.life) * 0.25); p.m.material.opacity = p.life / 8; if (p.life <= 0) { Game.scene.remove(p.m); p.m.material.dispose(); return false; } return true; });
     // a trout jumps now and then when you are near water
     this.fishT -= dt; if (this.fishT <= 0) { this.fishT = rand(6, 14); for (let k = 0; k < 8; k++) { const x = P.x + rand(-25, 25), z = P.z + rand(-25, 25); if (WORLD.waterY - Terrain.height(x, z) > 0.8) { FX.splash(x, WORLD.waterY, z); break; } } }
     // decorative horses in the corral
@@ -4555,8 +4559,8 @@ const Post = {
           for (int i = 0; i < 40; i++) { acc += mask(uv) * w; nrm += w; w *= 0.96; uv += dl; }
           float fall = 1.0 - smoothstep(0.0, 0.8, length((vUv - uSun) * vec2(uAsp, 1.0))); gl_FragColor = vec4(vec3(acc / nrm * fall), 1.0); }` });
     this.mComp = new THREE.ShaderMaterial({ vertexShader: vs, depthTest: false, depthWrite: false,
-      uniforms: { tCol: { value: null }, tDepth: { value: null }, tBloom: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.1 }, uFar: { value: 900 }, uAO: { value: 0 }, uFXAA: { value: 0 }, uBloom: { value: 0.55 }, uWarm: { value: 0 }, uNight: { value: 0 }, uT: { value: 0 }, uFlash: { value: 0 }, tGod: { value: null }, uGod: { value: 0 }, uGodCol: { value: new THREE.Color() }, uTan: { value: new THREE.Vector2(1, 1) } }, extensions: { derivatives: true },
-      fragmentShader: `uniform vec2 uTan; uniform sampler2D tGod; uniform float uGod; uniform vec3 uGodCol; uniform sampler2D tCol; uniform sampler2D tDepth; uniform sampler2D tBloom; uniform vec2 uRes; uniform float uNear; uniform float uFar; uniform float uAO; uniform float uFXAA; uniform float uBloom; uniform float uWarm; uniform float uNight; uniform float uT; uniform float uFlash; varying vec2 vUv;
+      uniforms: { tCol: { value: null }, tDepth: { value: null }, tBloom: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uNear: { value: 0.1 }, uFar: { value: 900 }, uAO: { value: 0 }, uFXAA: { value: 0 }, uBloom: { value: 0.55 }, uWarm: { value: 0 }, uNight: { value: 0 }, uT: { value: 0 }, uFlash: { value: 0 }, uHurt: { value: 0 }, tGod: { value: null }, uGod: { value: 0 }, uGodCol: { value: new THREE.Color() }, uTan: { value: new THREE.Vector2(1, 1) } }, extensions: { derivatives: true },
+      fragmentShader: `uniform float uHurt; uniform vec2 uTan; uniform sampler2D tGod; uniform float uGod; uniform vec3 uGodCol; uniform sampler2D tCol; uniform sampler2D tDepth; uniform sampler2D tBloom; uniform vec2 uRes; uniform float uNear; uniform float uFar; uniform float uAO; uniform float uFXAA; uniform float uBloom; uniform float uWarm; uniform float uNight; uniform float uT; uniform float uFlash; varying vec2 vUv;
         float lin(float d){ return (uNear * uFar) / (uFar - d * (uFar - uNear)); }
         float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
         vec3 vpos(vec2 uv, float z){ return vec3((uv * 2.0 - 1.0) * uTan * z, -z); } // view-space position from screen uv and linear depth
@@ -4583,6 +4587,7 @@ const Post = {
           vec3 shadowT = mix(vec3(0.96, 0.99, 1.05), vec3(0.92, 0.96, 1.08), uNight), highT = mix(vec3(1.03, 1.0, 0.95), vec3(1.08, 0.98, 0.86), uWarm);
           c *= mix(shadowT, highT, smoothstep(0.15, 0.85, l));
           c = mix(c, vec3(1.0, 0.98, 0.96), uFlash * 0.5);
+          if (uHurt > 0.0) { float e = smoothstep(0.2, 0.75, length((vUv - 0.5) * vec2(1.2, 1.0))); c = mix(c, vec3(luma(c)), uHurt * 0.65); c = mix(c, vec3(0.5, 0.03, 0.02), e * uHurt * 0.85); } // badly hurt: colour drains, red at the edges
           vec2 q = vUv - 0.5; c *= 1.0 - smoothstep(0.35, 0.85, length(q * vec2(1.15, 1.0))) * (0.32 + uNight * 0.15); // vignette
           c += (fract(sin(dot(vUv * uRes + uT, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.018; // fine film grain
           gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0); }` });
@@ -4612,7 +4617,7 @@ const Post = {
     this.mBlur.uniforms.tSrc.value = this.ra.texture; this.mBlur.uniforms.uDir.value.set(1 / this.bw, 0); this.pass(this.mBlur, this.rb);
     this.mBlur.uniforms.tSrc.value = this.rb.texture; this.mBlur.uniforms.uDir.value.set(0, 1 / this.bh); this.pass(this.mBlur, this.ra);
     const u = this.mComp.uniforms; u.tCol.value = this.rt.texture; u.tDepth.value = this.rt.depthTexture; u.tBloom.value = this.ra.texture; u.uNear.value = camera.near; u.uFar.value = camera.far; const th = Math.tan(camera.fov * Math.PI / 360); u.uTan.value.set(th * camera.aspect, th);
-    u.uAO.value = this.ao ? 0.55 : 0; u.uFXAA.value = this.fxaa ? 1 : 0; u.uBloom.value = Sky.night() ? 0.5 : (Sky.golden || 0) * 0.2; /* subtle by day, stronger for lanterns at night */ u.uWarm.value = Sky.golden || 0; u.uNight.value = Sky.night() ? 1 : 0; u.uT.value = (u.uT.value + 1.7) % 1000; u.uFlash.value = Sky.flash || 0;
+    u.uAO.value = this.ao ? 0.55 : 0; u.uFXAA.value = this.fxaa ? 1 : 0; u.uBloom.value = Sky.night() ? 0.5 : (Sky.golden || 0) * 0.2; /* subtle by day, stronger for lanterns at night */ u.uWarm.value = Sky.golden || 0; u.uNight.value = Sky.night() ? 1 : 0; u.uT.value = (u.uT.value + 1.7) % 1000; u.uFlash.value = Sky.flash || 0; const hr = S.p.hp / S.p.maxHp; u.uHurt.value = hr < 0.35 && S.p.hp > 0 ? (1 - hr / 0.35) * (0.8 + 0.2 * Math.sin(performance.now() * 0.006)) : 0;
     const god = this.godRays(camera); u.uGod.value = god; u.tGod.value = this.rc.texture;
     if (god > 0) { const g = this.mGod.uniforms; g.tCol.value = this.rt.texture; g.tDepth.value = this.rt.depthTexture; g.uNear.value = camera.near; g.uFar.value = camera.far; g.uAsp.value = camera.aspect; this.pass(this.mGod, this.rc); }
     this.pass(this.mComp, null);
@@ -4734,15 +4739,19 @@ class CamRig {
     if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
-    const want = aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
+    // close-quarters framing (grab, counter, duel, a fistfight at arm's length): tighter, over the shoulder, both fighters in view
+    const lc = Brawl.lastCounter, close = aim || riding ? null : P.grab || (lc && Game.time - lc.t < 1.4 && lc.n.alive ? lc.n : null) || (Duel.on ? Duel.n : null) || (foe && fd < 2.6 && P.weapon === 'fists' && foe instanceof Person && (foe.fists || !foe.gun) ? foe : null);
+    this.cine = damp(this.cine || 0, close ? 1 : 0, 4, dt); this.closeFoe = close;
+    if (close && this.idleT > 0.35) { const a = Math.atan2(close.pos.x - P.pos.x, close.pos.z - P.pos.z) + 0.38; this.yaw = dampAngle(this.yaw, a, 5 * this.cine, dt); this.pitch = damp(this.pitch, 0.14, 3 * this.cine, dt); }
+    const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
     if (P.state === 'air') ty = Math.min(ty, this.groundY + 0.35); else this.groundY = ty;
     const tgt = V[0].set(P.pos.x, ty, P.pos.z);
     if (this.snap) this.tgt.copy(tgt); else { this.tgt.x = damp(this.tgt.x, tgt.x, 12, dt); this.tgt.z = damp(this.tgt.z, tgt.z, 12, dt); this.tgt.y = damp(this.tgt.y, tgt.y, P.state === 'air' ? 5 : 8, dt); }
-    const lo = V[1].set(0, 0, 0); if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
-    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35;
+    const lo = V[1].set(0, 0, 0); if (close) lo.set((close.pos.x - P.pos.x) * 0.5, 0, (close.pos.z - P.pos.z) * 0.5).clampLength(0, 2); else if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
+    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35 + (this.cine || 0) * 0.3;
     const base = V[2].set(this.tgt.x + rx * sh, this.tgt.y, this.tgt.z + rz * sh);
     const cp = Math.cos(this.pitch), toC = V[3].set(-f.x * cp, Math.sin(this.pitch), -f.z * cp); const len = this.dist; // unit vector from the target out to the camera
     // spring arm: walls (raycast), solid colliders and terrain (sampled along the arm); pull in fast, ease back out slowly

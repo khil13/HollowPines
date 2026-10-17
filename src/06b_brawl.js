@@ -16,7 +16,7 @@ const Brawl = {
   counter(P, n) { // called when an enemy punch lands: true if Wren countered it
     if (!P.blocking || P.blockT > (Skills.has('brawl', 3) ? 0.6 : 0.45) || P.grab) return false;
     const a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.pos.x += Math.sin(a) * 0.5; n.pos.z += Math.cos(a) * 0.5; Col.resolve(n.pos, 0.34, n.pos.y, 1.6); n.stunT = 1.4; n.stunKnee = false; n.anim.play('hit', { replace: false }); n.anim.expr = 'alarm';
-    P.yaw = a; P.blockT = 9; P.anim.play('hook', { on: { hit: () => { if (n.alive && !n.downed) { n.takeHit({ dmg: 14, from: P, melee: true, dir: fwd(P.yaw) }); Sfx.punch(); } } } });
+    P.yaw = a; P.blockT = 9; this.lastCounter = { n, t: Game.time }; P.anim.play('hook', { on: { hit: () => { if (n.alive && !n.downed) { n.takeHit({ dmg: 14, from: P, melee: true, dir: fwd(P.yaw) }); Sfx.punch(); } } } });
     Sfx.burst(1300, 0.07, 0.12, 'bandpass', 2); Game.shake(0.2); UI.hitmark(true); S.stats.counters = (S.stats.counters || 0) + 1; Skills.gain('brawl', 3); Haptic.buzz([30, 40, 30]); return true;
   },
   canGrab(n) { return n.alive && !n.downed && !n.carried && !n.grabbed && n.state !== 'ride' && n.state !== 'tied' && !n.hogtied; },

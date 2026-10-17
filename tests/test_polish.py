@@ -58,6 +58,12 @@ async def main():
         check('town: Wren\'s wanted poster hangs on the street side of the sheriff\'s office', r['z'] > 11, r)
         r = await ev(pg, """(()=>{ X.reset(); HP.S.time.hour = 23; HP.sim(0.2, X.F); const night = { hemi: Sky.hemi.intensity, amb: Sky.amb.intensity }; HP.S.time.hour = 12; HP.sim(0.1, X.F); return night; })()""")
         check('night: dark but readable (a little more moonlight than before)', 0.15 < r['hemi'] < 0.2 and 0.06 < r['amb'] < 0.08, r)
+        r = await ev(pg, """(()=>{ X.reset(); const P = HP.Game.player; const n = X.foe('poG', 1.1); n.fightPlayer(true); n.shootT = 99; Input.keys.add('q'); HP.sim(X.F, X.F); Input.mouse.lp = true; HP.sim(X.F, X.F); Input.mouse.lp = false; Input.keys.delete('q');
+            HP.Game.cam.idleT = 1; HP.sim(1.2, X.F); const r = { grab: P.grab === n, cine: +HP.Game.cam.cine.toFixed(2), dist: +HP.Game.cam.dist.toFixed(2), foe: HP.Game.cam.closeFoe === n }; Brawl.release(P); HP.NPC.despawn(n); HP.sim(2, X.F); r.after = +HP.Game.cam.cine.toFixed(2); return r; })()""")
+        check('camera: a grab pulls the camera in over the shoulder to frame both fighters, and it eases back out after', r['grab'] and r['cine'] > 0.8 and r['dist'] < 3 and r['foe'] and r['after'] < 0.3, r)
+        r = await ev(pg, """(()=>{ X.reset(); const P = HP.Game.player; P.inv = 0; const n = X.foe('poH', 6, { gun: 'revolver' }); HP.sim(0.2, X.F); const z0 = P.pos.z; P.hurt(10, n, 'gun'); const st = P.stagger; HP.sim(0.3, X.F); const back = z0 - P.pos.z;
+            HP.S.p.hp = HP.S.p.maxHp * 0.2; Input.keys.add('w'); Input.keys.add('shift'); HP.sim(1.5, X.F); const sp = Math.hypot(P.vel.x, P.vel.z); Input.keys.clear(); HP.S.p.hp = HP.S.p.maxHp; return { st: +st.toFixed(2), back: +back.toFixed(2), limp: +sp.toFixed(2), jog: PLAYER.JOG }; })()""")
+        check('wren: a hit knocks her back a step and staggers her; badly hurt, she limps and can\'t run', r['st'] > 0.3 and r['back'] > 0.2 and r['limp'] <= r['jog'] * 0.81, r)
         await ev(pg, "X.reset()")
 
         bad = [e for e in errs if 'favicon' not in e]
