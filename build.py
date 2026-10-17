@@ -4,6 +4,8 @@ js='\n'.join(open(f).read() for f in sorted(glob.glob('src/[0-9]*.js')))
 glb='<script>window.CHARACTER_GLB="'+base64.b64encode(open('assets/character.glb','rb').read()).decode()+'";</script>' if os.path.exists('assets/character.glb') else ''
 animals={os.path.splitext(os.path.basename(f))[0]: base64.b64encode(open(f,'rb').read()).decode() for f in sorted(glob.glob('assets/animals/*.glb'))}  # optional imported animals (03c_animals.js)
 glb+=('<script>window.ANIMAL_GLB=Object.assign('+json.dumps(animals)+',window.ANIMAL_GLB||{});</script>') if animals else ''  # a page can pre-set its own (the tests do)
+props={os.path.splitext(os.path.basename(f))[0]: base64.b64encode(open(f,'rb').read()).decode() for f in sorted(glob.glob('assets/props/*.glb'))}  # optional imported props (03d_props.js)
+glb+=('<script>window.PROP_GLB=Object.assign('+json.dumps(props)+',window.PROP_GLB||{});</script>') if props else ''
 anims={os.path.splitext(os.path.basename(f))[0]: json.load(open(f)) for f in sorted(glob.glob('assets/anim/*.json'))}  # retargeted clips (tools/retarget.py)
 ext='<script>window.EXTRA_ANIMS='+json.dumps(anims,separators=(',',':'))+';</script>' if anims else ''
 cdn='<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>'

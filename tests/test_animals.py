@@ -95,6 +95,12 @@ async def main():
             if wolf:
                 check('shipped wolf: walks on its Walking clip and, with no run clip, lopes on it faster with a bounding body', wolf['walk']['clip'] == 'Walking' and wolf['chase']['clip'] == 'Walking' and wolf['chase']['rate'] > 2.2 > wolf['walk']['rate'], wolf)
                 check('shipped wolf: grey coat, and with no death clip a killed wolf rolls onto its side', wolf['col'] == '#7d7b78' and wolf['roll'] > 1.2, wolf)
+            if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'props', 'rifle.glb')):
+                rf = await ev(pg, """(() => { const P = HP.Game.player; HP.S.weapons.rifle = 1; P.setWeapon('rifle'); HP.sim(0.3); P.rifle.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(P.rifle), s = b.getSize(new THREE.Vector3());
+                  const loc = new THREE.Box3(); P.rifle.traverse(m => { if (m.isMesh) { m.geometry.computeBoundingBox(); const bb = m.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().copy(P.rifle.matrixWorld).invert().multiply(m.matrixWorld)); loc.union(bb); } });
+                  const ls = loc.getSize(new THREE.Vector3()); let tex = false; P.rifle.traverse(m => { if (m.isMesh && m.material.map) tex = true; });
+                  return { visible: P.rifle.visible, len: +ls.z.toFixed(2), h: +ls.y.toFixed(2), w: +ls.x.toFixed(2), front: +loc.max.z.toFixed(2), back: +loc.min.z.toFixed(2), tex }; })()""")
+                check('rifle model: in Wren\'s hand, a real rifle\'s length along the aim, taller than it is wide (upright), most of it ahead of the grip, textured', rf['visible'] and 1.0 < rf['len'] < 1.25 and rf['h'] > rf['w'] and rf['front'] > -rf['back'] and rf['tex'], rf)
             await ev(pg, "HP.sim(2)"); check('shipped horse: no page errors', not [e for e in errs if 'favicon' not in e], errs[:3]); await b.close()
     n = sum(1 for r in RESULTS if r[1]); print(f'\n{n}/{len(RESULTS)} animal model checks passed')
     if n != len(RESULTS): raise SystemExit(1)
