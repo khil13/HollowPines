@@ -436,6 +436,7 @@ const Encounters = {
     const inTown = Math.hypot(P.pos.x + 40, P.pos.z - 20) < 45;
     if (inTown) { if (S.flags.brawlDay !== S.time.day && S.time.hour > 10 && S.time.hour < 19 && r < 0.3) return this.brawl(); return; }
     if (trailDist(P.pos.x, P.pos.z) < 12 && r < 0.7 && SIDE.encounter(r)) return;
+    if (trailDist(P.pos.x, P.pos.z) < 12 && Town.roadEvent(Math.random())) return;
     if (trailDist(P.pos.x, P.pos.z) > 10 && S.flags.snareDay !== S.time.day && r < 0.3) return this.snare();
     if (!S.flags.ida_met && r < 0.35) return this.ida();
     if (S.chapter >= 3 && S.factions.crane < -40 && S.chars.fenwick !== 'dead' && S.flags.lastAmbushDay !== S.time.day && r < 0.25) return this.craneAmbush();

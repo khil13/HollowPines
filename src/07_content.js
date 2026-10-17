@@ -102,7 +102,7 @@ function gatherable(kind, x, z) {
   let fruit; if (kind === 'berries') { g.add(M(GEO.ico, '#4f8a3c', 0.7, 0.55, 0.7, 0, 0.45, 0)); fruit = new THREE.Group(); for (let i = 0; i < 9; i++) { const a = i * 2.4; fruit.add(M(GEO.sphLo, '#5b4a9c', 0.07, 0.07, 0.07, Math.cos(a) * 0.55, 0.45 + Math.sin(i) * 0.3, Math.sin(a) * 0.55)); } g.add(fruit); Col.circle(x, z, 0.5, y, y + 1, { block: false }); }
   else { fruit = new THREE.Group(); for (let i = 0; i < 6; i++) { const l = M(GEO.cone, '#7fa7a0', 0.06, 0.5, 0.06, Math.cos(i) * 0.12, 0.25, Math.sin(i) * 0.12); l.rotation.z = Math.cos(i) * 0.3; fruit.add(l); } fruit.add(M(GEO.sphLo, '#6a7fd0', 0.05, 0.05, 0.05, 0, 0.5, 0)); g.add(fruit); }
   const o = { id, kind, x, z, y, fruit }; Gather.push(o);
-  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, kind === 'berries' ? 2 : 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
+  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
   return o;
 }
 const DoorSys = {

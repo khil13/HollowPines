@@ -13,6 +13,7 @@ Stylized frontier open-world game. Three.js (r128), plain JavaScript, no build s
 - `src/03b_gltf.js` — imported character model and `ClipAnimator` (AnimationMixer clips, crossfades, leg IK)
 - `src/03c_animstate.js` — locomotion state machine (`LocoFSM`) shared by the player and NPCs
 - `src/04_state.js` — items, persistent world state `S`, inventory, reputation, save/load
+- `src/05b_skills.js` — skills and perks (Gunslinger, Brawler, Survivalist, Horseman), honor standing, phone vibration
 - `src/05_systems.js` — interaction prompts, law and witnesses, dialogue engine, mission framework
 - `src/06_entities.js` — player, horse, NPC AI (schedules, witnesses, combat, cover), wildlife
 - `src/06b_brawl.js` — counters, grabs and shoves, hit reactions (limp, disarm, flinch), squad tactics (flank, suppression, rushes)
@@ -22,6 +23,7 @@ Stylized frontier open-world game. Three.js (r128), plain JavaScript, no build s
 - `src/08b_ch4.js` — Chapter 4, Night at Willow Bridge (tail, eavesdrop, confrontation)
 - `src/08c_ch5.js` — Chapter 5, The Ledger (Survey Camp 3, allies, four endings)
 - `src/08d_side.js` — bounty board, stranger missions, road encounters, travelers, landmarks
+- `src/08f_town.js` — the living town (gunfire panic, the law's response), bounty hunters, Wren's wanted poster, road events, duels
 - `src/08e_riders.js` — NPCs on horseback: posses, fleeing outlaws, mounted ambushers
 - `src/09_ui.js` — HUD, panels, map, shop, camp, fishing
 - `src/09b_post.js` — post-processing: ambient occlusion, bloom, colour grade, vignette, grain, anti-aliasing
@@ -51,6 +53,34 @@ Tests need Playwright with Chromium (set `PW_CHROMIUM=/path/to/chrome` to use a 
 Gameplay follows Red Dead Redemption 2. `src/07b_camps.js`:
 - **Traveler camps** (Teague's Camp, Holt Hunting Camp): trappers work near camp by day, sit at the fire in the evening and sleep at night. Greet them, ask about the area (they'll mark the outlaw hideout on your map), or rob them. Sneak in crouched to loot their satchel and lockbox: sleepers only notice someone standing right beside them, and walking upright past a bedroll wakes them. Anyone who sees a theft is a witness, which brings honor loss and a bounty through the normal law system. Aim at someone until their hands go up, then choose **Rob** (a witnessed robbery: honor -8, bounty). They remember you.
 - **Outlaw hideout** (Rattlesnake Hollow, Crane gang): two sentries patrol and two outlaws sit at the fire facing inward. Crouched, you aren't noticed from behind, so a punch from behind is a silent takedown; otherwise it's a shootout using the cover AI. Downed outlaws stay down. When nobody's left standing the hideout is cleared and its lockbox (gold, cash, ammo) is free loot; breaking it open while the gang is still around makes them suspicious. Killing outlaws costs no honor. Cleared hideouts are reoccupied after five days.
+
+## Living world
+`Town` and `Duel` in `src/08f_town.js`:
+- **Gunfire in Juniper Gap:** townsfolk run for the nearest door and cower inside until it's quiet. The sheriff or a deputy comes to see who's shooting and warns you once; shoot in town again and it's *disturbing the peace*. Outlaws' gunfire panics people too.
+- **Bounty hunters:** with a bounty of $15 or more on you, out in the country, three mounted hunters ride you down. At low honor they come at $8. They're fair game. If they knock you out, you wake in the sheriff's office with the bounty paid from your money. They never come into town.
+- **Wanted poster:** with a bounty, Wren's own poster goes up outside the sheriff's office. It has a sketch in your outfit colours and the reward, and you can read it or tear it down.
+- **Road events:**
+  - A settler's wagon with a broken wheel: help him for honor, a few dollars and coffee, or rob him.
+  - From Chapter 2, a gunslinger calls you out to a duel. Ten paces, then wait for **DRAW!** and shoot first. Hold aim as you draw to shoot the gun from their hand and spare them (+honor). Draw early and they shoot you for cheating; too slow and they win.
+
+## Character development
+`Skills` in `src/05b_skills.js`. Four skills level from I to V by doing the thing itself, and each level unlocks a perk:
+- **Gunslinger** (hits, headshots, disarms, duels): tighter spread → faster reloads → +20% headshot damage → aim settles twice as fast.
+- **Brawler** (punches, counters, grabs, shoves): +15% punch damage → wider counter window → cheaper punches → longer grabs and harder shoves.
+- **Survivalist** (skinning, fishing, foraging): animals notice you later → extra herbs and berries → extra meat → slower core drain.
+- **Horseman** (riding, brushing and feeding): horse tires slower → faster bond → steadier saddle aim → faster gallop.
+
+Honor shows as a standing, from Outlaw through Drifter to Hero of the Gap. The **Wren** tab in the satchel shows standing, health and stamina cores, skills and perks, and a record (duels, counters, disarming shots, kills, pelts, fish, crimes).
+
+## Phone controls
+- **Stick:** a floating stick appears wherever your left thumb lands. Push it to the rim and hold to break into a run.
+- **Context buttons:** they appear when needed: Grab beside a brawler, Shove while holding, and a pulsing Block with a "Block!" cue when an enemy winds up (the moment to counter).
+- **Aiming:** look is slower while aiming, for finer thumb aim.
+- **Other:**
+  - The phone vibrates on hits, counters and level-ups.
+  - Duels fire from the Attack button.
+  - Held upright, the phone asks to be turned sideways.
+- **Settings → Touch controls:** touch look speed, button size (small/medium/large), left-handed layout, push-to-run and vibration.
 
 ## Close combat and squads
 RDR2-style close combat, in our own style (`Brawl` and `Tactics` in `src/06b_brawl.js`):

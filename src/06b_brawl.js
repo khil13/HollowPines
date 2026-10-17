@@ -14,10 +14,10 @@ const Brawl = {
   },
   windup(n) { Sfx.tone(300, 0.14, 0.04, 'triangle', 260); n.windT = 0.3; }, // a cue before the punch: the moment to block for a counter
   counter(P, n) { // called when an enemy punch lands: true if Wren countered it
-    if (!P.blocking || P.blockT > 0.45 || P.grab) return false;
+    if (!P.blocking || P.blockT > (Skills.has('brawl', 3) ? 0.6 : 0.45) || P.grab) return false;
     const a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.pos.x += Math.sin(a) * 0.5; n.pos.z += Math.cos(a) * 0.5; n.stunT = 1.4; n.stunKnee = false; n.anim.play('hit', { replace: false }); n.anim.expr = 'alarm';
     P.yaw = a; P.blockT = 9; P.anim.play('hook', { on: { hit: () => { if (n.alive && !n.downed) { n.takeHit({ dmg: 14, from: P, melee: true, dir: fwd(P.yaw) }); Sfx.punch(); } } } });
-    Sfx.burst(1300, 0.07, 0.12, 'bandpass', 2); Game.shake(0.2); UI.hitmark(true); S.stats.counters = (S.stats.counters || 0) + 1; return true;
+    Sfx.burst(1300, 0.07, 0.12, 'bandpass', 2); Game.shake(0.2); UI.hitmark(true); S.stats.counters = (S.stats.counters || 0) + 1; Skills.gain('brawl', 3); Haptic.buzz([30, 40, 30]); return true;
   },
   canGrab(n) { return n.alive && !n.downed && !n.carried && !n.grabbed && n.state !== 'ride' && n.state !== 'tied' && !n.hogtied; },
   tryGrab(P) {
@@ -26,7 +26,7 @@ const Brawl = {
     if (!tgt || S.p.st < 10) return false;
     S.p.st -= 10; P.stDelay = 0.8; Sfx.burst(300, 0.12, 0.15); tgt.takeHit({ dmg: 1, from: P, melee: true }); // grabbing someone is assault, and wakes the fight
     if (!tgt.alive || tgt.downed) return true; // a crouched grab from behind is a silent takedown
-    P.grab = tgt; P.grabT = 0; tgt.grabbed = true; tgt.stunT = 0; tgt.anim.expr = 'alarm'; tgt.say(pick(['Get off me!', 'Let go of me!', 'Hey!'])); return true;
+    P.grab = tgt; P.grabT = 0; P.grabHits = 0; tgt.grabbed = true; Skills.gain('brawl', 1); tgt.stunT = 0; tgt.anim.expr = 'alarm'; tgt.say(pick(['Get off me!', 'Let go of me!', 'Hey!'])); return true;
   },
   release(P) { if (P.grab) P.grab.grabbed = false; P.grab = null; },
   hold(P, dt) { // each frame while Wren holds someone
@@ -34,16 +34,16 @@ const Brawl = {
     P.grabT += dt; const f = fwd(P.yaw); n.pos.x = damp(n.pos.x, P.pos.x + f.x * 0.75, 14, dt); n.pos.z = damp(n.pos.z, P.pos.z + f.z * 0.75, 14, dt); n.yaw = P.yaw + Math.PI; P.vel.set(0, 0, 0);
     if ((Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && P.cool <= 0 && !P.anim.busy()) { P.cool = 0.45; P.grabT = Math.max(0, P.grabT - 0.6); S.p.st -= 4;
       P.anim.play(P.grabHits++ % 2 ? 'hook' : 'punch', { on: { hit: () => { if (P.grab !== n) return; n.takeHit({ dmg: 20, from: P, melee: true }); Sfx.punch(); Game.shake(0.15); if (n.downed || !n.alive) this.release(P); } } }); return; }
-    if (Input.hit('x') || Input.hit('q') || Input.tb('dodge')) return this.shove(P, n);
-    if (P.grabT > 3.2) { this.release(P); n.say(pick(['Ha!', 'Not today!'])); P.anim.play('hit', { replace: false }); const a = Math.atan2(P.pos.x - n.pos.x, P.pos.z - n.pos.z); P.vel.x = Math.sin(a) * 4; P.vel.z = Math.cos(a) * 4; } // they wriggle free
+    if (Input.hit('x') || Input.hit('q') || Input.tb('dodge') || Input.tb('shove')) return this.shove(P, n);
+    if (P.grabT > (Skills.has('brawl', 5) ? 4.5 : 3.2)) { this.release(P); n.say(pick(['Ha!', 'Not today!'])); P.anim.play('hit', { replace: false }); const a = Math.atan2(P.pos.x - n.pos.x, P.pos.z - n.pos.z); P.vel.x = Math.sin(a) * 4; P.vel.z = Math.cos(a) * 4; } // they wriggle free
   },
   shove(P, n) {
     this.release(P); const f = fwd(P.yaw); n.shoveV = new THREE.Vector3(f.x * 9, 0, f.z * 9); n.floorT = 2.4; P.anim.play('punch'); Sfx.burst(240, 0.25, 0.25); Game.shake(0.2);
-    n.takeHit({ dmg: 8, from: P, melee: true }); if (n.downed) n.floorT = 0;
+    n.takeHit({ dmg: Skills.has('brawl', 5) ? 16 : 8, from: P, melee: true }); if (n.downed) n.floorT = 0; Skills.gain('brawl', 1);
     for (const o of NPC.all) if (o !== n && this.canGrab(o) && Math.hypot(o.pos.x - (n.pos.x + f.x * 1.6), o.pos.z - (n.pos.z + f.z * 1.6)) < 1.1) { o.stunT = 1.2; o.anim.play('hit', { replace: false }); } // knocked into a friend
   },
   npcTick(n, dt) { // reactions that take over an NPC's turn; true when it used the frame
-    if (n.limpT > 0) n.limpT -= dt;
+    if (n.limpT > 0) n.limpT -= dt; if (n.windT > 0) n.windT -= dt;
     if (n.grabbed) { if (Game.player.grab !== n) n.grabbed = false; else { n.sp = 0; n.anim.update(dt, { state: 'ground', speed: 0 }); n.place(); return true; } }
     if (n.floorT > 0) { n.floorT -= dt;
       if (n.shoveV) { n.pos.addScaledVector(n.shoveV, dt); Col.resolve(n.pos, 0.34, n.pos.y, 1.6); n.shoveV.multiplyScalar(Math.exp(-5 * dt)); n.pos.y = Col.ground(n.pos.x, n.pos.z, n.pos.y + 0.5); }
@@ -62,7 +62,7 @@ const Brawl = {
     n.gun = null; n.fists = true; if (n.gunM) n.gunM.visible = false; n.stunT = 0.6; n.stunKnee = false;
     const m = new THREE.Mesh(GEO.box, toon('#2b2522')); m.scale.set(0.09, 0.07, g === 'rifle' ? 0.9 : 0.3); m.position.set(x, Col.ground(x, z, n.pos.y + 1) + 0.04, z); m.rotation.y = rand(0, TAU); Game.scene.add(m);
     const dr = { x, z, m, gun: g, t: 0 }; this.drops.push(dr); FX.puff(n.pos.x, n.pos.y + 1.1, n.pos.z, { n: 2, size: 0.3, color: 0x9a948a, life: 0.5 });
-    Sfx.tone(1800, 0.05, 0.08, 'square'); n.say(pick(['My hand!', 'Argh, my gun!']), 2); UI.toast('Disarmed', 'good'); S.stats.disarms = (S.stats.disarms || 0) + 1;
+    Sfx.tone(1800, 0.05, 0.08, 'square'); n.say(pick(['My hand!', 'Argh, my gun!']), 2); UI.toast('Disarmed', 'good'); S.stats.disarms = (S.stats.disarms || 0) + 1; Skills.gain('gun', 4);
     if (n.hostileToPlayer && (n.brave > 0.5 || n.group)) n.regun = dr; // the brave ones go for it
   },
   regunTick(n, dt) { // a disarmed outlaw dives for the gun; true while busy with it
