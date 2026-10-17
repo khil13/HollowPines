@@ -14,10 +14,11 @@ _srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(_Quie
 threading.Thread(target=_srv.serve_forever, daemon=True).start()
 URL=os.environ.get('HP_TEST_URL') or f'http://127.0.0.1:{_srv.server_address[1]}/test.html'
 OUT=os.path.join(ROOT,'tests')+os.sep
-async def boot(p, w=1280, h=760, mobile=False, quality='low'):
+async def boot(p, w=1280, h=760, mobile=False, quality='low', init=None):
     b = await p.chromium.launch(executable_path=os.environ.get('PW_CHROMIUM') or None, args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'])
     ctx = await b.new_context(viewport={'width':w,'height':h}, has_touch=mobile, is_mobile=mobile)
     if quality: await ctx.add_init_script(f"try{{localStorage.setItem('hollowpines_settings', JSON.stringify({{quality:'{quality}'}}))}}catch(e){{}}")
+    if init: await ctx.add_init_script(init)
     pg = await ctx.new_page(); errs=[]; pg.set_default_timeout(120000)
     pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.on('console', lambda m: errs.append(m.text) if m.type=='error' else None)

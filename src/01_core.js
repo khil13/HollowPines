@@ -84,7 +84,7 @@ const Input = {
   tick(dt) { // push the stick to the rim and hold it there to break into a run (let it back in to slow down)
     if (this.move.mag > 0.95) this.rimT += dt; else { this.rimT = 0; if (this.move.mag < 0.7) this.autoSprint = false; } if (this.rimT > 0.3 && this.touch && Settings.v.autoRun !== false) this.autoSprint = true;
     const k = document.getElementById('knob'); if (k && k.classList.contains('run') !== this.autoSprint) k.classList.toggle('run', this.autoSprint); },
-  applyLayout() { document.body.classList.toggle('lefty', !!Settings.v.lefty); const t = document.getElementById('touch'); if (t) t.style.setProperty('--tbs', Settings.v.btnScale || 1); },
+  applyLayout() { document.body.classList.toggle('lefty', !!Settings.v.lefty); document.body.classList.toggle('framed', window.self !== window.top && matchMedia('(pointer:coarse)').matches); const t = document.getElementById('touch'); if (t) t.style.setProperty('--tbs', Settings.v.btnScale || 1); },
   endFrame() { this.pressed.clear(); this.btnP.clear(); this.mouse.dx = this.mouse.dy = 0; this.mouse.lp = false; this.look.dx = this.look.dy = 0; this.wheel = 0; this.pinch = 0; }
 };
 
