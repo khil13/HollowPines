@@ -80,7 +80,7 @@ const Town = {
     const bed = M(GEO.box, '#7a5a3c', 2.8, 0.5, 1.4, 0, 0.85, 0); bed.rotation.z = 0.14; g.add(bed); g.add(M(GEO.box, '#e8dfc8', 2.6, 1.0, 1.3, 0.1, 1.55, 0)); // canvas cover
     for (const [wx, wz] of [[-1.1, 0.75], [-1.1, -0.75], [1.1, 0.75]]) { const w = M(GEO.cyl, '#4a3a2a', 0.5, 0.1, 0.5, wx, 0.5, wz); w.rotation.x = Math.PI / 2; g.add(w); }
     const broke = M(GEO.cyl, '#4a3a2a', 0.5, 0.1, 0.5, 1.8, 0.06, -1.3); g.add(broke); // the broken wheel lies in the dirt
-    const c = Col.circle(s.x, s.z, 1.5, y - 1, y + 2, { block: true, cover: true });
+    const fx = Math.cos(yaw), fz = -Math.sin(yaw), c = [-1, 0, 1].map(k => Col.circle(s.x + fx * k * 1.05, s.z + fz * k * 1.05, 0.85, y - 1, y + 2, { block: true, cover: true })); // three circles along the bed: the whole wagon is solid
     const n = NPC.spawn({ key: 'wagon_otis', name: 'Otis Pruitt', x: s.x + Math.cos(yaw) * 2.4, z: s.z - Math.sin(yaw) * 2.4, lawful: true, wild: true, brave: 0.3, state: 'scripted', tags: ['generic', 'wayfarer'], look: { skin: '#e2a57c', shirt: '#6a7a4a', hair: '#9a8a7a', beard: '#9a8a7a', hatColor: '#7a6a4a' } });
     n.script = (dt, me) => { me.sp = 0; if (me.distP < 9) me.face(Game.player.pos); if (me.distP < 12 && !ev.called) { ev.called = true; me.say('Wheel came clean off! Could you lend a hand?', 4); } };
     const ev = { kind: 'wagon', g, c, n, fixed: false, robbed: false };
@@ -102,14 +102,18 @@ const Town = {
   eventsTick() {
     const P = Game.player;
     for (const ev of this.events.slice()) { const far = !ev.n || !NPC.all.includes(ev.n) || ev.n.distP > 130;
-      if (far) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) ev.c.on = false; if (ev.it) Interact.remove(ev.it); if (ev.n && NPC.all.includes(ev.n) && !Duel.on) NPC.despawn(ev.n); this.events = this.events.filter(e => e !== ev); } }
+      if (far) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) [].concat(ev.c).forEach(cc => cc.on = false); if (ev.it) Interact.remove(ev.it); if (ev.n && NPC.all.includes(ev.n) && !Duel.on) NPC.despawn(ev.n); this.events = this.events.filter(e => e !== ev); } }
+  },
+  safehouse(dt) { // the Greers' barn hides you from the law once you've stood by them (and no lawman has eyes on you)
+    if (!S.wanted || !S.flags.greer_safehouse || S.locations.farm !== 'occupied') { this.hideT = 0; return; } const P = Game.player, near = Math.hypot(P.pos.x + 106, P.pos.z - 82) < 7;
+    if (near && Law.seenT > 2) { this.hideT = (this.hideT || 0) + dt; if (this.hideT > 8) { this.hideT = 0; S.wanted = false; Law.searchC = null; for (const n of NPC.all) if (n.lawman) n.calm(); UI.toast(`The Greers hid you in the hay barn. The law rode on. Bounty of $${S.bounty.toFixed(2)} stands.`, 'good'); Missions.emit('escaped', {}); } } else this.hideT = 0;
   },
   update(dt) {
-    this.alarmT -= dt; this.lawT -= dt; if (this.lawT < -10) this.lawCaller = null; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
+    this.safehouse(dt); this.alarmT -= dt; this.lawT -= dt; if (this.lawT < -10) this.lawCaller = null; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
     const c = this.lawCaller, P = Game.player; // the lawman who came to check gives one warning when he finds you
     if (c && c.alive && c.state !== 'pursue' && c.state !== 'combat' && c.distP < 8 && c.seesPlayer && Game.time - this.warnedAt > 90) { this.warnedAt = Game.time; this.lawCaller = null; c.face(P.pos); c.say('Keep that iron holstered in my town. Next shot costs you.', 4); UI.toast('Warned by the law: no more shooting in town', 'bad'); }
   },
-  clear() { for (const ev of this.events) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) ev.c.on = false; if (ev.it) Interact.remove(ev.it); } this.events = []; Duel.stop(); this.alarmT = 0; this.lawCaller = null; },
+  clear() { for (const ev of this.events) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) [].concat(ev.c).forEach(cc => cc.on = false); if (ev.it) Interact.remove(ev.it); } this.events = []; Duel.stop(); this.alarmT = 0; this.lawCaller = null; },
 };
 
 /* A frontier duel: ten paces, a long wait, then DRAW! Shoot first (attack) to win; hold aim as you draw to shoot the gun

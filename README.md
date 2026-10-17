@@ -115,6 +115,23 @@ A full review of every system fixed about 50 issues.
   - Rain darkens the ground in the shader instead of re-uploading the terrain colours.
   - The animators share one ground probe.
   - Chimney smoke puffs fade on their own.
+- **Story threads that now pay off:** Ezra repays the $40 the Greers owe you, and once you've stood by them, the Greers' hay barn hides you from the law.
+- **World:**
+  - Picked bushes stay bare until they grow back.
+  - Morning fog lifts within a few hours.
+  - The stranded wagon is solid end to end.
+- **Accuracy:**
+  - A crouched outlaw's hitbox shrinks, so no headshots on empty air over cover.
+  - A body on the ground counts as body.
+  - A gun-hand hit no longer wins over a closer body hit.
+  - Punch auto-aim ignores downed bodies.
+  - No punches while swimming.
+- **Input:**
+  - The click that closes a menu isn't also a punch.
+  - Scroll zoom is remembered.
+  - Fishing can be stopped with a tap.
+  - The floating stick resets cleanly.
+  - Old banners don't replay after a load.
 - **Look and feel:**
   - Nights are moonlit rather than black.
   - The camera stops at tree canopies and never looks out from inside Wren's head.

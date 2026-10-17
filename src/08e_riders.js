@@ -16,7 +16,7 @@ class NPCHorse {
   }
   move(dt) {
     const f = fwd(this.yaw); this.pos.x += f.x * this.speed * dt; this.pos.z += f.z * this.speed * dt;
-    if (Col.resolve(this.pos, 0.55, this.pos.y, 1.6)) this.speed *= 0.85; if (WORLD.waterY - Terrain.height(this.pos.x, this.pos.z) > 1.4) this.speed = Math.min(this.speed, 2.6);
+    if (Col.resolve(this.pos, 0.55, this.pos.y, 1.6)) this.speed *= 0.85; if (WORLD.waterY - Terrain.height(this.pos.x, this.pos.z) > 1.4 && Col.ground(this.pos.x, this.pos.z, this.pos.y + 1) < WORLD.waterY + 0.2) this.speed = Math.min(this.speed, 2.6); /* swimming pace only off the bridge */
     this.pos.x = clamp(this.pos.x, -WORLD.half + 8, WORLD.half - 8); this.pos.z = clamp(this.pos.z, -WORLD.half + 8, WORLD.half - 8); this.pos.y = damp(this.pos.y, Col.ground(this.pos.x, this.pos.z, this.pos.y + 1), 14, dt);
     this.gait = this.speed < 3.2 ? 'walk' : this.speed < 6.4 ? 'trot' : this.speed < 10.5 ? 'canter' : 'gallop';
   }

@@ -42,6 +42,7 @@ const Input = {
     canvas.addEventListener('mousedown', e => {
       if (this.touch) return;
       if (!this.locked && !this.uiOpen && Settings.v.mouseLock !== false && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
+      if (this.swallowClick) { this.swallowClick = false; if (e.button === 0) return; } // the first click back in the game only re-grabs the mouse
       if (e.button === 0) { this.mouse.l = true; this.mouse.lp = true; } if (e.button === 2) this.mouse.r = true;
     });
     addEventListener('mouseup', e => { if (e.button === 0) this.mouse.l = false; if (e.button === 2) this.mouse.r = false; });
@@ -74,7 +75,7 @@ const Input = {
     });
     addEventListener('touchstart', () => this.setTouch(true), { passive: true });
     // anything held when the page loses focus, is hidden, or a menu opens is released, so nothing stays stuck on
-    this.reset = () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; this.mouse.dx = this.mouse.dy = 0; stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; lookIds.clear(); this.look.dx = this.look.dy = 0; for (const k in this.btn) this.btn[k] = false; };
+    this.reset = () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; this.mouse.dx = this.mouse.dy = 0; stickId = null; knob.style.transform = ''; stick.classList.remove('float'); stick.classList.add('idle'); stick.style.left = stick.style.top = stick.style.bottom = stick.style.right = ''; this.autoSprint = false; this.rimT = 0; this.move.x = this.move.y = this.move.mag = 0; lookIds.clear(); this.look.dx = this.look.dy = 0; for (const k in this.btn) this.btn[k] = false; };
     addEventListener('blur', this.reset); document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
   },
   setTouch(v) { this.touch = v; document.body.classList.toggle('touch', v); document.getElementById('touch').hidden = !v || !Game.running; },

@@ -54,7 +54,7 @@ const Law = {
   },
   canSurrender() { return S.wanted && NPC.all.some(n => n.lawman && n.alive && !n.downed && n.seesPlayer && n.distP < 16); },
   surrender() {
-    const pay = Math.min(S.money, S.bounty); Inv.money(-pay, 'fine paid'); UI.toast(S.money < 0.01 && pay < S.bounty ? 'You could not cover it all. A night in the cell squared it.' : 'Fine paid. Charges cleared.', '');
+    const pay = Math.min(S.money, S.bounty); if (pay > 0) Inv.money(-pay, 'fine paid'); UI.toast(S.money < 0.01 && pay < S.bounty ? 'You could not cover it all. A night in the cell squared it.' : 'Fine paid. Charges cleared.', '');
     S.bounty = 0; S.wanted = false; this.searchC = null; Rep.honor(-2, 'arrested');
     Sky.advance(6); Game.player.teleport(-22, 14.5, 0); for (const n of NPC.all) if (n.lawman) n.calm(); journal('Arrested in Juniper Gap. Paid what I owed and lost a night to it.');
   },

@@ -97,7 +97,7 @@ class CamRig {
   update(dt) {
     const P = Game.player, sens = Settings.v.sens, V = this.v; const ts = Settings.v.tsens || 1; let dx = (Input.mouse.dx * 0.0025 + Input.look.dx * 0.0065 * ts) * sens, dy = (Input.mouse.dy * 0.0025 + Input.look.dy * 0.0055 * ts) * sens * (Settings.v.invertY ? -1 : 1);
     if (Input.uiOpen) dx = dy = 0;
-    if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) Settings.v.zoom = this.zoom; }
+    if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) { Settings.v.zoom = this.zoom; clearTimeout(this._zs); this._zs = setTimeout(() => Settings.save(), 600); } } /* remember the zoom once you stop scrolling */
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
     dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { dx *= 0.55; dy *= 0.55; } // finer thumb aim // zoomed in: same feel per degree
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;

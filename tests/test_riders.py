@@ -65,7 +65,7 @@ async def main():
         check('weather: sight shrinks with weather (clear > rain > storm > fog)', r['clear']['mul'] > r['rain']['mul'] > r['storm']['mul'] > r['fog']['mul'], {k: v['mul'] for k, v in r.items()})
         check('weather: rain and storms muffle your footsteps', r['rain']['noise'] < r['clear']['noise'] and r['storm']['noise'] < r['clear']['noise'], {k: v['noise'] for k, v in r.items()})
         check('weather: the HUD names thunderstorms and fog', r['storm']['label'] == 'Thunderstorm' and r['fog']['label'] == 'Fog', {k: v['label'] for k, v in r.items()})
-        r = await ev(pg, "(()=>{ R.reset('storm'); const b0 = Sky.bolts || 0; let flash = 0; for (let i = 0; i < 120; i++) { HP.sim(0.25, R.F); flash = Math.max(flash, Sky.flash || 0); } return { bolts: (Sky.bolts || 0) - b0, flash: +flash.toFixed(2) }; })()")
+        r = await ev(pg, "(()=>{ R.reset('storm'); const b0 = Sky.bolts || 0; let flash = 0; for (let i = 0; i < 900; i++) { HP.sim(R.F, R.F); flash = Math.max(flash, Sky.flash || 0); } /* every frame: a flash fades in a few frames */ return { bolts: (Sky.bolts || 0) - b0, flash: +flash.toFixed(2) }; })()")
         check('weather: thunderstorms throw lightning across the sky', r['bolts'] >= 1 and r['flash'] > 0.3, r)
         r = await ev(pg, """(()=>{ const top = wet => { R.reset(wet ? 'rain' : 'clear'); Sky.wet = wet; const h = new NPCHorse(HP.Game.player.pos.x + 20, HP.Game.player.pos.z, 0); for (let i = 0; i < 240; i++) { Sky.wet = wet; h.steer(h.pos.x, h.pos.z + 50, 12, R.F); } const s = h.speed; h.remove(); return +s.toFixed(2); };
             return { dry: top(0), mud: top(1) }; })()""")
