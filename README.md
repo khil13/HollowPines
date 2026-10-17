@@ -82,6 +82,39 @@ Honor shows as a standing, from Outlaw through Drifter to Hero of the Gap. The *
   - Held upright, the phone asks to be turned sideways.
 - **Settings → Touch controls:** touch look speed, button size (small/medium/large), left-handed layout, push-to-run and vibration.
 
+## Polish pass
+A full review of every system fixed about 50 issues.
+- **Story:** no more soft-locks.
+  - Mae, and Ezra until Chapter 3 is settled, are essential characters: they can be knocked down but not killed.
+  - Chapter 4 unlocks even if the Greers' stand never happened.
+  - The Chapter 2 goat path turns into a fight if Dutchy can't guide you.
+  - Rook's proof drops however he falls.
+  - Chapter 5's Crane plan works with any surviving Crane.
+- **Missions:**
+  - Retry always restarts cleanly from the first stage, and the fail screen pauses the world.
+  - Timers from before a load or retry stand down (the `later()` helper).
+  - Loading at camp keeps the camp.
+  - Townsfolk you know can be woken at night.
+- **Combat:**
+  - Punches hurt again after a stun ends.
+  - Grabs and pushes respect walls.
+  - No shooting while carrying someone.
+  - Disarmed riders and allies stop firing.
+  - Hits on a rider never freeze the horse.
+  - Despawned or loaded-away riders take their horses with them.
+- **Town:**
+  - Hiding townsfolk stay hidden.
+  - Only the bounty hunters themselves can haul you in.
+  - Road events stay on dry, open trail.
+  - Wren's poster hangs on the street side.
+- **Look and feel:**
+  - Nights are moonlit rather than black.
+  - The camera stops at tree canopies and never looks out from inside Wren's head.
+  - The desktop ammo counter is back.
+  - The saloon lamps hang again.
+  - Shift+number still switches weapons.
+  - Squad callouts get Wren right ("She's reloading!").
+
 ## Close combat and squads
 RDR2-style close combat, in our own style (`Brawl` and `Tactics` in `src/06b_brawl.js`):
 - **Counter:** an enemy's swing has an audible wind-up. Raise your guard (Q) just before it lands and Wren slips the punch and hits back, and the attacker reels. A guard held up early only blocks.

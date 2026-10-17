@@ -213,14 +213,18 @@ const NOISE = (() => {
 })();
 function fbm(x, y, oct = 4) { let s = 0, a = 1, f = 1, n = 0; for (let i = 0; i < oct; i++) { s += NOISE(x * f, y * f) * a; n += a; a *= 0.5; f *= 2.03; } return s / n; }
 
+/* setTimeout for game logic: the callback is dropped if the game was loaded or a mission retried in the meantime */
+function later(fn, ms) { const g = Game.gen; return setTimeout(() => { if (g === Game.gen) fn(); }, ms); }
+
 /* ---------- Input ---------- */
 const Input = {
   keys: new Set(), pressed: new Set(), mouse: { dx: 0, dy: 0, l: false, r: false, lp: false }, wheel: 0,
   touch: false, move: { x: 0, y: 0, mag: 0 }, autoSprint: false, rimT: 0, look: { dx: 0, dy: 0 }, pinch: 0, btn: {}, btnP: new Set(), sprintToggle: false, aimToggle: false,
   locked: false, uiOpen: false,
   init(canvas) {
-    addEventListener('keydown', e => { if (e.repeat) return; const k = e.key.toLowerCase(); this.keys.add(k); this.pressed.add(k); if (['tab', ' ', 'alt'].includes(k)) e.preventDefault(); });
-    addEventListener('keyup', e => this.keys.delete(e.key.toLowerCase()));
+    const keyOf = e => /^Digit\d$/.test(e.code) ? e.code.slice(5) : e.key.toLowerCase(); // digits by position, so Shift+2 still draws the revolver
+    addEventListener('keydown', e => { if (e.repeat) return; const k = keyOf(e); this.keys.add(k); this.pressed.add(k); if (['tab', ' ', 'alt'].includes(k)) e.preventDefault(); });
+    addEventListener('keyup', e => { this.keys.delete(keyOf(e)); this.keys.delete(e.key.toLowerCase()); });
     canvas.addEventListener('mousedown', e => {
       if (this.touch) return;
       if (!this.locked && !this.uiOpen && Settings.v.mouseLock !== false && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
@@ -274,7 +278,7 @@ const Sfx = {
   ctx: null, master: null, beds: {}, musicT: 0,
   init() {
     if (this.ctx) return; try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
-    const c = this.ctx; this.master = c.createGain(); this.master.gain.value = 0.6; this.master.connect(c.destination);
+    const c = this.ctx; this.master = c.createGain(); this.master.gain.value = Settings.v.sound ?? 0.6; this.master.connect(c.destination);
     const len = c.sampleRate * 2, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1; this.noise = buf;
     const bed = (type, f, q) => { const s = c.createBufferSource(); s.buffer = buf; s.loop = true; const fl = c.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const g = c.createGain(); g.gain.value = 0; s.connect(fl); fl.connect(g); g.connect(this.master); s.start(); return g; };
@@ -1527,8 +1531,8 @@ const Missions = {
   },
   available(giver) { return this.order.filter(id => this.defs[id].giver === giver && this.st(id).status === 'available'); },
   start(id) {
-    const d = this.defs[id], m = this.st(id); if (this.active && this.active !== id) this.abandon(true);
-    this.retryState = JSON.stringify(S); m.status = 'active'; m.stage = 0; m.c = {}; m.opt = {}; this.active = id; S.activeMission = id;
+    const d = this.defs[id], m = this.st(id); if (this.active && this.active !== id) this.abandon(false); // say so when another job pauses the current one
+    if (Game.syncState) Game.syncState(); this.retryState = JSON.stringify(S); m.status = 'active'; m.stage = 0; m.c = {}; m.opt = {}; this.active = id; S.activeMission = id;
     this.ctx = { d, m, t: 0, st: 0 }; UI.banner(d.chapter ? `Chapter ${d.chapter}` : d.type.toUpperCase(), d.title); journal(`Started: ${d.title}`, 'mission');
     this.enterStage();
   },
@@ -1548,9 +1552,11 @@ const Missions = {
   },
   advance() { const ctx = this.ctx, { d, m } = ctx, s = d.stages[m.stage]; if (s.exit) s.exit(ctx); const nx = s.next ? s.next(ctx) : m.stage + 1; if (nx === 'complete' || nx >= d.stages.length) return this.complete(); m.stage = typeof nx === 'string' ? d.stages.findIndex(x => x.id === nx) : nx; this.enterStage(); },
   complete() { const { d, m } = this.ctx; m.status = 'done'; if (d.complete) d.complete(this.ctx); this.active = null; S.activeMission = null; this.ctx = null; UI.banner('Mission complete', d.title, m.outcome || ''); journal(`Completed: ${d.title}${m.outcome ? ' — ' + m.outcome : ''}`, 'mission'); this._silent = false; this.refresh(); World.apply(); Save.save(true); },
-  fail(why) { const { d, m } = this.ctx; this.failing = { id: d.id, why }; UI.failScreen(d.title, why); },
-  retry() { const id = this.failing.id; this.failing = null; Save.apply(JSON.parse(this.retryState)); this.start(id); },
-  acceptFail() { const id = this.failing.id, d = this.defs[id], m = this.st(id); this.failing = null; m.status = 'failed'; m.outcome = d.failOutcome ? d.failOutcome(this.ctx) : 'Failed'; if (d.onFail) d.onFail(this.ctx); this.active = null; S.activeMission = null; this.ctx = null; journal(`Failed: ${d.title} — ${m.outcome}`, 'mission'); this.refresh(); World.apply(); Save.save(true); },
+  fail(why) { if (!this.ctx || this.failing) return; const { d, m } = this.ctx; this.failing = { id: d.id, why }; UI.failScreen(d.title, why); },
+  retry() { // back to the start of the mission: clean up this run, and never re-enter a mid-mission stage from a loaded save
+    if (UI.panelOpen) UI.close(true); const id = this.failing.id, d = this.defs[id]; if (this.ctx && d.cleanup) d.cleanup(this.ctx); this.failing = null; this.active = null; this.ctx = null;
+    const st = JSON.parse(this.retryState); st.activeMission = null; if (st.missions && st.missions[id]) Object.assign(st.missions[id], { status: 'available', stage: 0 }); Save.apply(st); this.start(id); },
+  acceptFail() { if (UI.panelOpen) UI.close(true); const id = this.failing.id, d = this.defs[id], m = this.st(id); this.failing = null; m.status = 'failed'; m.outcome = d.failOutcome ? d.failOutcome(this.ctx) : 'Failed'; if (d.onFail) d.onFail(this.ctx); if (d.cleanup) d.cleanup(this.ctx); m.status = 'failed'; this.active = null; S.activeMission = null; this.ctx = null; journal(`Failed: ${d.title} — ${m.outcome}`, 'mission'); this.refresh(); World.apply(); Save.save(true); },
   abandon(silent) { if (!this.active) return; const m = this.st(this.active); m.status = 'available'; m.stage = 0; if (this.ctx.d.cleanup) this.ctx.d.cleanup(this.ctx); if (!silent) UI.toast(`Mission paused: ${this.ctx.d.title}. Restart it from the giver.`, ''); this.active = null; S.activeMission = null; this.ctx = null; World.apply(); },
   markers() { const out = []; if (this.active) { for (const o of this.objectives()) { if (o.optional && this.ctx.m.opt[o.id]) continue; if (!o.optional && o.check(this.ctx)) continue; const mk = o.marker && o.marker(); if (mk) out.push(mk); } } else { for (const id of this.order) { const d = this.defs[id]; if (this.st(id).status === 'available' && d.start) { const p = d.start(); if (p) out.push(Object.assign({ giver: true }, p)); } } } return out; },
 };
@@ -1577,7 +1583,6 @@ const Skills = {
   },
   onEvent(ev, d) { // experience from what Wren does out in the world
     if (ev === 'skin') this.gain('survive', 4); else if (ev === 'fish') this.gain('survive', 3); else if (ev === 'horsecare') this.gain('ride', 2);
-    else if (ev === 'item' && d && (d.id === 'berries' || d.id === 'sage')) this.gain('survive', 1);
   },
   rideM: 0,
   update(dt) { const P = Game.player; if (P.state === 'ride' && Game.horse.speed > 3) { this.rideM += Game.horse.speed * dt; if (this.rideM > 100) { this.rideM = 0; this.gain('ride', 1); } } },
@@ -1691,11 +1696,11 @@ class Player {
     if (this.canAct()) {
       if (Input.hit('c') || Input.tb('crouch')) { this.crouch = !this.crouch; Input.setBtnState('crouch', this.crouch); }
       if (Input.hit('1')) this.setWeapon('fists'); if (Input.hit('2') && S.weapons.revolver) this.setWeapon('revolver'); if (Input.hit('3') && S.weapons.rifle) this.setWeapon('rifle');
-      if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon();
+      if ((Input.hit('v') || Input.tb('weapon')) && !this.carry) this.cycleWeapon();
       if (Input.hit('h') || Input.tb('whistle')) this.whistle();
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (Input.hit('b') || Input.tb('camp')) Camp.make();
-      if ((Input.hit('x') || Input.tb('dodge')) && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
+      if ((Input.hit('x') || Input.tb('dodge')) && !this.grab && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
     const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !this.grab && !aiming && this.state === 'ground'; this.blockT = this.blocking ? (this.blockT || 0) + dt : 0; // how long the guard has been up (a fresh one counters)
@@ -1774,6 +1779,7 @@ class Player {
     // brandishing at townsfolk
     if (aiming && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
     if (!atk || this.cool > 0 || this.anim.busy()) return;
+    if (this.carry) return; // hands full
     if (this.weapon !== 'fists' && (aiming || this.state === 'swim' ? false : true) && !aiming) { return this.shoot(false); }
     if (this.weapon !== 'fists' && aiming) return this.shoot(true);
     if (this.carry || this.grab) return; if (this.blocking && Brawl.tryGrab(this)) return; if (S.p.st < 6) { UI.toast('Too tired to swing', 'bad'); return; }
@@ -1827,10 +1833,10 @@ class Player {
     if (this.state !== 'ride') { const back = from && from.pos && Math.cos(angDiff(this.yaw, Math.atan2(from.pos.x - this.pos.x, from.pos.z - this.pos.z))) < 0; this.anim.play(back ? 'hitB' : 'hit', { replace: false }); } UI.flash(); Game.shake(0.25); this.anim.expr = 'alarm'; setTimeout(() => this.anim.expr = 'calm', 900);
     if (S.p.hp <= 0) this.knockout(from);
   }
-  knockout(from) { S.p.hp = 0; this.state = 'down'; this.downT = 0; this.dropCarry(); if (Game.horse.rider === this) Game.horse.rider = null; UI.toast('You were knocked out', 'bad'); if (Missions.active) setTimeout(() => Missions.fail('Wren was knocked out.'), 1800); }
+  knockout(from) { this.koBy = from; S.p.hp = 0; this.state = 'down'; this.downT = 0; this.dropCarry(); if (Game.horse.rider === this) Game.horse.rider = null; UI.toast('You were knocked out', 'bad'); if (Missions.active) { const id = Missions.active, gen = Game.gen; setTimeout(() => { if (Missions.active === id && Game.gen === gen) Missions.fail('Wren was knocked out.'); }, 1800); } }
   updDown(dt) { this.downT += dt; this.anim.update(dt, { state: 'down', speed: 0 }); this.place();
     if (this.downT > 3.5 && !Missions.failing) { this.state = 'ground'; this.anim.play('standup'); S.p.hp = S.p.maxHp * 0.5; const lose = Math.round(S.money * 0.1 * 100) / 100; if (lose > 0) Inv.money(-lose, 'lost while out cold');
-      if (Town.huntersNear()) Town.captured(); else if (S.wanted) { Law.surrender(); } else { Sky.advance(3); this.teleport(-30, 34, 0); UI.toast('Doc Pell patched you up.', ''); } for (const n of NPC.all) if (n.hostileToPlayer && !n.tags.includes('story')) n.calm(); } }
+      if (this.koBy && this.koBy.tags && this.koBy.tags.includes('hunter')) Town.captured(); /* only the hunters themselves haul you in */ else if (S.wanted) { Law.surrender(); } else { Sky.advance(3); this.teleport(-30, 34, 0); UI.toast('Doc Pell patched you up.', ''); } for (const n of NPC.all) if (n.hostileToPlayer && !n.tags.includes('story')) n.calm(); } }
   // carrying world objects (strongbox, hogtied outlaw)
   pickCarry(obj) { this.anim.play('pickup', { on: { grab: () => { this.carry = obj; obj.carried = true; if (obj.onPick) obj.onPick(); Sfx.pickup(); } } }); if (this.weapon !== 'fists') this.weapon = 'fists'; }
   dropCarry() { if (!this.carry) return; const c = this.carry; this.carry = null; c.carried = false; const f = fwd(this.yaw); const x = this.pos.x + f.x * 0.9, z = this.pos.z + f.z * 0.9; c.mesh.position.set(x, Col.ground(x, z, this.pos.y + 1) + (c.h || 0.2), z); if (c.onDrop) c.onDrop(x, z); }
@@ -1947,7 +1953,7 @@ const TOWN_NODES = {}; const PLACES = {};
 const NPC = {
   all: [], byKey(k) { return this.all.find(n => n.key === k); },
   spawn(cfg) { const n = new Person(cfg); this.all.push(n); return n; },
-  despawn(n) { Game.scene.remove(n.rig.root); if (n.anim.dispose) n.anim.dispose(); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
+  despawn(n) { if (n.mount) { const h = n.mount; n.mount = null; h.rider = null; h.remove(); } Game.scene.remove(n.rig.root); if (n.anim.dispose) n.anim.dispose(); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
 };
 function townPath(fx, fz, tx, tz) {
   // BFS over town graph from nearest node to node nearest target
@@ -1975,7 +1981,7 @@ class Person {
       if (this.witness && this.state !== 'combat') return [{ label: `Pay off ($8)`, disabled: S.money < 8, fn: () => this.payoff() }, { label: 'Intimidate', crime: true, fn: () => this.intimidate() }];
       return [];
     }
-    if (this.isAsleep()) return []; // no prompts on a sleeper (and none crowding the lockbox beside the bedroll)
+    if (this.isAsleep()) return ['mae', 'ezra', 'pike', 'doc', 'cora'].includes(this.key) && !p.crouch ? [{ label: `Wake ${this.name}`, fn: () => { this.wakeT = 60; this.face(p.pos); this.say(pick(['Mm? Oh, it\'s you. What is it?', 'This had better be important.', 'Wren? At this hour?']), 3); } }] : []; // townsfolk you know can be woken (standing, not sneaking); none crowding the lockbox beside a bedroll
     if (this.state === 'handsup') return Game.player.aiming && !this.robbed ? [{ label: `Rob ${this.name}`, crime: true, fn: () => this.rob() }] : [];
     const o = []; const tree = this.talk ? this.talk(this) : null;
     if (tree) o.push({ label: `Talk to ${this.name}`, fn: () => Dialog.start(this, tree) });
@@ -2009,7 +2015,7 @@ class Person {
   intimidate() { Game.player.anim.play('taunt'); const ok = Math.random() < (Game.player.weapon !== 'fists' ? 0.8 : 0.5); if (ok) { this.witness = null; this.state = 'routine'; this.say('A-alright. I never saw a thing.'); Rep.honor(-3, 'intimidation'); if (this.key) Rep.rel(this.key, -12); } else { this.say('You don\'t scare me!'); this.state = 'report'; this.sp = 6; } }
   investigate(pos) { if (this.hostileToPlayer || this.lawman && S.wanted) return; if (this.brave > 0.5 && this.state === 'routine') { this.state = 'investigate'; this.invPos = pos; this.invT = 10; this.path = null; this.say('What was that?'); } }
   hearShot(pos, src) {
-    if (!this.alive || this.downed) return; if (this.group && this.state !== 'combat') { this.alertGroup(src && src.isPlayer ? src.pos : pos); return; }
+    if (!this.alive || this.downed || this.panicked) return; if (this.group && this.state !== 'combat') { this.alertGroup(src && src.isPlayer ? src.pos : pos); return; }
     if (this.hostileToPlayer || this.state === 'combat') return;
     if (this.lawful && !this.lawman && Town.inTown(pos.x, pos.z) && this.brave < 0.7 && Town.panic(this, pos)) return; // in town folks run indoors
     if (this.lawman && src && src.isPlayer && Town.inTown(pos.x, pos.z)) Town.lawCheck(this, pos);
@@ -2017,23 +2023,24 @@ class Person {
     if (this.lawman && !S.wanted && src && src.isPlayer && Math.hypot(pos.x - this.pos.x, pos.z - this.pos.z) < 35) this.investigate(pos);
   }
   fightPlayer(fists) { this.hostileToPlayer = true; this.state = 'combat'; this.fists = fists || !this.gun; this.anim.expr = 'angry'; if (this.gunM && !this.fists) this.gunM.visible = true; }
-  pursue() { this.state = 'pursue'; this.path = null; this.warned = false; if (this.gunM) this.gunM.visible = true; this.anim.expr = 'angry'; }
+  pursue() { this.state = 'pursue'; this.path = null; this.warned = false; if (this.gunM && this.gun) this.gunM.visible = true; this.anim.expr = 'angry'; }
   calm() { this.hostileToPlayer = false; if (this.alive && !this.downed && !this.tags.includes('story')) this.state = 'routine'; this.path = null; if (this.gunM) this.gunM.visible = false; this.anim.expr = 'calm'; this.warned = false; }
   alertGroup(pos) { for (const n of NPC.all) if (n.group === this.group && n.alive && !n.downed && n.state !== 'combat' && Math.hypot(n.pos.x - this.pos.x, n.pos.z - this.pos.z) < 45) { n.fightPlayer(); n.alert = 1; n.lastSeen = pos ? { x: pos.x, z: pos.z } : null; } Missions.emit('alarm', { group: this.group }); }
   takeHit(o) {
     if (!this.alive) return; const fromP = o.from && o.from.isPlayer;
     if (fromP && o.melee && !this.hostileToPlayer && this.state !== 'combat' && (this.alert || 0) < 0.5 && Game.player.crouch && !this.seesPlayer && (this.group || !this.lawful)) { this.knockdown(); Sfx.punch(); UI.toast('Silent takedown', 'good'); return; }
     this.hp -= o.dmg * (o.melee && this.stunT > 0 ? 1.5 : 1); this.anim.play('hit', { replace: false }); this.anim.expr = 'alarm'; if (o.gun) FX.impact({ x: this.pos.x, y: this.pos.y + (o.zone === 'head' ? 1.55 : o.zone === 'legs' ? 0.6 : 1.1), z: this.pos.z }, 'blood'); if (o.dir) { this.pos.x += o.dir.x * (o.melee ? 0.35 : 0.15); this.pos.z += o.dir.z * (o.melee ? 0.35 : 0.15); }
-    if (fromP && this.lawful && !this.hostileToPlayer && !this.witness) { Law.crime(this.hp <= 0 && !o.melee ? 'murder' : 'assault', this.pos, { victim: this, noise: o.gun ? 60 : 0 }); }
+    if (this.hp <= 0 && STORY.essential(this)) this.knockoutOnly = true; // essential story characters go down, not out
+    if (fromP && this.lawful && !this.hostileToPlayer && !this.witness) { Law.crime(this.hp <= 0 && !o.melee && !this.knockoutOnly ? 'murder' : 'assault', this.pos, { victim: this, noise: o.gun ? 60 : 0 }); }
     if (fromP && this.group) this.alertGroup(Game.player.pos);
     if (fromP && this.lawful && !this.lawman && this.alive && this.hp > 0 && o.melee && this.brave > 0.55) { this.fightPlayer(true); this.say(pick(['You want a fight? You got one!', 'Why you...!'])); }
     Brawl.react(this, o);
     if (this.hp <= 0) { if (o.melee || this.knockoutOnly) this.knockdown(); else { this.setDead(); if (fromP) { S.stats.kills++; Missions.emit('kill', { npc: this }); } } }
   }
-  knockdown() { this.downed = true; this.downT = this.tags.includes('bounty') || this.tags.includes('outlaw') ? 1e9 : 30; /* hideout outlaws stay down */ this.state = 'down'; this.hp = 0; Sfx.burst(250, 0.3, 0.2); Missions.emit('ko', { npc: this }); if (this.gunM) this.gunM.visible = false; }
+  knockdown() { if (this.panicked) { this.panicked = this.hid = this.crouchC = false; this.script = null; } this.stunT = 0; this.floorT = 0; this.shoveV = null; this.regun = null; this.pickT = 0; if (this.anim.actions) this.anim.actions = this.anim.actions.filter(a => a.name !== 'punch' && a.name !== 'hook'); this.downed = true; this.downT = this.tags.includes('bounty') || this.tags.includes('outlaw') ? 1e9 : 30; /* hideout outlaws stay down */ this.state = 'down'; this.hp = 0; Sfx.burst(250, 0.3, 0.2); Missions.emit('ko', { npc: this }); if (this.gunM) this.gunM.visible = false; }
   setDead(silent) { this.alive = false; this.state = 'dead'; this.lootable = !silent; if (this.key && !this.tags.includes('generic')) { S.chars[this.key] = 'dead'; if (!silent) journal(`${this.name} is dead.`, 'fate'); } if (this.gunM) this.gunM.visible = false; this.anim.expr = 'calm'; }
-  lootBody(p) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.looted = true; const cash = Math.round(rand(1, 6) * 100) / 100; Inv.money(cash, 'from the body'); if (this.gun) Inv.add(this.gun === 'rifle' ? 'ammo_rifle' : 'ammo_rev', 4); if (this.loot) this.loot(); if (this.lawful) Law.crime('looting', this.pos, {}); }, 1300); }
-  hogtie(p) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.hogtied = true; UI.toast(`${this.name} is hogtied`); Missions.emit('hogtie', { npc: this }); }, 1500); }
+  lootBody(p) { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); this.looted = true; const cash = Math.round(rand(1, 6) * 100) / 100; Inv.money(cash, 'from the body'); if (this.gun) Inv.add(this.gun === 'rifle' ? 'ammo_rifle' : 'ammo_rev', 4); if (this.loot) this.loot(); if (this.lawful) Law.crime('looting', this.pos, {}); }, 1300); }
+  hogtie(p) { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); this.hogtied = true; UI.toast(`${this.name} is hogtied`); Missions.emit('hogtie', { npc: this }); }, 1500); }
   asCarry() { const n = this; return { id: 'npc:' + this.key, label: this.name, h: 0.3, stowable: true, mesh: this.rig.root, npc: this, onPick() { n.carried = true; }, onDrop(x, z) { n.carried = false; n.pos.set(x, Col.ground(x, z, 99), z); } }; }
   perceive() {
     const P = Game.player; const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z, d = Math.hypot(dx, dz); this.distP = d;
@@ -2058,6 +2065,7 @@ class Person {
     if (!this.alive) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
     if (this.downed) { this.downT -= dt; this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); if (this.downT <= 0 && !this.hogtied) { this.downed = false; this.hp = this.maxHp * 0.5; this.anim.play('standup'); if (this.lawful && !this.lawman) { this.state = 'report'; this.witness = { type: 'assault', value: Law.VALUES.assault, pos: { x: this.pos.x, z: this.pos.z } }; this.say('You\'ll pay for that!'); } else this.fightPlayer(); } return; }
     if (Brawl.npcTick(this, dt)) return; // grabbed, shoved to the ground, or reeling
+    if (this.panicked && this.state !== 'scripted') { this.panicked = this.hid = this.crouchC = false; this.script = null; } // pulled out of hiding (knocked down, witnessing, a mission): forget the panic
     this.perceiveT -= dt; if (this.perceiveT <= 0) { this.perceiveT = far ? 1 : 0.2; this.perceive(); }
     if (far && this.state === 'routine' && !this.group) { const e = this.schedEntry(); if (e) { const pl = PLACES[e[2]]; if (pl && Math.hypot(pl.x - this.pos.x, pl.z - this.pos.z) > 2) { this.pos.set(pl.x, Col.ground(pl.x, pl.z, 99), pl.z); this.yaw = pl.yaw || 0; this.path = null; } this.act = pl ? pl.act : 'idle'; this.atPlace = true; } this.place(); return; }
     let animState = 'ground'; this.poseClip = null;
@@ -2103,7 +2111,7 @@ class Person {
     if (!P.alive || P.state === 'down') { this.sp = 0; return; }
     if (this.regun && Brawl.regunTick(this, dt)) return;
     if (this.fists || !this.gun || d < 2.4) { // melee
-      if (d > 1.5) this.moveTo(P.pos.x, P.pos.z, 4.6, dt, 1.4); else { this.sp = 0; this.shootT -= dt; if (this.shootT <= 0) { this.shootT = rand(0.9, 1.6); Brawl.windup(this); this.anim.play(pick(['punch', 'hook']), { on: { hit: () => { if (Math.hypot(P.pos.x - this.pos.x, P.pos.z - this.pos.z) < 1.9 && !this.stunT && !Brawl.counter(P, this)) { P.hurt(this.fists ? 9 : 12, this, 'melee'); Sfx.punch(); } } } }); } }
+      if (d > 1.5) this.moveTo(P.pos.x, P.pos.z, 4.6, dt, 1.4); else { this.sp = 0; this.shootT -= dt; if (this.shootT <= 0) { this.shootT = rand(0.9, 1.6); Brawl.windup(this); this.anim.play(pick(['punch', 'hook']), { on: { hit: () => { if (Math.hypot(P.pos.x - this.pos.x, P.pos.z - this.pos.z) < 1.9 && !(this.stunT > 0) && this.alive && !this.downed && !this.grabbed && this.state === 'combat' && !Brawl.counter(P, this)) { P.hurt(this.fists ? 9 : 12, this, 'melee'); Sfx.punch(); } } } }); } }
       return;
     }
     if (this.gunM) this.gunM.visible = true; this.anim.layers.aim = 1; this.anim.layers.rifle = this.gun === 'rifle' ? 1 : 0;
@@ -2191,7 +2199,7 @@ const Brawl = {
   windup(n) { Sfx.tone(300, 0.14, 0.04, 'triangle', 260); n.windT = 0.3; }, // a cue before the punch: the moment to block for a counter
   counter(P, n) { // called when an enemy punch lands: true if Wren countered it
     if (!P.blocking || P.blockT > (Skills.has('brawl', 3) ? 0.6 : 0.45) || P.grab) return false;
-    const a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.pos.x += Math.sin(a) * 0.5; n.pos.z += Math.cos(a) * 0.5; n.stunT = 1.4; n.stunKnee = false; n.anim.play('hit', { replace: false }); n.anim.expr = 'alarm';
+    const a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.pos.x += Math.sin(a) * 0.5; n.pos.z += Math.cos(a) * 0.5; Col.resolve(n.pos, 0.34, n.pos.y, 1.6); n.stunT = 1.4; n.stunKnee = false; n.anim.play('hit', { replace: false }); n.anim.expr = 'alarm';
     P.yaw = a; P.blockT = 9; P.anim.play('hook', { on: { hit: () => { if (n.alive && !n.downed) { n.takeHit({ dmg: 14, from: P, melee: true, dir: fwd(P.yaw) }); Sfx.punch(); } } } });
     Sfx.burst(1300, 0.07, 0.12, 'bandpass', 2); Game.shake(0.2); UI.hitmark(true); S.stats.counters = (S.stats.counters || 0) + 1; Skills.gain('brawl', 3); Haptic.buzz([30, 40, 30]); return true;
   },
@@ -2199,7 +2207,7 @@ const Brawl = {
   tryGrab(P) {
     const f = fwd(P.yaw); let tgt = null, td = 1.8;
     for (const n of NPC.all) { if (!this.canGrab(n)) continue; const dx = n.pos.x - P.pos.x, dz = n.pos.z - P.pos.z, d = Math.hypot(dx, dz); if (d < td && (dx * f.x + dz * f.z) / (d || 1) > 0.3 && Math.abs(n.pos.y - P.pos.y) < 1) { td = d; tgt = n; } }
-    if (!tgt || S.p.st < 10) return false;
+    if (!tgt || S.p.st < 10 || P.carry || !Col.los(P.pos.x, P.pos.y + 1.2, P.pos.z, tgt.pos.x, tgt.pos.y + 1.2, tgt.pos.z)) return false;
     S.p.st -= 10; P.stDelay = 0.8; Sfx.burst(300, 0.12, 0.15); tgt.takeHit({ dmg: 1, from: P, melee: true }); // grabbing someone is assault, and wakes the fight
     if (!tgt.alive || tgt.downed) return true; // a crouched grab from behind is a silent takedown
     P.grab = tgt; P.grabT = 0; P.grabHits = 0; tgt.grabbed = true; Skills.gain('brawl', 1); tgt.stunT = 0; tgt.anim.expr = 'alarm'; tgt.say(pick(['Get off me!', 'Let go of me!', 'Hey!'])); return true;
@@ -2207,7 +2215,7 @@ const Brawl = {
   release(P) { if (P.grab) P.grab.grabbed = false; P.grab = null; },
   hold(P, dt) { // each frame while Wren holds someone
     const n = P.grab; if (!n.alive || n.downed || !NPC.all.includes(n) || P.state !== 'ground') return this.release(P);
-    P.grabT += dt; const f = fwd(P.yaw); n.pos.x = damp(n.pos.x, P.pos.x + f.x * 0.75, 14, dt); n.pos.z = damp(n.pos.z, P.pos.z + f.z * 0.75, 14, dt); n.yaw = P.yaw + Math.PI; P.vel.set(0, 0, 0);
+    P.grabT += dt; const f = fwd(P.yaw); n.pos.x = damp(n.pos.x, P.pos.x + f.x * 0.75, 14, dt); n.pos.z = damp(n.pos.z, P.pos.z + f.z * 0.75, 14, dt); Col.resolve(n.pos, 0.34, n.pos.y, 1.6); n.yaw = P.yaw + Math.PI; n.place(); P.vel.set(0, 0, 0);
     if ((Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && P.cool <= 0 && !P.anim.busy()) { P.cool = 0.45; P.grabT = Math.max(0, P.grabT - 0.6); S.p.st -= 4;
       P.anim.play(P.grabHits++ % 2 ? 'hook' : 'punch', { on: { hit: () => { if (P.grab !== n) return; n.takeHit({ dmg: 20, from: P, melee: true }); Sfx.punch(); Game.shake(0.15); if (n.downed || !n.alive) this.release(P); } } }); return; }
     if (Input.hit('x') || Input.hit('q') || Input.tb('dodge') || Input.tb('shove')) return this.shove(P, n);
@@ -2221,25 +2229,25 @@ const Brawl = {
   npcTick(n, dt) { // reactions that take over an NPC's turn; true when it used the frame
     if (n.limpT > 0) n.limpT -= dt; if (n.windT > 0) n.windT -= dt;
     if (n.grabbed) { if (Game.player.grab !== n) n.grabbed = false; else { n.sp = 0; n.anim.update(dt, { state: 'ground', speed: 0 }); n.place(); return true; } }
-    if (n.floorT > 0) { n.floorT -= dt;
+    if (n.floorT > 0) { n.floorT = Math.max(0, n.floorT - dt);
       if (n.shoveV) { n.pos.addScaledVector(n.shoveV, dt); Col.resolve(n.pos, 0.34, n.pos.y, 1.6); n.shoveV.multiplyScalar(Math.exp(-5 * dt)); n.pos.y = Col.ground(n.pos.x, n.pos.z, n.pos.y + 0.5); }
       n.anim.update(dt, { state: 'down', speed: 0 }); n.place(); if (n.floorT <= 0) { n.shoveV = null; n.anim.play('standup'); } return true; }
-    if (n.stunT > 0) { n.stunT -= dt; n.sp = 0; n.anim.update(dt, { state: 'ground', speed: 0, crouch: n.stunKnee }); n.place(); return true; }
+    if (n.stunT > 0) { n.stunT = Math.max(0, n.stunT - dt); n.sp = 0; n.anim.update(dt, { state: 'ground', speed: 0, crouch: n.stunKnee }); n.place(); return true; }
     return false;
   },
   react(n, o) { // how a person reacts to where a bullet landed (they survived it)
-    if (!o.gun || n.hp <= 0 || !n.alive) return;
+    if (!o.gun || n.hp <= 0 || !n.alive) return; if (n.state === 'ride') { if (o.zone === 'hand') this.disarm(n, true); return; } // in the saddle a hit can only cost them the gun
     if (o.zone === 'legs') { n.limpT = 12; if (Math.random() < 0.4) { n.stunT = 1.1; n.stunKnee = true; } if (n.hostileToPlayer) Tactics.call(n, pick(['Agh, my leg!', 'I\'m hit!']), true); }
     else if (o.zone === 'hand') this.disarm(n);
     else if (o.zone === 'body') { n.stunT = Math.max(n.stunT || 0, 0.35); n.stunKnee = false; n.shootT = Math.max(n.shootT || 0, 0.8); }
   },
-  disarm(n) {
+  disarm(n, riding) {
     if (!n.gun || n.fists) return; const g = n.gun, f = fwd(n.yaw), x = n.pos.x + f.x * 1.1 + rand(-0.3, 0.3), z = n.pos.z + f.z * 1.1 + rand(-0.3, 0.3);
-    n.gun = null; n.fists = true; if (n.gunM) n.gunM.visible = false; n.stunT = 0.6; n.stunKnee = false;
+    n.gun = null; n.fists = true; if (n.gunM) n.gunM.visible = false; if (!riding) { n.stunT = 0.6; n.stunKnee = false; }
     const m = new THREE.Mesh(GEO.box, toon('#2b2522')); m.scale.set(0.09, 0.07, g === 'rifle' ? 0.9 : 0.3); m.position.set(x, Col.ground(x, z, n.pos.y + 1) + 0.04, z); m.rotation.y = rand(0, TAU); Game.scene.add(m);
     const dr = { x, z, m, gun: g, t: 0 }; this.drops.push(dr); FX.puff(n.pos.x, n.pos.y + 1.1, n.pos.z, { n: 2, size: 0.3, color: 0x9a948a, life: 0.5 });
     Sfx.tone(1800, 0.05, 0.08, 'square'); n.say(pick(['My hand!', 'Argh, my gun!']), 2); UI.toast('Disarmed', 'good'); S.stats.disarms = (S.stats.disarms || 0) + 1; Skills.gain('gun', 4);
-    if (n.hostileToPlayer && (n.brave > 0.5 || n.group)) n.regun = dr; // the brave ones go for it
+    if (n.hostileToPlayer && !riding && (n.brave > 0.5 || n.group)) n.regun = dr; // the brave ones go for it
   },
   regunTick(n, dt) { // a disarmed outlaw dives for the gun; true while busy with it
     const dr = n.regun, P = Game.player; if (!this.drops.includes(dr) || Math.hypot(P.pos.x - dr.x, P.pos.z - dr.z) < 2.5) { n.regun = null; return false; }
@@ -2249,7 +2257,7 @@ const Brawl = {
   takeDrop(dr) { Game.scene.remove(dr.m); this.drops = this.drops.filter(d => d !== dr); },
   update(dt) {
     const P = Game.player; if (P.grab) this.hold(P, dt);
-    for (const dr of this.drops.slice()) { dr.t += dt; if (dr.t > 90) this.takeDrop(dr); else if (P.state === 'ground' && Math.hypot(P.pos.x - dr.x, P.pos.z - dr.z) < 1.1 && !NPC.all.some(n => n.regun === dr && n.pickT > 0)) { this.takeDrop(dr); Inv.add(dr.gun === 'rifle' ? 'ammo_rifle' : 'ammo_rev', 3); Sfx.pickup(); UI.toast('Took their ' + (dr.gun === 'rifle' ? 'rifle' : 'revolver') + ' (+3 rounds)', 'good'); } }
+    for (const dr of this.drops.slice()) { dr.t += dt; if (dr.t > 90) this.takeDrop(dr); else if (P.state === 'ground' && Math.hypot(P.pos.x - dr.x, P.pos.z - dr.z) < 1.1 && !NPC.all.some(n => n.regun === dr && n.pickT > 0 && n.alive && !n.downed)) { this.takeDrop(dr); Inv.add(dr.gun === 'rifle' ? 'ammo_rifle' : 'ammo_rev', 3); Sfx.pickup(); UI.toast('Took their ' + (dr.gun === 'rifle' ? 'rifle' : 'revolver') + ' (+3 rounds)', 'good'); } }
   },
   clear() { for (const dr of this.drops) Game.scene.remove(dr.m); this.drops = []; if (Game.player) this.release(Game.player); },
 };
@@ -2263,8 +2271,8 @@ const Tactics = {
     if (foes.length >= 3) { const want = Math.floor(foes.length / 3); let have = foes.filter(n => n.flanker).length;
       for (const n of foes.slice().sort((a, b) => a.distP - b.distP)) { if (have >= want) break; if (n.flanker || n.flankDone || n.distP < 6) continue;
         const side = have % 2 ? -1 : 1, a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z) + side * 1.35, r = clamp(n.distP, 10, 16); // swing around to the player's side
-        n.flanker = true; n.flankT = 7; n.flankTo = { x: P.pos.x + Math.sin(a) * r, z: P.pos.z + Math.cos(a) * r }; n.cover = null; have++; this.call(n, pick(['Flank him!', 'Go around!', 'Cut him off!'])); } }
-    if ((P.reloading || S.p.hp < S.p.maxHp * 0.3) && !foes.some(n => n.rushT > 0)) for (const n of foes) if (!n.rushT && n.distP < 18 && (n.brave ?? 0.6) > 0.45) { n.rushT = 2.4; n.cover = null; this.call(n, P.reloading ? 'He\'s reloading! Rush him!' : 'He\'s hurt! Finish it!', true); break; }
+        n.flanker = true; n.flankT = 7; n.flankTo = { x: P.pos.x + Math.sin(a) * r, z: P.pos.z + Math.cos(a) * r }; n.cover = null; have++; this.call(n, pick(['Flank her!', 'Go around!', 'Cut him off!'])); } }
+    if ((P.reloading || S.p.hp < S.p.maxHp * 0.3) && !foes.some(n => n.rushT > 0)) for (const n of foes) if (!n.rushT && n.distP < 18 && (n.brave ?? 0.6) > 0.45) { n.rushT = 2.4; n.cover = null; this.call(n, P.reloading ? 'She\'s reloading! Rush her!' : 'She\'s hurt! Finish it!', true); break; }
   },
   move(n, dt, d) { // squad movement that overrides cover: true when it moved the NPC this frame
     const P = Game.player;
@@ -2277,7 +2285,7 @@ const Tactics = {
     const ab = new THREE.Vector3().subVectors(b, a), L = ab.length(); if (L < 0.1) return; ab.divideScalar(L);
     for (const n of NPC.all) { if (n === hitH || !n.alive || n.downed || n.state !== 'combat' || !n.hostileToPlayer) continue;
       const cx = n.pos.x - a.x, cy = n.pos.y + 1.2 - a.y, cz = n.pos.z - a.z, t = clamp(cx * ab.x + cy * ab.y + cz * ab.z, 0, L), dx = cx - ab.x * t, dy = cy - ab.y * t, dz = cz - ab.z * t;
-      if (dx * dx + dy * dy + dz * dz < 1.6 * 1.6 && t > 1) { n.suppressT = rand(1.6, 2.4); if (!n.cover) n.coverT = 0; if (Math.random() < 0.3) this.call(n, pick(['Whoa, that was close!', 'Keep your head down!', 'He\'s got us pinned!'])); } }
+      if (dx * dx + dy * dy + dz * dz < 1.6 * 1.6 && t > 1) { n.suppressT = rand(1.6, 2.4); if (!n.cover) n.coverT = 0; if (Math.random() < 0.3) this.call(n, pick(['Whoa, that was close!', 'Keep your head down!', 'She\'s got us pinned!'])); } }
   },
 };
 
@@ -2342,7 +2350,7 @@ const Sky = {
     this.glare.position.copy(this.sunM.position); this.glare.material.opacity = sy > -0.05 ? (0.08 + dusk * 0.4) * (1 - this.cloud * 0.8) : 0; this.glare.scale.setScalar(70 + dusk * 90); WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, storm ? 2.8 : raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
     // warm low sun and long shadows at golden hour; at night the 'sun' becomes a dim blue moonlight and the world goes properly dark
     this.sun.intensity = day * (1 - this.cloud * 0.55) * (0.95 + dusk * 0.2) + (1 - day) * 0.16; this.sun.color.set('#fff1d6').lerp(new THREE.Color('#ff8a3a'), dusk).lerp(new THREE.Color('#8fa8e0'), 1 - day); if (day < 0.2) this.sun.position.set(P.x - sx * 80, P.y + 60, P.z - 30);
-    this.hemi.intensity = 0.13 + day * 0.47; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.05 + day * 0.07 + this.flash * 1.4; if (this.flash > 0.05) Game.scene.background = hor.clone().lerp(new THREE.Color('#e8eeff'), this.flash * 0.8);
+    this.hemi.intensity = 0.17 + day * 0.43; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.065 + day * 0.055 + this.flash * 1.4; if (this.flash > 0.05) Game.scene.background = hor.clone().lerp(new THREE.Color('#e8eeff'), this.flash * 0.8);
     this.cloudMat.color.set(raining ? '#8e979e' : '#ffffff'); for (const c of this.clouds.children) { c.position.x += dt * 1.5; if (c.position.x > 280) c.position.x = -280; c.visible = Math.random() < 2 && (c.id % 3 < 1 + this.cloud * 2); }
     this.rain.visible = raining; if (raining) { this.rain.position.set(Game.cam.pos.x, Game.cam.pos.y - 8, Game.cam.pos.z); const a = this.rain.geometry.attributes.position.array; for (let i = 0; i < a.length; i += 6) { a[i + 1] -= dt * 26; a[i + 4] -= dt * 26; if (a[i + 1] < 0) { a[i + 1] += 22; a[i + 4] += 22; } } this.rain.geometry.attributes.position.needsUpdate = true; }
     const lampOn = h > 19 || h < 6.2; for (const l of Game.lamps) l.intensity = lampOn ? 1.15 + (1 - day) * 0.6 : 0; // lanterns matter once it's dark
@@ -2385,7 +2393,7 @@ function gatherable(kind, x, z) {
   let fruit; if (kind === 'berries') { g.add(M(GEO.ico, '#4f8a3c', 0.7, 0.55, 0.7, 0, 0.45, 0)); fruit = new THREE.Group(); for (let i = 0; i < 9; i++) { const a = i * 2.4; fruit.add(M(GEO.sphLo, '#5b4a9c', 0.07, 0.07, 0.07, Math.cos(a) * 0.55, 0.45 + Math.sin(i) * 0.3, Math.sin(a) * 0.55)); } g.add(fruit); Col.circle(x, z, 0.5, y, y + 1, { block: false }); }
   else { fruit = new THREE.Group(); for (let i = 0; i < 6; i++) { const l = M(GEO.cone, '#7fa7a0', 0.06, 0.5, 0.06, Math.cos(i) * 0.12, 0.25, Math.sin(i) * 0.12); l.rotation.z = Math.cos(i) * 0.3; fruit.add(l); } fruit.add(M(GEO.sphLo, '#6a7fd0', 0.05, 0.05, 0.05, 0, 0.5, 0)); g.add(fruit); }
   const o = { id, kind, x, z, y, fruit }; Gather.push(o);
-  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
+  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Skills.gain('survive', 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
   return o;
 }
 const DoorSys = {
@@ -2533,6 +2541,9 @@ const World = {
       T[kind].push([x, h, z, s, R() * TAU, R()]); Col.circle(x, z, (kind === 'oak' ? 0.42 : 0.32) * s + 0.08, h - 1, h + 6, { block: true, cover: true });
     }
     for (const [x, z] of [[-14, 40], [-70, 44], [-28, -6], [-80, 0], [-5, 34]]) { const h = Terrain.height(x, z); T.oak.push([x, h, z, 1.25, R() * TAU, R()]); Col.circle(x, z, 0.6, h - 1, h + 6, { block: true, cover: true }); }
+    // canopy volumes (centre height and radius per tree kind) so the camera stops at the leaves instead of passing through them
+    const CAN = { pine: [2.9, 1.9], fir: [3.2, 1.4], oak: [4.2, 2.6], aspen: [4.0, 1.3] }; this.canopy = new Map();
+    for (const k in CAN) for (const [x, h, z, s] of T[k]) { const key = Math.floor(x / 8) * 1000 + Math.floor(z / 8); if (!this.canopy.has(key)) this.canopy.set(key, []); this.canopy.get(key).push([x, h + CAN[k][0] * s, z, CAN[k][1] * s]); }
     const bark = toon('#6b4a2f'), barkL = toon('#e7e2d6'), barkD = toon('#857b70');
     const W = (c, amp, leaf = 0) => windMat(c, amp, leaf);
     inst(cylUp, bark, T.pine, (d, [x, h, z, s]) => { d.position.set(x, h - 0.2, z); d.scale.set(0.24 * s, 2.2 * s, 0.24 * s); d.rotation.set(0, 0, 0); });
@@ -2581,6 +2592,7 @@ const World = {
     const RG = mulberry(5); let nb = 0, ns = 0; for (let i = 0; i < 600 && (nb < 34 || ns < 30); i++) { const x = (RG() - 0.5) * 420, z = (RG() - 0.5) * 420; if (avoid(x, z)) continue; const h = Terrain.height(x, z); if (h < WORLD.waterY + 0.6 || h > 20) continue; if (nb < 34 && RG() < 0.5) { gatherable('berries', x, z); nb++; } else if (ns < 30) { gatherable('sage', x, z); ns++; } }
     for (const [x, z] of [[-30, 48], [-80, 0], [-20, -10], [-160, -70], [-60, -128], [-110, 60]]) gatherable(x % 20 ? 'berries' : 'sage', x, z);
   },
+  inCanopy(x, y, z) { if (!this.canopy) return false; const i0 = Math.floor(x / 8), j0 = Math.floor(z / 8); for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const l = this.canopy.get(i * 1000 + j); if (l) for (const c of l) { const dx = x - c[0], dy = (y - c[1]) * 1.25, dz = z - c[2]; if (dx * dx + dy * dy + dz * dz < c[3] * c[3]) return true; } } return false; },
   cullChunks() { const P = Game.cam.pos, f = Game.cam.dir(), r = { low: 55, medium: 70, high: 90 }[Game.quality] || 80; for (const g of this.grassChunks || []) { const dx = g.userData.c.x - P.x, dz = g.userData.c.z - P.z, d = Math.hypot(dx, dz); g.visible = d < r + 28 && (d < 40 || (dx * f.x + dz * f.z) / d > -0.2); } },
   horizon() {
     const sc = Game.scene, R = mulberry(77), g = new THREE.Group(); sc.add(g);
@@ -2828,7 +2840,7 @@ const Interiors = {
     for (const [x, z] of [[-5.3, -1.5], [2.0, 3.6], [-1.6, 3.6]]) this.put(b, GEO.cyl, '#b08a3a', 0.18, 0.25, 0.18, x, 0, z);
     { const x = -5.64, y = 2.4, z = -1.0; this.put(b, GEO.box, '#5a3a22', 0.05, 0.4, 0.3, x, y, z); for (const s of [-1, 1]) { this.put(b, GEO.box, '#e6dcc5', 0.05, 0.5, 0.05, x + 0.05, y + 0.35, z + s * 0.25, { rx: s * 0.6 }); this.put(b, GEO.box, '#e6dcc5', 0.05, 0.3, 0.05, x + 0.05, y + 0.55, z + s * 0.45, { rx: s * 1.1 }); } } // antlers
     this.frame(b, 5.64, 1.9, 1.2, -Math.PI / 2, 1.4, 0.9, '#c97b5a'); this.frame(b, 5.64, 1.9, -2.0, -Math.PI / 2, 0.8, 1.0, '#6a7fb0');
-    this.barrel(b, 4.9, -3.6, false); this.barrel(b, 5.3, -2.9, false); // decorative: Cora walks round the end of the bar this.lamp(b, -3.5, -2.6, 2.95); this.lamp(b, 3.5, -2.6, 2.95);
+    this.barrel(b, 4.9, -3.6, false); this.barrel(b, 5.3, -2.9, false); /* decorative: Cora walks round the end of the bar */ this.lamp(b, -3.5, -2.6, 2.95); this.lamp(b, 3.5, -2.6, 2.95);
   },
   mae(b) { if (!b) return; // door N: the back wall is +z
     this.rug(b, 0.3, 0.3, 2.4, 1.8, '#9dbf8a', '#c97b5a'); this.table(b, 1.6, -0.6, 1.2, 0.8); this.chair(b, 1.0, -0.6, Math.PI / 2); this.chair(b, 2.25, -0.6, -Math.PI / 2);
@@ -3052,7 +3064,7 @@ const STORY = {
     return {
       start: { text: 'This here\'s private property. Crane property. You lost, lady?', choices: [
         { text: 'Bribe him ($15)', cond: () => S.money >= 15, why: 'Need $15', do: () => { Inv.money(-15, 'to Dutchy'); S.decisions.m1_dutchy = 'bribed'; Rep.rel('dutchy', 25); STORY.distractGang(me); }, next: 'bribed' },
-        { text: 'Threaten him (gun drawn)', cond: () => Game.player.weapon !== 'fists', why: 'Draw a gun first', do: () => { S.decisions.m1_dutchy = 'threatened'; Rep.rel('dutchy', -20); me.fled = true; me.state = 'scripted'; me.say('Don\'t shoot! I\'m gone!'); me.script = (dt, n) => { n.moveTo(170, -40, 5, dt); }; setTimeout(() => { const f = NPC.byKey('fenwick') || NPC.byKey('sal'); if (f && f.alive && !m.c.boxTaken) { f.say('Dutchy? What\'s he yelling about?'); f.alertGroup(Game.player.pos); } }, 7000); }, next: 'threat' },
+        { text: 'Threaten him (gun drawn)', cond: () => Game.player.weapon !== 'fists', why: 'Draw a gun first', do: () => { S.decisions.m1_dutchy = 'threatened'; Rep.rel('dutchy', -20); me.fled = true; me.state = 'scripted'; me.say('Don\'t shoot! I\'m gone!'); me.script = (dt, n) => { n.moveTo(170, -40, 5, dt); }; later(() => { const f = NPC.byKey('fenwick') || NPC.byKey('sal'); if (f && f.alive && !m.c.boxTaken) { f.say('Dutchy? What\'s he yelling about?'); f.alertGroup(Game.player.pos); } }, 7000); }, next: 'threat' },
         { text: '"Fenwick sent for me." (bluff)', cond: () => S.honor > -20, why: 'Your reputation precedes you', do: () => { S.decisions.m1_dutchy = 'bluffed'; Rep.rel('dutchy', -5); }, next: 'bluff' },
         { text: 'Back off', do: () => { m.c.dutchy = 0; m.c.dutchyWarned = (m.c.dutchyWarned || 0) + 1; if (m.c.dutchyWarned > 1) { me.say('I warned you!'); me.alertGroup(Game.player.pos); } }, next: null },
         { text: 'Attack', do: () => { S.decisions.m1_dutchy = 'fought'; me.alertGroup(Game.player.pos); }, next: null },
@@ -3141,7 +3153,7 @@ Missions.def({ id: 'm2', type: 'main', chapter: 2, title: 'Cold Trail', giver: '
 Missions.defs.m2.stages.forEach(s => s.fail = [{ check: () => S.chars.mae === 'dead' && S.decisions.journal === 'mae', why: 'Mae Holloway is dead.' }]);
 
 Missions.def({ id: 'm3', type: 'main', chapter: 3, title: "Greer's Stand", giver: 'ezra', summary: 'Eli\'s journal says the Greers are next. Railroad men have come to collect.',
-  prereq: () => Missions.st('m2').status === 'done',
+  prereq: () => ['done', 'failed'].includes(Missions.st('m2').status),
   blocked: () => S.chars.ezra === 'dead' ? 'Ezra Greer is dead. There is no one left to stand.' : S.locations.farm !== 'occupied' ? 'The Greer farm is empty.' : null,
   start: () => { const n = NPC.byKey('ezra'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: FARM.x, z: FARM.z }; },
   stages: [
@@ -3174,19 +3186,20 @@ Missions.def({ id: 'bounty_rook', type: 'bounty', title: 'Wanted: Rook Malloy', 
   start: () => ({ x: -25.5, z: 8.6, y: 5 }),
   stages: [
     { id: 'find', text: 'Find Rook\'s camp near the Shallow Ford.', objectives: [O.goto('camp', 'Find Rook\'s camp', riverX(-120) + 22, -128, 22)], enter: () => STORY.spawnRook() },
-    { id: 'take', text: 'Bring him in. Knock him out and hogtie him for the full $40.', objectives: [O.check('sub', 'Subdue Rook Malloy', () => { const r = NPC.byKey('rook'); return !r || !r.alive || r.hogtied; }, () => { const r = NPC.byKey('rook'); return r && r.alive ? { x: r.pos.x, z: r.pos.z, y: r.pos.y + 2.4, enemy: true } : null; })],
+    { id: 'take', text: 'Bring him in. Knock him out and hogtie him for the full $40.', enter: ctx => { if (ctx.resumed) STORY.spawnRook(); }, objectives: [O.check('sub', 'Subdue Rook Malloy', () => { const r = NPC.byKey('rook'); return !r || !r.alive || r.hogtied; }, () => { const r = NPC.byKey('rook'); return r && r.alive ? { x: r.pos.x, z: r.pos.z, y: r.pos.y + 2.4, enemy: true } : null; })],
       on: { kill: (d, ctx) => { if (d.npc.key === 'rook') { d.npc.loot = () => { S.flags.rook_proof = true; UI.toast('Took Rook\'s gun belt as proof'); }; } } } },
-    { id: 'deliver', text: 'Bring Rook (or proof) to Sheriff Pike.', objectives: [O.flag('turn', () => NPC.byKey('rook') && NPC.byKey('rook').alive ? 'Carry Rook to the sheriff (stow him on your horse)' : 'Search Rook\'s body, then see the sheriff', 'rook_done', () => { const n = NPC.byKey('pike'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: -22, z: 8 }; })] },
+    { id: 'deliver', text: 'Bring Rook (or proof) to Sheriff Pike.', enter: ctx => { if (ctx.resumed && !NPC.byKey('rook') && S.chars.rook === 'dead') S.flags.rook_proof = true; }, objectives: [O.flag('turn', () => NPC.byKey('rook') && NPC.byKey('rook').alive ? 'Carry Rook into the sheriff\'s office (your horse can haul him most of the way)' : 'Search Rook\'s body, then see the sheriff', 'rook_done', () => { const n = NPC.byKey('pike'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: -22, z: 8 }; })] },
   ],
   complete: ctx => { ctx.m.outcome = S.decisions.rook === 'alive' ? 'Brought Rook Malloy in alive ($40)' : 'Brought proof of Rook\'s death ($15)'; },
   cleanup: () => { const r = NPC.byKey('rook'); if (r) NPC.despawn(r); },
   failOutcome: () => 'Rook Malloy got away.',
 });
-Missions.defs.bounty_rook.stages.forEach(s => s.fail = [{ check: () => S.chars.pike === 'dead', why: 'There is no sheriff to pay the bounty.' }]);
+Missions.defs.bounty_rook.stages.forEach(s => s.fail = [{ check: () => S.chars.pike === 'dead' || S.chars.pike === 'left', why: 'There is no sheriff to pay the bounty.' }]);
 
 
 /* ---------- Mission helpers ---------- */
 Object.assign(STORY, {
+  essential(n) { return n.key === 'mae' || (n.key === 'ezra' && !['done', 'failed'].includes(Missions.st('m3').status)); }, // story givers can be knocked down, never killed (like RDR2's essential characters)
   ensureBox() { const P = Game.player; if (S.flags.m1_delivered || S.horseCarry || (P.carry && P.carry.id === 'strongbox') || Carry.list.some(c => c.id === 'strongbox')) return; const f = fwd(P.yaw); Carry.make('strongbox', P.pos.x + f.x, P.pos.z + f.z); },
   cabinClues() {
     if (this._cab) return; this._cab = true;
@@ -3205,7 +3218,7 @@ Object.assign(STORY, {
     const lead = S.chars.fenwick === 'alive' ? 'fenwick' : 'sal'; const members = [lead, 'jeb']; if (S.chars.rook === 'alive' && !S.flags.rook_done) members.push('rook');
     const spot = [[-76, -118], [-80, -122], [-72, -114]];
     members.forEach((k, i) => { const look = k === 'fenwick' ? { skin: '#d9a07a', shirt: '#3b3b3b', coat: '#5a3a2a', hair: '#2b1d14', mustache: '#2b1d14', hatColor: '#1b1b1b', stout: 1.1 } : k === 'rook' ? { skin: '#e2a57c', shirt: '#5a2a2a', hair: '#1b1b1b', hatColor: '#2b2b2b', mustache: '#1b1b1b' } : { skin: '#e8b48c', shirt: '#4a6a4a', hair: '#6b4a2f', hatColor: '#3b2a1e', stout: 1.2 };
-      if (NPC.byKey(k)) NPC.despawn(NPC.byKey(k)); const n = NPC.spawn({ key: k, name: NPCNAMES[k] || (k === 'jeb' ? 'Jeb' : 'Sal'), x: spot[i][0], z: spot[i][1], look, lawful: false, group: 'crane', state: 'patrol', gun: k === 'fenwick' ? 'rifle' : 'revolver', hp: k === 'fenwick' ? 140 : 90, maxHp: 140, tags: ['crane', 'ambush', 'story'], wild: true, accuracy: 0.42, fleeHp: k === 'fenwick' ? 0 : 25, route: [{ x: -62 + i * 2, z: -136, wait: 30 }] }); n.flanker = i === 1; if (S.decisions.m1_dutchy === 'bribed' && S.chars.dutchy !== 'dead') n.sense = 0.45; });
+      if (NPC.byKey(k)) NPC.despawn(NPC.byKey(k)); const n = NPC.spawn({ key: k, name: NPCNAMES[k] || (k === 'jeb' ? 'Jeb' : 'Sal'), x: spot[i][0], z: spot[i][1], look, lawful: false, group: 'crane', state: 'patrol', gun: k === 'fenwick' ? 'rifle' : 'revolver', hp: k === 'fenwick' ? 140 : 90, maxHp: 140, tags: ['crane', 'ambush', 'story'], wild: true, accuracy: 0.42, fleeHp: k === 'fenwick' ? 0 : 25, route: [{ x: -62 + i * 2, z: -136, wait: 30 }] }); if (S.decisions.m1_dutchy === 'bribed' && S.chars.dutchy !== 'dead') n.sense = 0.45; });
     if (dutchyAlly) { const d = NPC.spawn({ key: 'dutchy', name: 'Dutchy Moss', x: -58, z: -134, look: { skin: '#f0c4a0', shirt: '#b5a17a', hair: '#e2c06a', hatColor: '#8b7d6b', scale: 0.95 }, lawful: false, state: 'scripted', wild: true, tags: ['story'] }); d.say('Psst! Calloway! They\'re coming for that book. Follow me, there\'s a goat path!', 5); m.c.phase = 'follow'; m.c.followT = 0; m.c.lost = 0;
       const path = [[-48, -134], [-38, -128], [-30, -116], [-28, -100], [-34, -84]]; d.ri = 0; d.script = (dt, me) => { const p = path[me.ri]; if (!p) { me.sp = 0; return; } const dP = me.distP || 0; if (dP > 9) { me.sp = 0; me.face(Game.player.pos); return; } if (me.moveTo(p[0], p[1], 2.6, dt, 1)) me.ri++; }; }
     else { m.c.phase = 'fight'; m.c.fought = 1; for (const n of NPC.all) if (n.tags.includes('ambush')) { n.fightPlayer(); } UI.toast(S.flags.crane_unaware ? 'They followed the journal\'s trail, not you. Too late now.' : '"That\'s her! Calloway!"', 'bad'); }
@@ -3213,7 +3226,8 @@ Object.assign(STORY, {
     ctx.d.stages[3].on = { alarm: (d, c) => { if (c.m.c.phase === 'follow') { c.m.c.phase = 'fight'; c.m.c.fought = 1; c.d.stages[3].objectives = [O.defeat('amb', 'Survive the Crane ambush', 'ambush')]; } } };
   },
   ambushUpdate(dt, ctx) {
-    const m = ctx.m; if (m.c.phase === 'follow') { const d = NPC.byKey('dutchy'); if (!d || !d.alive) { m.c.phase = 'fight'; return; } if (Game.player.cool > 0.2 && Game.player.weapon !== 'fists') m.c.shot = 1;
+    const m = ctx.m; if (m.c.phase === 'follow') { const d = NPC.byKey('dutchy'); if (!d || !d.alive || d.downed || d.state !== 'scripted') { // no guide left: it's a fight now
+      m.c.phase = 'fight'; m.c.fought = 1; ctx.d.stages[3].objectives = [O.defeat('amb', 'Survive the Crane ambush', 'ambush')]; for (const n of NPC.all) if (n.tags.includes('ambush') && n.alive && !n.downed) n.fightPlayer(); UI.toast('"There she is!" The Cranes have spotted you.', 'bad'); return; } if (Game.player.cool > 0.2 && Game.player.weapon !== 'fists') m.c.shot = 1;
       if (d.ri >= 5) { m.c.followDone = 1; m.c.dutchyHelped = 1; d.say('Go on. Tell Mae I\'m sorry about the box.', 5); Rep.rel('dutchy', 20); S.chars.dutchy = 'ally'; for (const n of NPC.all.slice()) if (n.tags.includes('ambush')) NPC.despawn(n); journal('Dutchy Moss led me down a goat path past the Crane ambush. He\'s done with the gang.', 'decision'); } }
   },
   pikeIntercept(dt, ctx) {
@@ -3235,7 +3249,7 @@ Object.assign(STORY, {
       kept: { text: 'Then you\'re responsible for what happens to it. And to you.', on: () => { pk.state = 'routine'; } },
     };
   },
-  spawnRook() { if (NPC.byKey('rook') || S.chars.rook !== 'alive') return; const x = riverX(-120) + 22, z = -126; NPC.spawn({ key: 'rook', name: 'Rook Malloy', x, z, look: { skin: '#e2a57c', shirt: '#5a2a2a', hair: '#1b1b1b', hatColor: '#2b2b2b', mustache: '#1b1b1b' }, lawful: false, group: 'rook', state: 'patrol', gun: 'revolver', hp: 70, maxHp: 70, tags: ['bounty', 'story'], wild: true, accuracy: 0.35, route: [{ x, z, wait: 20 }, { x: x - 6, z: z - 4, wait: 8 }] }); },
+  spawnRook() { if (NPC.byKey('rook') || S.chars.rook !== 'alive') return; const x = riverX(-120) + 22, z = -126; const r = NPC.spawn({ key: 'rook', name: 'Rook Malloy', x, z, look: { skin: '#e2a57c', shirt: '#5a2a2a', hair: '#1b1b1b', hatColor: '#2b2b2b', mustache: '#1b1b1b' }, lawful: false, group: 'rook', state: 'patrol', gun: 'revolver', hp: 70, maxHp: 70, tags: ['bounty', 'story'], wild: true, accuracy: 0.35, route: [{ x, z, wait: 20 }, { x: x - 6, z: z - 4, wait: 8 }] }); r.loot = () => { S.flags.rook_proof = true; UI.toast('Took Rook\'s gun belt as proof'); }; }, // proof however and wherever he falls
   m3Spawn(ctx) {
     if (ctx.m.c.spawned && NPC.byKey('brock')) return; ctx.m.c.spawned = 1;
     const thug = (k, nm, x, z, o) => { if (NPC.byKey(k)) NPC.despawn(NPC.byKey(k)); return NPC.spawn(Object.assign({ key: k, name: nm, x, z, lawful: false, group: 'rail', gun: 'revolver', hp: 90, maxHp: 90, tags: ['rail', 'story'], wild: true, fleeHp: 30, accuracy: 0.4, state: 'scripted', look: { skin: '#e8b48c', shirt: '#3b3b5b', vest: '#5a5a5a', hair: '#3b2a1e', hatColor: '#2b2b2b' } }, o)); };
@@ -3246,7 +3260,7 @@ Object.assign(STORY, {
     const nell = NPC.byKey('nell'); if (nell) { nell.pos.set(-108, Col.ground(-108, 79.6, 9), 79.6); nell.state = 'tied'; nell.yaw = 0; nell.talk = null; nell.opts = p => nell.state === 'tied' ? [{ label: 'Untie Nell', fn: () => STORY.freeNell(p, nell) }] : Person.prototype.opts.call(nell, p); }
     const ez = NPC.byKey('ezra'); if (ez) { ez.state = 'scripted'; ez.script = (dt, me) => { me.moveTo(-126, 93, 1.4, dt); me.face(Game.player.pos); }; }
   },
-  freeNell(p, nell) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); nell.state = 'scripted'; nell.script = (dt, me) => me.moveTo(-126, 92, 4, dt); nell.say('Thank God. Ezra!', 3); S.flags.m3_nell_free = true; Rep.rel('ezra', 10); Rep.faction('greer', 10); journal('Untied Nell Greer in the barn.', 'decision'); }, 1500); },
+  freeNell(p, nell) { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); nell.state = 'scripted'; nell.script = (dt, me) => me.moveTo(-126, 92, 4, dt); nell.say('Thank God. Ezra!', 3); S.flags.m3_nell_free = true; Rep.rel('ezra', 10); Rep.faction('greer', 10); journal('Untied Nell Greer in the barn.', 'decision'); }, 1500); },
   m3Update(dt, ctx) {
     const gil = NPC.byKey('gil'), nell = NPC.byKey('nell');
     if (S.flags.m3_confronted && !S.flags.m3_nell_free && S.decisions.m3 === 'fight' && !ctx.m.c.nellHurtChk) { ctx.m.c.nellHurtChk = 1; if (gil && gil.alive && !gil.downed) { S.flags.nell_hurt = true; journal('Gil struck Nell when the shooting started. She\'ll heal, but Ezra won\'t forget I went in shooting first.', 'decision'); UI.toast('Gil struck Nell!', 'bad'); } }
@@ -3254,7 +3268,7 @@ Object.assign(STORY, {
   },
   brockTree(me) {
     const nellFree = () => !!S.flags.m3_nell_free;
-    const peaceful = (how) => { S.decisions.m3 = how; S.flags.m3_confronted = true; for (const n of NPC.all) if (n.group === 'rail' && n.alive && !n.downed) { n.state = 'scripted'; n.fled = true; n.script = (dt, x) => x.moveTo(40, 70, 3.2, dt); } setTimeout(() => { for (const n of NPC.all.slice()) if (n.group === 'rail') NPC.despawn(n); }, 25000); if (!nellFree()) { S.flags.m3_nell_free = true; const nl = NPC.byKey('nell'); if (nl) { nl.state = 'scripted'; nl.script = (dt, x) => x.moveTo(-126, 92, 3, dt); } } };
+    const peaceful = (how) => { S.decisions.m3 = how; S.flags.m3_confronted = true; for (const n of NPC.all) if (n.group === 'rail' && n.alive && !n.downed) { n.state = 'scripted'; n.fled = true; n.script = (dt, x) => x.moveTo(40, 70, 3.2, dt); } later(() => { for (const n of NPC.all.slice()) if (n.group === 'rail') NPC.despawn(n); }, 25000); if (!nellFree()) { S.flags.m3_nell_free = true; const nl = NPC.byKey('nell'); if (nl) { nl.state = 'scripted'; nl.script = (dt, x) => x.moveTo(-126, 92, 3, dt); } } };
     return {
       start: { text: () => nellFree() ? 'You the Calloway woman? Funny. Mrs. Greer just walked out of that barn on her own. Mr. Vane\'s got a note here says this family owes eighty dollars.' : 'Calloway. Thought you\'d turn up. Mrs. Greer\'s resting in the barn with my associate. Nobody needs to get hurt. This family owes Halvorsen eighty dollars or a signature.', on: () => { S.flags.m3_confronted_seen = true; }, choices: [
         { text: 'Show him Eli\'s journal: "A marshal will want to read this."', cond: () => Inv.count('journal') || Inv.count('journal_copy'), why: 'You don\'t have Eli\'s journal or a copy', do: () => { peaceful('evidence'); Rep.faction('railroad', -30); S.flags.vane_warned = true; }, next: 'ev' },
@@ -3311,20 +3325,20 @@ const Encounters = {
   snare() { // a deer caught in a poacher's snare: free it, or put it down for the hide
     S.flags.snareDay = S.time.day; const s = this.spot(22); const deer = Animal.spawn('deer', s.x, s.z); deer.state = 'snared'; deer.scare = () => {}; deer.cfg = Object.assign({}, deer.cfg, { sense: 0 });
     const stake = M(GEO.box, '#6b4a2f', 0.08, 0.6, 0.08, s.x + 0.6, Terrain.height(s.x, s.z) + 0.3, s.z); Game.scene.add(stake); UI.toast('You hear a deer thrashing in the brush', '');
-    const it = Interact.add({ pos: () => deer.pos, r: 2.2, pri: 0.8, opts: p => !deer.alive || deer.freed ? [] : [{ label: 'Free the deer from the snare', fn: () => { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); deer.freed = true; deer.state = 'flee'; deer.fleeFrom = { x: p.pos.x, z: p.pos.z }; deer.fleeT = 10; deer.scare = Beast.prototype.scare; Rep.honor(3, 'freed a snared deer'); journal('Cut a deer loose from a poacher\'s snare.'); Game.scene.remove(stake); Interact.remove(it); Missions.emit('snare', { freed: true }); }, 1400); } }] });
+    const it = Interact.add({ pos: () => deer.pos, r: 2.2, pri: 0.8, opts: p => !deer.alive || deer.freed ? [] : [{ label: 'Free the deer from the snare', fn: () => { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); deer.freed = true; deer.state = 'flee'; deer.fleeFrom = { x: p.pos.x, z: p.pos.z }; deer.fleeT = 10; deer.scare = Beast.prototype.scare; Rep.honor(3, 'freed a snared deer'); journal('Cut a deer loose from a poacher\'s snare.'); Game.scene.remove(stake); Interact.remove(it); Missions.emit('snare', { freed: true }); }, 1400); } }] });
     this.lastSnare = deer; const orig = deer.update.bind(deer); deer.update = (dt, far) => { if (deer.state === 'snared' && deer.alive && !deer.freed) { deer.speed = 0; deer.rear = Math.sin(Game.time * 6) > 0.6 ? 0.5 : 0; deer.anim.update(dt, { speed: 0, alert: true, rear: deer.rear }); deer.rig.root.position.copy(deer.pos); return; } orig(dt, far); };
   },
   brawl() { // two men squaring off outside the saloon; step in, place a bet, or let the deputy sort it
     S.flags.brawlDay = S.time.day; const abe = NPC.byKey('abe'); if (!abe || !abe.alive) return;
     const cy = NPC.spawn({ key: 'cyrus', name: 'Cyrus Webb', x: -38, z: 15, look: { skin: '#e2a57c', shirt: '#8a3b3b', hair: '#3b2a1e', hatColor: '#5a4a3a', beard: '#3b2a1e', stout: 1.15 }, brave: 0.8, state: 'scripted', tags: ['generic'], wild: true });
     abe.state = 'scripted'; abe.pos.set(-41, abe.pos.y, 15); const face = (a, b) => { a.yaw = Math.atan2(b.pos.x - a.pos.x, b.pos.z - a.pos.z); };
-    let t = 0, phase = 'argue'; const end = (msg) => { phase = 'done'; cy.say(msg || 'Fine. FINE.', 3); abe.state = 'routine'; abe.goal = null; cy.state = 'scripted'; cy.script = (dt, me) => me.moveTo(10, 20, 1.6, dt); setTimeout(() => NPC.all.includes(cy) && NPC.despawn(cy), 40000); };
+    let t = 0, phase = 'argue'; const end = (msg) => { phase = 'done'; cy.say(msg || 'Fine. FINE.', 3); abe.state = 'routine'; abe.goal = null; cy.state = 'scripted'; cy.script = (dt, me) => me.moveTo(10, 20, 1.6, dt); later(() => NPC.all.includes(cy) && NPC.despawn(cy), 40000); };
     const lines = [[abe, 'You marked that deck, Webb!'], [cy, 'Say that again, Tull.'], [abe, 'I\'ll say it louder!'], [cy, 'Then step into the street.']]; let li = 0;
-    const scr = (dt, me) => { if (phase === 'done') return; me.sp = 0; face(abe, cy); face(cy, abe); t += dt / 2; if (phase === 'argue') { if (t > 2.5 * (li + 1) && li < lines.length) { lines[li][0].say(lines[li][1], 3); lines[li][0].anim.play('taunt'); li++; } if (t > 13) { phase = 'fight'; } } else if (phase === 'fight') { if (Math.random() < dt) { const [a, b] = Math.random() < 0.5 ? [abe, cy] : [cy, abe]; a.anim.play(pick(['punch', 'hook'])); setTimeout(() => { b.anim.play('hit'); Sfx.punch(); }, 180); } if (t > 26) { const dep = NPC.byKey('lyle'); if (dep) dep.say('Break it up, you two!', 3); end('Alright, alright, Deputy.'); } } };
+    const scr = (dt, me) => { if (phase === 'done') return; me.sp = 0; face(abe, cy); face(cy, abe); t += dt / 2; if (phase === 'argue') { if (t > 2.5 * (li + 1) && li < lines.length) { lines[li][0].say(lines[li][1], 3); lines[li][0].anim.play('taunt'); li++; } if (t > 13) { phase = 'fight'; } } else if (phase === 'fight') { if (Math.random() < dt) { const [a, b] = Math.random() < 0.5 ? [abe, cy] : [cy, abe]; a.anim.play(pick(['punch', 'hook'])); later(() => { b.anim.play('hit'); Sfx.punch(); }, 180); } if (t > 26) { const dep = NPC.byKey('lyle'); if (dep) dep.say('Break it up, you two!', 3); end('Alright, alright, Deputy.'); } } };
     abe.script = scr; cy.script = scr; UI.toast('Shouting outside the Pine Knot', '');
     cy.talk = () => phase === 'done' ? null : { start: { text: 'Stay out of this, stranger. This is between me and Tull.', choices: [
       { text: 'Break it up. Nobody needs a black eye today.', do: () => { Rep.rel('lyle', 0); Rep.honor(2, 'kept the peace'); Rep.faction('town', 3); S.npcMem.abe = Object.assign(S.npcMem.abe || {}, { helped: true }); end('...Not worth it.'); abe.say('Thanks, Miss Calloway.', 3); }, next: null },
-      { text: 'Two dollars says Tull knocks you flat. (Bet $2)', cond: () => S.money >= 2, do: () => { Inv.money(-2, 'bet'); phase = 'fight'; t = 13; setTimeout(() => { const win = Math.random() < 0.55; if (win) { Inv.money(4, 'won the bet'); abe.say('Ha!', 2); } else { cy.say('Pay up!', 2); } end(); }, 9000); }, next: null },
+      { text: 'Two dollars says Tull knocks you flat. (Bet $2)', cond: () => S.money >= 2, do: () => { Inv.money(-2, 'bet'); phase = 'fight'; t = 13; later(() => { const win = Math.random() < 0.55; if (win) { Inv.money(4, 'won the bet'); abe.say('Ha!', 2); } else { cy.say('Pay up!', 2); } end(); }, 9000); }, next: null },
       { text: 'Carry on.', next: null } ] } };
   },
   spot(dist) { const P = Game.player, f = fwd(P.yaw); const x = P.pos.x + f.x * dist, z = P.pos.z + f.z * dist; return { x, z }; },
@@ -3332,7 +3346,7 @@ const Encounters = {
     const ida = NPC.spawn({ key: 'ida', name: 'Ida Fairweather', x: s.x, z: s.z, look: IDA_LOOK, brave: 0.4, wild: true, state: 'scripted', tags: ['generic'], talk: n => this.idaTree(n, cart) }); ida.script = (dt, me) => { me.sp = 0; if (me.distP < 25) { me.face(Game.player.pos); if (!me._called) { me._called = 1; me.say('Hello? Please! My wheel\'s busted!', 4); } } };
     UI.toast('Someone is calling for help nearby', ''); },
   idaTree(n, cart) {
-    const done = (helped) => { S.flags.ida_helped = helped; n.state = 'scripted'; n.script = (dt, me) => me.moveTo(-40, 20, 1.8, dt); setTimeout(() => { NPC.despawn(n); Game.scene.remove(cart); if (helped) World.apply(); }, 30000); };
+    const done = (helped) => { S.flags.ida_helped = helped; n.state = 'scripted'; n.script = (dt, me) => me.moveTo(-40, 20, 1.8, dt); later(() => { NPC.despawn(n); Game.scene.remove(cart); if (helped) World.apply(); }, 30000); };
     return { start: { text: 'Bless you for stopping. Ida Fairweather. My cart threw a wheel and I haven\'t eaten since yesterday. I\'m headed for Juniper Gap.', choices: [
       { text: 'Give her canned beans', cond: () => Inv.count('beans'), why: 'No beans', do: () => { Inv.take('beans'); Rep.honor(4, 'helped a stranger'); done(true); }, next: 'thanks' },
       { text: 'Give her a sage tonic', cond: () => Inv.count('tonic'), why: 'No tonic', do: () => { Inv.take('tonic'); Rep.honor(5, 'helped a stranger'); Inv.money(5, 'from Ida'); done(true); }, next: 'thanks' },
@@ -3341,7 +3355,7 @@ const Encounters = {
     ] }, thanks: { text: 'I won\'t forget this. If you\'re ever in the saloon, the first drink is mine. And I keep my eyes open.' }, bye: { text: 'I... see. Well. Good day.' } };
   },
   craneAmbush() { S.flags.lastAmbushDay = S.time.day; const P = Game.player; UI.toast('"There\'s Calloway!" Crane riders!', 'bad');
-    for (let i = 0; i < 2; i++) { const a = P.yaw + (i ? 0.6 : -0.6), x = P.pos.x + Math.sin(a) * 32, z = P.pos.z + Math.cos(a) * 32; const n = Riders.spawnRider({ key: 'crane_amb' + i, name: 'Crane gunman', look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b' }, lawful: false, group: 'crane_r', gun: 'revolver', hp: 80, maxHp: 80, tags: ['generic', 'random'], fleeHp: 20, accuracy: 0.35 }, 'chase', x, z, a + Math.PI); n.hostileToPlayer = true; n.anim.expr = 'angry'; /* they ride in */ setTimeout(() => { if (NPC.all.includes(n)) NPC.despawn(n); }, 180000); } },
+    for (let i = 0; i < 2; i++) { const a = P.yaw + (i ? 0.6 : -0.6), x = P.pos.x + Math.sin(a) * 32, z = P.pos.z + Math.cos(a) * 32; const n = Riders.spawnRider({ key: 'crane_amb' + i, name: 'Crane gunman', look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b' }, lawful: false, group: 'crane_r', gun: 'revolver', hp: 80, maxHp: 80, tags: ['generic', 'random'], fleeHp: 20, accuracy: 0.35 }, 'chase', x, z, a + Math.PI); n.hostileToPlayer = true; n.anim.expr = 'angry'; /* they ride in */ later(() => { if (NPC.all.includes(n)) NPC.despawn(n); }, 180000); } },
 };
 
 /* ===== Chapter 4: Night at Willow Bridge =====
@@ -3530,7 +3544,7 @@ const CH4 = {
 };
 
 Missions.def({ id: 'ch4', type: 'main', chapter: 4, title: 'Night at Willow Bridge', giver: 'cora', summary: 'Sheriff Pike asked Cora for a late supper and a full flask. He\'s meeting someone at midnight.',
-  prereq: () => ['done', 'failed'].includes(Missions.st('m3').status),
+  prereq: () => ['done', 'failed', 'unavailable'].includes(Missions.st('m3').status), // the story goes on even if the Greers' stand never happened
   blocked: () => S.chars.pike === 'dead' ? 'Sheriff Pike is dead. Whatever he was hiding died with him.' : S.chars.pike === 'left' || S.chars.pike === 'jailed' ? 'Sheriff Pike is gone from the valley.' : null,
   start: () => { const n = NPC.byKey(S.chars.cora === 'dead' ? 'mae' : 'cora'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : null; },
   stages: [
@@ -3616,12 +3630,13 @@ const CH5 = {
       const cr = (k, nm, x, z, lk, o) => { const old = NPC.byKey(k); if (old) NPC.despawn(old); return NPC.spawn(Object.assign({ key: k, name: nm, x, z, lawful: false, state: 'scripted', wild: true, gun: 'revolver', hp: 120, maxHp: 120, tags: ['story', 'ch5', 'ally', 'crane'], look: lk }, o)); };
       cr('dutchy', 'Dutchy Moss', T_OVERLOOK.x - 3, T_OVERLOOK.z + 3, { skin: '#f0c4a0', shirt: '#b5a17a', hair: '#e2c06a', hatColor: '#8b7d6b', scale: 0.95 });
       if (S.chars.fenwick !== 'dead') cr('fenwick', 'Fenwick Crane', T_OVERLOOK.x - 5, T_OVERLOOK.z + 1, { skin: '#d9a07a', shirt: '#3b3b3b', coat: '#5a3a2a', hair: '#2b1d14', mustache: '#2b1d14', hatColor: '#1b1b1b', stout: 1.1 }, { gun: 'rifle' });
-      else cr('sal', 'Sal', T_OVERLOOK.x - 5, T_OVERLOOK.z + 1, { skin: '#b07a55', shirt: '#7a3b3b', hair: '#1b1b1b', hatColor: '#4a3b30' });
+      else if (S.chars.sal !== 'dead') cr('sal', 'Sal', T_OVERLOOK.x - 5, T_OVERLOOK.z + 1, { skin: '#b07a55', shirt: '#7a3b3b', hair: '#1b1b1b', hatColor: '#4a3b30' });
     }
     for (const a of this.allies()) { a.script = (dt, me) => this.allyAI(me, dt); a.talk = n => this.stage() === 'plan' ? this.council() : null; }
   },
   allies() { return NPC.all.filter(n => n.tags.includes('ally') && n.tags.includes('ch5') && n.alive); },
-  lead() { return NPC.byKey('marshal') || NPC.byKey('fenwick') || NPC.byKey('sal') || NPC.byKey('dutchy'); },
+  live(k) { const n = NPC.byKey(k); return n && n.alive && !n.downed ? n : null; },
+  lead() { return this.live('marshal') || this.live('fenwick') || this.live('sal') || this.live('dutchy'); }, // only the living can lead
   despawn() { for (const n of NPC.all.slice()) if (n.tags.includes('ch5')) NPC.despawn(n); },
   cleanup() { this.despawn(); if (S.chars.pike !== 'dead' && S.chars.pike !== 'left' && !NPC.byKey('pike')) World.apply(); },
 
@@ -3635,9 +3650,9 @@ const CH5 = {
     }
     let t = null, td = 1e9; for (const f of foes) { const d = this.dist(me.pos, f.pos); if (d < td) { td = d; t = f; } }
     if (td > 17) me.moveTo(t.pos.x, t.pos.z, 4.4, dt, 14); else { me.sp = damp(me.sp, 0, 6, dt); me.face(t.pos); }
-    me.allyAim = true; me.anim.layers.aim = 1; me.anim.layers.rifle = me.gun === 'rifle' ? 1 : 0; if (me.gunM) me.gunM.visible = true;
+    me.allyAim = true; me.anim.layers.aim = 1; me.anim.layers.rifle = me.gun === 'rifle' ? 1 : 0; if (me.gunM && me.gun && !me.fists) me.gunM.visible = true;
     me.shootT = (me.shootT ?? rand(0.6, 1.4)) - dt;
-    if (me.shootT <= 0 && td < 32) { me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
+    if (me.shootT <= 0 && td < 32 && me.gun && !me.fists) { // a disarmed ally can't shoot me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
       const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); const hit = Math.random() < 0.45; FX.tracer(m, new THREE.Vector3(t.pos.x + (hit ? 0 : rand(-1.2, 1.2)), t.pos.y + 1.2, t.pos.z + (hit ? 0 : rand(-1.2, 1.2)))); Sfx.shot(me.gun === 'rifle'); me.anim.play('recoil');
       if (hit) t.takeHit({ dmg: me.gun === 'rifle' ? 45 : 32, from: me, gun: me.gun, dir: fwd(me.yaw) }); }
   },
@@ -3698,7 +3713,7 @@ const CH5 = {
     const c = ctx.m.c, v = NPC.byKey('vane');
     if (!v || !v.alive) return this.end(c.plan === 'cranes' ? 'cranes' : 'gun');
     if (c.plan === 'law') { const m = NPC.byKey('marshal'); if (m) { m.script = (dt, me) => { if (me.moveTo(v.pos.x, v.pos.z, 3, dt, 1.4)) { me.face(v.pos); c.cuffT = (c.cuffT || 0) + dt; if (c.cuffT > 2 && !c.ended) { me.say('Silas Vane, you\'re under arrest.', 4); this.end('law'); } } }; } else this.end('law'); }
-    else if (c.plan === 'cranes') { const k = NPC.byKey('fenwick') || NPC.byKey('sal') || NPC.byKey('dutchy'); if (k) { k.script = (dt, me) => { if (me.moveTo(v.pos.x, v.pos.z, 3.4, dt, 4)) { me.face(v.pos); c.execT = (c.execT || 0) + dt; if (c.execT > 0.4 && !c.execSaid) { c.execSaid = 1; me.say('The Cranes don\'t hold with courts, Vane.', 3); } if (c.execT > 2.2 && v.alive) { const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); FX.tracer(m, new THREE.Vector3(v.pos.x, v.pos.y + 1.2, v.pos.z)); Sfx.shot(false); v.setDead(); this.end('cranes'); } } }; } else this.end('cranes'); }
+    else if (c.plan === 'cranes') { const k = this.live('fenwick') || this.live('sal') || this.live('dutchy'); if (k) { k.script = (dt, me) => { if (me.moveTo(v.pos.x, v.pos.z, 3.4, dt, 4)) { me.face(v.pos); c.execT = (c.execT || 0) + dt; if (c.execT > 0.4 && !c.execSaid) { c.execSaid = 1; me.say('The Cranes don\'t hold with courts, Vane.', 3); } if (c.execT > 2.2 && v.alive) { const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); FX.tracer(m, new THREE.Vector3(v.pos.x, v.pos.y + 1.2, v.pos.z)); Sfx.shot(false); v.setDead(); this.end('cranes'); } } }; } else this.end('cranes'); }
     else { // alone: Vane blocks the way out
       c.standoff = 0; STORY.hint('Get Eli out through the gate.');
     }
@@ -3747,7 +3762,7 @@ const CH5 = {
 Missions.def({ id: 'ch5', type: 'main', chapter: 5, title: 'The Ledger', giver: 'none', summary: 'Eli is held at Survey Camp 3, Tamarack Pass, up the trail north of Coyote Mill.',
   prereq: () => ['done', 'failed', 'unavailable'].includes(Missions.st('ch4').status),
   start: () => ({ x: T_TRAILHEAD.x, z: T_TRAILHEAD.z, y: Terrain.height(T_TRAILHEAD.x, T_TRAILHEAD.z) + 2.4 }),
-  tick: (dt, m) => { if (m.status === 'available' && !Missions.active && !Missions.failing && CH5.dist(Game.player.pos, T_TRAILHEAD) < 10) Missions.start('ch5'); }, // RDR2-style: riding into the marker starts it
+  tick: (dt, m) => { if (m.status === 'available' && !Missions.active && !Missions.failing && !S.wanted && !Town.hunters().some(h => h.alive && !h.downed) && CH5.dist(Game.player.pos, T_TRAILHEAD) < 10) Missions.start('ch5'); } /* not with the law or hunters on your tail */, // RDR2-style: riding into the marker starts it
   stages: [
     { id: 'ride', text: 'Ride up the trail to Tamarack Pass.', enter: ctx => { if (ctx.resumed && !ctx.rew) return CH5.rewind(ctx); CH5.spawn(); },
       objectives: [O.goto('overlook', 'Ride to the overlook below Survey Camp 3', T_OVERLOOK.x, T_OVERLOOK.z, 9)] },
@@ -3845,19 +3860,19 @@ const SIDE = {
     for (const tr of TRAILS) for (let i = 0; i < tr.length - 1; i++) { const [ax, az] = tr[i], [bx, bz] = tr[i + 1], L = Math.hypot(bx - ax, bz - az); for (let s = 0; s <= L; s += 4) { const x = ax + (bx - ax) * s / L, z = az + (bz - az) * s / L, d = Math.hypot(x - P.pos.x, z - P.pos.z); if (d < dist * 0.7 || d > dist * 1.5) continue; const ahead = ((x - P.pos.x) * f.x + (z - P.pos.z) * f.z) / d; const sc = Math.abs(d - dist) - ahead * 20; if (sc < bd && Math.hypot(x + 40, z - 20) > 50) { bd = sc; best = { x, z }; } } }
     return best;
   },
-  tempNPC(o) { const n = NPC.spawn(Object.assign({ wild: true, tags: ['generic', 'encounter'] }, o)); setTimeout(() => { if (NPC.all.includes(n) && n.distP > 60) NPC.despawn(n); }, 240000); return n; },
+  tempNPC(o) { const n = NPC.spawn(Object.assign({ wild: true, tags: ['generic', 'encounter'] }, o)); const sweep = setInterval(() => { if (!NPC.all.includes(n)) return clearInterval(sweep); if (n.distP > 60) { NPC.despawn(n); clearInterval(sweep); } }, 60000); return n; }, // once you're well away, they go on their way
   holdup() { // two bandits robbing a traveler: step in, cut yourself in, or ride on
-    const s = this.roadSpot(40); if (!s) return; S.flags.holdupDay = S.time.day; let resolved = false;
+    const s = this.roadSpot(40); if (!s) return; S.flags.holdupDay = S.time.day; let resolved = false, cut = false;
     const v = this.tempNPC({ key: 'enc_victim', name: 'Traveler', x: s.x, z: s.z, brave: 0.2, state: 'scripted', look: { skin: '#f0c4a0', shirt: '#4f7ca8', hair: '#8b5a2b', hatColor: '#d9c58f' } });
     v.state = 'handsup'; v.handsT = -1e9; v.anim.expr = 'alarm'; // hands up until someone settles it
     const robbers = [0, 1].map(i => this.tempNPC({ key: 'enc_bandit' + i, name: 'Road agent', x: s.x + (i ? 3 : -3), z: s.z + 2.5, lawful: false, group: 'enc_bandits', state: 'scripted', gun: 'revolver', hp: 80, maxHp: 80, fleeHp: 20, accuracy: 0.38, look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b', scarf: '#8a3b3b' } }));
     for (const r of robbers) { r.script = (dt, me) => { me.sp = 0; me.face(v.pos); me.anim.layers.aim = 1; if (me.gunM) me.gunM.visible = true; if (me.distP < 14 && !me._warned) { me._warned = 1; me.face(Game.player.pos); me.say('Keep riding, friend. This ain\'t your business.', 4); } };
       r.talk = () => resolved ? null : { start: { text: 'Keep riding. Or are you looking for a cut?', choices: [
-        { text: '"Cut me in."', do: () => { resolved = true; Inv.money(6, 'your cut'); Rep.honor(-8, 'joined a robbery'); v.say('Thieves! All of you!', 3); v.state = 'flee'; v.fleeFrom = Game.player.pos.clone(); v.fleeT = 10; v.script = null; for (const x of robbers) { x.script = (dt, me) => me.moveTo(s.x + 60, s.z + 60, 3, dt); } }, next: null },
+        { text: '"Cut me in."', do: () => { resolved = true; cut = true; Inv.money(6, 'your cut'); Rep.honor(-8, 'joined a robbery'); v.say('Thieves! All of you!', 3); v.state = 'flee'; v.fleeFrom = Game.player.pos.clone(); v.fleeT = 10; v.script = null; for (const x of robbers) { x.script = (dt, me) => me.moveTo(s.x + 60, s.z + 60, 3, dt); } }, next: null },
         { text: '"Let him go." (Draw)', do: () => { resolved = true; for (const x of robbers) x.fightPlayer(); }, next: null }, { text: 'Ride on', next: null }] } }; }
     const watch = setInterval(() => { // the robbery plays out whether or not you stay
       if (!NPC.all.includes(v)) return clearInterval(watch);
-      if (robbers.every(r => !r.alive || r.downed || r.fled)) { clearInterval(watch); if (!resolved || robbers.some(r => r.hostileToPlayer)) { resolved = true; v.state = 'scripted'; v.say('Bless you! Here, it\'s not much.', 4); Inv.money(5, 'from the traveler'); Rep.honor(5, 'stopped a robbery'); journal('Stopped two road agents robbing a traveler.'); v.script = (dt, me) => me.moveTo(-40, 20, 1.6, dt); } return; }
+      if (robbers.every(r => !r.alive || r.downed || r.fled)) { clearInterval(watch); if (v.alive && !v.downed && !cut && (!resolved || robbers.some(r => r.hostileToPlayer))) { resolved = true; v.state = 'scripted'; v.say('Bless you! Here, it\'s not much.', 4); Inv.money(5, 'from the traveler'); Rep.honor(5, 'stopped a robbery'); journal('Stopped two road agents robbing a traveler.'); v.script = (dt, me) => me.moveTo(-34, 24, 1.6, dt, 2); } else resolved = true; /* no reward from the dead or after taking a cut */ return; }
       if (!resolved && Game.player.pos.distanceTo(v.pos) > 90) { clearInterval(watch); resolved = true; for (const x of [v, ...robbers]) NPC.despawn(x); }
     }, 1000);
     UI.toast('Shouting on the road ahead', '');
@@ -3866,7 +3881,7 @@ const SIDE = {
     const s = this.roadSpot(32); if (!s) return; S.flags.snakeDay = S.time.day; let done = false;
     const m = this.tempNPC({ key: 'enc_snake', name: 'Bitten traveler', x: s.x + 2, z: s.z, brave: 0.3, state: 'tied', look: { skin: '#e8b48c', shirt: '#9a7b4f', hair: '#6b4a2f', hatColor: '#8b6a47', beard: '#6b4a2f' } });
     m.say('Snake got me! Please, somebody!', 5); m.talk = null;
-    m.opts = p => done ? [] : [{ label: 'Suck out the venom', fn: () => { done = true; p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.saved(m, 4); }, 1800); } }].concat(Inv.count('tonic') ? [{ label: 'Give him a sage tonic', fn: () => { done = true; Inv.take('tonic'); this.saved(m, 7); } }] : []);
+    m.opts = p => done ? [] : [{ label: 'Suck out the venom', fn: () => { done = true; p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); this.saved(m, 4); }, 1800); } }].concat(Inv.count('tonic') ? [{ label: 'Give him a sage tonic', fn: () => { done = true; Inv.take('tonic'); this.saved(m, 7); } }] : []);
     UI.toast('Someone is crying out by the trail', '');
   },
   saved(m, cash) { m.state = 'scripted'; m.say('I thought I was done for. Thank you, ma\'am.', 4); Inv.money(cash, 'from the traveler'); Rep.honor(4, 'helped a snakebit stranger'); journal('Sucked the venom from a snakebit stranger\'s leg on the trail.'); m.script = (dt, me) => me.moveTo(-40, 20, 1.4, dt); },
@@ -3937,10 +3952,12 @@ Missions.def({ id: 'bounty_board', type: 'bounty', title: 'Bounty', giver: 'boar
   stages: [
     { id: 'find', text: 'Track down the outlaw from the poster.', enter: ctx => { if (ctx.resumed && !ctx.rew) { ctx.rew = 1; } SIDE.spawnBounty(); },
       objectives: [O.check('find', () => { const q = SIDE.bs().active; return q ? `Find ${SIDE.outlaw(q.o).name} near ${SIDE.hideout(q.h).name}` : 'Find the outlaw'; }, () => { const q = SIDE.bs().active; if (!q) return false; const h = SIDE.hideout(q.h); return CH5.dist(Game.player.pos, h) < 28; }, () => { const q = SIDE.bs().active; if (!q) return null; const h = SIDE.hideout(q.h); return { x: h.x, z: h.z, y: Terrain.height(h.x, h.z) + 4 }; })] },
-    { id: 'take', text: 'Bring them in. Knock them out and hogtie them for the full reward.', enter: () => { const q = SIDE.bs().active; if (q && SIDE.outlaw(q.o).kind === 'brawler') STORY.hint('Ox only fights with his fists. Beat him down with yours, then hogtie him.'); },
+    { id: 'take', text: 'Bring them in. Knock them out and hogtie them for the full reward.', enter: ctx => { if (ctx.resumed && SIDE.bs().active && !NPC.byKey('bgen_' + SIDE.bs().active.o)) SIDE.spawnBounty(); // loaded mid-hunt: put the outlaw back
+ const q = SIDE.bs().active; if (q && SIDE.outlaw(q.o).kind === 'brawler') STORY.hint('Ox only fights with his fists. Beat him down with yours, then hogtie him.'); },
       objectives: [O.check('sub', () => `Subdue ${SIDE.outlaw(SIDE.bs().active.o).name}`, () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return !t || !t.alive || t.hogtied; }, () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return t && t.alive ? { x: t.pos.x, z: t.pos.z, y: t.pos.y + 2.4, enemy: true } : null; })],
       fail: [{ check: () => SIDE.bs().active && SIDE.bs().active.fled, why: 'The outlaw got away.' }] },
-    { id: 'deliver', text: 'Bring them (or proof) to the sheriff\'s office.', objectives: [O.check('turn', () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return t && t.alive ? 'Carry them to the sheriff\'s office (stow them on your horse)' : 'Search the body for proof, then go to the sheriff\'s office'; }, () => !!SIDE.bs().active.turnedIn, () => ({ x: -25.5, z: 8.6, y: 5 }))] },
+    { id: 'deliver', text: 'Bring them (or proof) to the sheriff\'s office.', enter: ctx => { const q = SIDE.bs().active; if (ctx.resumed && q && !NPC.byKey('bgen_' + q.o)) q.proof = true; }, // loaded after the body was gone: the deed counts
+      objectives: [O.check('turn', () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return t && t.alive ? 'Carry them into the sheriff\'s office (your horse can haul them most of the way)' : 'Search the body for proof, then go to the sheriff\'s office'; }, () => !!SIDE.bs().active.turnedIn, () => ({ x: -25.5, z: 8.6, y: 5 }))] },
   ],
   complete: ctx => SIDE.bountyComplete(ctx),
   cleanup: () => { const b = SIDE.bs(); if (b.active) { b.posted.push({ o: b.active.o, h: b.active.h }); b.active = null; } for (const n of NPC.all.slice()) if (n.tags.includes('bgen')) NPC.despawn(n); Missions.st('bounty_board').status = 'locked'; },
@@ -4025,11 +4042,11 @@ Object.assign(SIDE, {
     c.t += dt; if (c.t >= 8) { c.t = 0; c.plates = (c.plates || 0) + 1; Sfx.tone(1800, 0.05, 0.08, 'square'); UI.toast(`Plate ${c.plates} of 3 exposed`, 'good'); }
   },
   percival() { // a traveling photographer camps at Pine Hollow until his job is done
-    if (Missions.st('stranger_photo').status === 'done' && Missions.active !== 'stranger_photo') { const n = NPC.byKey('percival'); if (n && n.distP > 80) NPC.despawn(n); return; }
+    if (Missions.st('stranger_photo').status === 'done' && Missions.active !== 'stranger_photo') { const n = NPC.byKey('percival'); if (n && n.distP > 80) { NPC.despawn(n); if (this._cam) { Game.scene.remove(this._cam); this._cam = null; } } return; }
     if (NPC.byKey('percival') || Missions.st('m1').status !== 'done') return;
     const n = NPC.spawn({ key: 'percival', name: 'Percival Lumley', x: PINE_HOLLOW.x, z: PINE_HOLLOW.z, wild: true, brave: 0.3, state: 'scripted', tags: ['generic'], look: { skin: '#f0c4a0', shirt: '#e6dcc5', vest: '#5a3a5a', hair: '#c9a227', mustache: '#c9a227', hatColor: '#3b3b3b' } });
     n.script = (dt, me) => { me.sp = 0; }; n.talk = () => Missions.st('stranger_photo').status === 'available' ? { start: { text: 'Percival Lumley, photographic artist! I\'m assembling a portfolio of the American wilderness, but the deer simply will not sit still for me. Would you keep watch, and keep quiet?', choices: [{ text: 'I\'ll keep watch.', do: () => Missions.start('stranger_photo'), next: null }, { text: 'Not now.', next: null }] } } : { start: { text: Missions.st('stranger_photo').status === 'done' ? 'My finest plates yet. I owe you a great deal.' : 'Shh!', choices: [{ text: 'Goodbye', next: null }] } };
-    const cam = new THREE.Group(); cam.position.set(PINE_HOLLOW.x + 1.2, Terrain.height(PINE_HOLLOW.x + 1.2, PINE_HOLLOW.z + 0.8), PINE_HOLLOW.z + 0.8); for (const a of [0, 2.1, 4.2]) { const l = M(GEO.box, '#5a3a22', 0.05, 1.3, 0.05, Math.cos(a) * 0.25, 0.6, Math.sin(a) * 0.25); l.rotation.set(Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3); cam.add(l); } cam.add(M(GEO.box, '#2b2b2b', 0.35, 0.3, 0.45, 0, 1.35, 0)); cam.add(M(GEO.cyl, '#1b1b1b', 0.08, 0.15, 0.08, 0, 1.35, 0.28)); Game.scene.add(cam); n._cam = cam;
+    const cam = new THREE.Group(); cam.position.set(PINE_HOLLOW.x + 1.2, Terrain.height(PINE_HOLLOW.x + 1.2, PINE_HOLLOW.z + 0.8), PINE_HOLLOW.z + 0.8); for (const a of [0, 2.1, 4.2]) { const l = M(GEO.box, '#5a3a22', 0.05, 1.3, 0.05, Math.cos(a) * 0.25, 0.6, Math.sin(a) * 0.25); l.rotation.set(Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3); cam.add(l); } cam.add(M(GEO.box, '#2b2b2b', 0.35, 0.3, 0.45, 0, 1.35, 0)); cam.add(M(GEO.cyl, '#1b1b1b', 0.08, 0.15, 0.08, 0, 1.35, 0.28)); if (this._cam) Game.scene.remove(this._cam); this._cam = cam; Game.scene.add(cam); // one tripod, however often he's respawned n._cam = cam;
   },
 });
 
@@ -4092,20 +4109,21 @@ const Riders = {
       const side = n.flankSide || (n.flankSide = Math.random() < 0.5 ? -1 : 1), r = fwd(Math.atan2(P.pos.x - h.pos.x, P.pos.z - h.pos.z) + Math.PI / 2);
       if (d > 22) { tx = P.pos.x; tz = P.pos.z; want = 11.5; } else { tx = P.pos.x + r.x * side * 10; tz = P.pos.z + r.z * side * 10; want = P.state === 'ride' ? Math.max(4, Game.horse.speed) : 4; }
     } else if (n.rideMode === 'flee') { const a = Math.atan2(h.pos.x - P.pos.x, h.pos.z - P.pos.z); tx = h.pos.x + Math.sin(a) * 20; tz = h.pos.z + Math.cos(a) * 20; want = d < 120 ? 12 : 6; if (d > 160 && n.onEscape) { n.onEscape(n); n.onEscape = null; }
-    } else if (n.rideMode === 'leave') { tx = -40; tz = 20; want = 7; if (d > 150) { this.despawnRider(n); return; }
+    } else if (n.rideMode === 'leave') { tx = -40; tz = 20; want = 7; if (d > 150 || Math.hypot(h.pos.x + 40, h.pos.z - 20) < 8) { this.despawnRider(n); return; } // home, or out of sight
     } else if (n.rideMode === 'travel' && n.dest) { tx = n.dest.x; tz = n.dest.z; want = n.destSpeed || 5; if (Math.hypot(tx - h.pos.x, tz - h.pos.z) < 4) want = 0; }
     h.steer(tx, tz, want, dt);
     const seat = h.seat(); n.pos.set(seat.x, seat.y - (n.rig.isModel ? 0.24 : 0.62), seat.z); n.yaw = h.yaw; n.sp = 0;
     // shooting from the saddle
     n.allyAim = false;
-    if ((n.hostileToPlayer || (n.lawman && S.wanted)) && n.rideMode === 'chase' && P.alive && d < 40) {
+    if ((n.hostileToPlayer || (n.lawman && S.wanted)) && n.rideMode === 'chase' && P.alive && d < 40 && n.gun && !n.fists) { // a disarmed rider can't shoot
       n.allyAim = true; n.anim.layers.aim = 1; n.face(P.pos); n.shootT -= dt;
       if (n.shootT <= 0 && n.seesPlayer) { n.shootT = rand(1.6, 2.8); const m = new THREE.Vector3(); n.rig.R.hand.getWorldPosition(m);
         const acc = n.accuracy * 0.65 * (d < 12 ? 1.2 : d > 25 ? 0.55 : 1) * (P.state === 'ride' ? 0.75 : 1) * Sky.visMul(); const hit = Math.random() < acc;
         const tgt = new THREE.Vector3(P.pos.x + (hit ? 0 : rand(-2, 2)), P.pos.y + (hit ? 1.2 : rand(-0.2, 1.8)), P.pos.z + (hit ? 0 : rand(-2, 2))); if (!hit && tgt.y < P.pos.y + 0.6) tgt.y = Terrain.height(tgt.x, tgt.z);
-        FX.tracer(m, tgt, hit ? 'none' : 'auto'); Sfx.shot(n.gun === 'rifle'); n.anim.play('recoil'); if (hit) P.hurt(n.dmg, n, 'gun'); }
+        FX.tracer(m, tgt, hit ? 'none' : 'auto'); Sfx.shot(n.gun === 'rifle'); n.anim.play('recoil'); if (hit) P.hurt(n.dmg, n, 'gun'); Town.shot(h.pos.x, h.pos.z, n); }
     }
   },
+  clear() { for (const h of this.horses.slice()) { h.rider = null; h.remove(); } this.posseCD = 0; }, // loading or retrying: no riderless horses frozen in place
   despawnRider(n) { const h = n.mount; if (h) { h.rider = null; h.remove(); } NPC.despawn(n); },
   /* ---------- the law rides out ---------- */
   posse(dt) {
@@ -4155,6 +4173,7 @@ const Town = {
       else { me.sp = 0; me.crouchC = true; me.hideT -= dt; if (me.hideT <= 0 && Town.alarmT <= 0) Town.calm(me); } };
     return true;
   },
+  leave(dt, me) { const P = Game.player, a = Math.atan2(me.pos.x - P.pos.x, me.pos.z - P.pos.z); me.moveTo(me.pos.x + Math.sin(a) * 5, me.pos.z + Math.cos(a) * 5, 1.8, dt); }, // walk off, away from Wren
   calm(n) { n.panicked = false; n.hid = false; n.crouchC = false; n.script = null; n.state = 'routine'; n.goal = null; n.path = null; n.anim.expr = 'calm'; },
   lawCheck(n, pos) { // the sheriff or a deputy comes to see who's shooting
     if (S.wanted || n.state === 'combat' || n.state === 'pursue' || this.lawT > 0) return; this.lawT = 20; this.lawCaller = n; n.investigate(pos); n.invT = 14; n.say('Who\'s shooting?!', 2);
@@ -4168,10 +4187,12 @@ const Town = {
       if (hs.every(n => !n.alive || n.downed)) { if (!this.huntDone) { this.huntDone = true; UI.toast('The bounty hunters won\'t be collecting today.', 'good'); journal('Bounty hunters came for the paper on me. They didn\'t get it.'); } }
       return; }
     const thr = S.honor <= -40 ? 8 : 15;
-    if (S.bounty < thr || S.wanted || Missions.active || this.huntCD > 0 || Math.hypot(P.pos.x - TOWN_C.x, P.pos.z - TOWN_C.z) < 75 || P.state === 'down' || inBuilding(P.pos.x, P.pos.z, P.pos.y)) return;
+    if (S.bounty < thr || S.wanted || Missions.active || Duel.on || Dialog.open || this.huntCD > 0 || Math.hypot(P.pos.x - TOWN_C.x, P.pos.z - TOWN_C.z) < 75 || P.state === 'down' || inBuilding(P.pos.x, P.pos.z, P.pos.y)) return;
     this.huntCD = S.honor <= -40 ? 200 : 320; this.huntDone = false;
     const back = Math.atan2(-Math.sin(P.yaw), -Math.cos(P.yaw)), names = ['Abel Kincaid', 'Bounty hunter', 'Bounty hunter'];
-    for (let i = 0; i < 3; i++) { const a = back + (i - 1) * 0.35, x = clamp(P.pos.x + Math.sin(a) * 55, -WORLD.half + 10, WORLD.half - 10), z = clamp(P.pos.z + Math.cos(a) * 55, -WORLD.half + 10, WORLD.half - 10);
+    const spots = []; for (let k = 0; k < 24 && spots.length < 3; k++) { const a = back + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.3, x = P.pos.x + Math.sin(a) * 55, z = P.pos.z + Math.cos(a) * 55; if (Math.abs(x) < WORLD.half - 12 && Math.abs(z) < WORLD.half - 12 && Terrain.height(x, z) > WORLD.waterY + 0.6 && !spots.some(q => Math.hypot(q.x - x, q.z - z) < 6)) spots.push({ x, z, a }); } // dry ground, in the map, spread out
+    if (spots.length < 3) return;
+    for (let i = 0; i < 3; i++) { const { x, z, a } = spots[i];
       const n = Riders.spawnRider({ key: 'hunter' + i + '_' + Math.floor(Math.random() * 1e5), name: names[i], lawful: false, gun: i === 1 ? 'rifle' : 'revolver', hp: 120, maxHp: 120, accuracy: 0.42, brave: 0.9, tags: ['generic', 'hunter'], look: { skin: i === 2 ? '#8d5a3b' : '#e2a57c', shirt: ['#4a3b2a', '#3f4a3a', '#5a4030'][i], coat: '#2e2a26', hair: '#2b2018', hatColor: '#1e1a16', beard: i === 0 ? '#2b2018' : null } }, 'chase', x, z, a + Math.PI);
       n.hostileToPlayer = true; }
     UI.toast(`Bounty hunters are riding after the $${S.bounty.toFixed(2)} on your head!`, 'bad'); this.hunters()[0].say('That paper\'s ours, Wren. Come quiet or come dead.', 4); Haptic.buzz([40, 60, 40]);
@@ -4184,11 +4205,11 @@ const Town = {
   // ---------- your own wanted poster outside the sheriff's office ----------
   posterInit() {
     const c = document.createElement('canvas'); c.width = 128; c.height = 176; this.posterC = c; this.posterTex = new THREE.CanvasTexture(c);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.85), new THREE.MeshLambertMaterial({ map: this.posterTex })); const y = Col.ground(-19.6, 4.3, 99); m.position.set(-19.6, y + 1.75, 4.42); m.rotation.y = Math.PI; Game.scene.add(m); this.poster = m; this.drawn = -1;
-    Interact.add({ pos: () => ({ x: -19.6, y, z: 3.9 }), r: 1.8, pri: 0.3, opts: () => S.bounty >= 5 ? [{ label: 'Read poster: Wren', fn: () => Dialog.start(null, { start: { who: 'Wanted poster', text: `WANTED: "WREN", a drifter. ${S.bounty >= 30 ? 'Armed and dangerous. ' : ''}$${S.bounty.toFixed(2)} REWARD. Bring to Sheriff Pike, Juniper Gap. ${S.honor <= -40 ? 'Dead or alive.' : 'Alive preferred.'}`, choices: [{ text: 'Tear it down', do: () => { UI.toast('Torn down. Pike will put up another.', ''); this.torn = S.time.day; }, next: null }, { text: 'Leave it', next: null }] } }) }] : [] });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.85), new THREE.MeshLambertMaterial({ map: this.posterTex })); const y = Col.ground(-19.4, 12.4, 99); m.position.set(-19.4, y + 1.75, 11.66); m.rotation.y = 0; /* beside the door, facing the street */ Game.scene.add(m); this.poster = m; this.drawn = -1;
+    Interact.add({ pos: () => ({ x: -19.4, y, z: 12.3 }), r: 1.8, pri: 0.3, opts: () => S.bounty >= 5 && S.flags.posterTorn !== S.time.day ? [{ label: 'Read poster: Wren', fn: () => Dialog.start(null, { start: { who: 'Wanted poster', text: `WANTED: "WREN", a drifter. ${S.bounty >= 30 ? 'Armed and dangerous. ' : ''}$${S.bounty.toFixed(2)} REWARD. Bring to Sheriff Pike, Juniper Gap. ${S.honor <= -40 ? 'Dead or alive.' : 'Alive preferred.'}`, choices: [{ text: 'Tear it down', do: () => { UI.toast('Torn down. Pike will put up another tomorrow.', ''); S.flags.posterTorn = S.time.day; }, next: null }, { text: 'Leave it', next: null }] } }) }] : [] });
   },
   posterDraw() {
-    const show = S.bounty >= 5 && this.torn !== S.time.day; this.poster.visible = show; if (!show) return; const key = Math.round(S.bounty) + S.outfit; if (key === this.drawn) return; this.drawn = key;
+    const show = S.bounty >= 5 && S.flags.posterTorn !== S.time.day; this.poster.visible = show; if (!show) return; const key = Math.round(S.bounty) + S.outfit; if (key === this.drawn) return; this.drawn = key;
     const g = this.posterC.getContext('2d'), o = OUTFITS[S.outfit] || OUTFITS.duster; g.fillStyle = '#efe2c2'; g.fillRect(0, 0, 128, 176); g.strokeStyle = '#6b5a3e'; g.lineWidth = 3; g.strokeRect(4, 4, 120, 168);
     g.fillStyle = '#3b2a1e'; g.font = 'bold 22px Georgia, serif'; g.textAlign = 'center'; g.fillText('WANTED', 64, 30);
     g.fillStyle = '#e2b48c'; g.beginPath(); g.arc(64, 78, 22, 0, TAU); g.fill(); g.fillStyle = '#7a4a2a'; g.fillRect(42, 70, 8, 26); g.fillRect(78, 70, 8, 26); // face and hair
@@ -4202,7 +4223,8 @@ const Town = {
     if (r < 0.5 && S.flags.duelDay !== d && day && S.chapter >= 2) return this.duelist(), true;
     return false; },
   wagon() {
-    S.flags.wagonDay = S.time.day; const s = Encounters.spot(26), y = Terrain.height(s.x, s.z), P = Game.player, yaw = P.yaw + Math.PI / 2;
+    const s = SIDE.roadSpot(26); if (!s || Terrain.height(s.x, s.z) < WORLD.waterY + 0.6 || this.inTown(s.x, s.z) || Col.near(s.x, s.z, 2, []).some(c => c.block)) return; // a dry stretch of open trail
+    S.flags.wagonDay = S.time.day; const y = Terrain.height(s.x, s.z), P = Game.player, yaw = P.yaw + Math.PI / 2;
     const g = new THREE.Group(); g.position.set(s.x, y, s.z); g.rotation.y = yaw; Game.scene.add(g);
     const bed = M(GEO.box, '#7a5a3c', 2.8, 0.5, 1.4, 0, 0.85, 0); bed.rotation.z = 0.14; g.add(bed); g.add(M(GEO.box, '#e8dfc8', 2.6, 1.0, 1.3, 0.1, 1.55, 0)); // canvas cover
     for (const [wx, wz] of [[-1.1, 0.75], [-1.1, -0.75], [1.1, 0.75]]) { const w = M(GEO.cyl, '#4a3a2a', 0.5, 0.1, 0.5, wx, 0.5, wz); w.rotation.x = Math.PI / 2; g.add(w); }
@@ -4211,8 +4233,8 @@ const Town = {
     const n = NPC.spawn({ key: 'wagon_otis', name: 'Otis Pruitt', x: s.x + Math.cos(yaw) * 2.4, z: s.z - Math.sin(yaw) * 2.4, lawful: true, wild: true, brave: 0.3, state: 'scripted', tags: ['generic', 'wayfarer'], look: { skin: '#e2a57c', shirt: '#6a7a4a', hair: '#9a8a7a', beard: '#9a8a7a', hatColor: '#7a6a4a' } });
     n.script = (dt, me) => { me.sp = 0; if (me.distP < 9) me.face(Game.player.pos); if (me.distP < 12 && !ev.called) { ev.called = true; me.say('Wheel came clean off! Could you lend a hand?', 4); } };
     const ev = { kind: 'wagon', g, c, n, fixed: false, robbed: false };
-    ev.it = Interact.add({ pos: () => ({ x: s.x, y, z: s.z }), r: 3, pri: 0.6, opts: p => ev.fixed || ev.robbed || !n.alive ? [] : [
-      { label: 'Help fix the wheel', fn: () => { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); ev.fixed = true; broke.position.set(1.1, 0.5, -0.75); broke.rotation.x = Math.PI / 2; bed.rotation.z = 0; Rep.honor(3, 'helped a stranded settler'); Inv.money(Math.round(rand(2, 4) * 100) / 100, 'from Otis'); Inv.add('coffee', 1); n.say('Bless you! There\'s coffee in it for you.', 4); Skills.gain('survive', 2); }, 2600); } },
+    ev.it = Interact.add({ pos: () => ({ x: s.x, y, z: s.z }), r: 3, pri: 0.6, opts: p => ev.fixed || ev.fixing || ev.robbed || !n.alive ? [] : [
+      { label: 'Help fix the wheel', fn: () => { if (ev.fixing) return; ev.fixing = true; p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); if (!Town.events.includes(ev) || !n.alive || ev.robbed) return; ev.fixed = true; broke.position.set(1.1, 0.5, -0.75); broke.rotation.x = Math.PI / 2; bed.rotation.z = 0; Rep.honor(3, 'helped a stranded settler'); Inv.money(Math.round(rand(2, 4) * 100) / 100, 'from Otis'); Inv.add('coffee', 1); n.say('Bless you! There\'s coffee in it for you.', 4); Skills.gain('survive', 2); }, 2600); } },
       { label: 'Rob him', crime: true, fn: () => { ev.robbed = true; n.state = 'handsup'; n.handsT = -6; n.say('Take it, take it! Just don\'t shoot!', 3); Inv.money(Math.round(rand(3, 6) * 100) / 100, 'robbed from Otis'); Law.crime('robbery', p.pos, { victim: n }); } }] });
     this.events.push(ev); UI.toast('A wagon is stuck on the trail ahead', '');
   },
@@ -4223,7 +4245,7 @@ const Town = {
     n.script = (dt, me) => { me.sp = 0; me.face(Game.player.pos); if (me.distP < 14 && !ev.called) { ev.called = true; me.say('They say you\'re quick, Wren. I\'d like to find out.', 4); } };
     n.talk = () => ev.done ? null : { start: { who: nm, text: 'Main street rules. We stand ten paces apart and draw on the word. Unless you\'re yellow.', choices: [
       { text: 'Let\'s settle it. (Duel)', cond: () => S.weapons.revolver, do: () => Duel.start(n), next: null },
-      { text: 'Not today.', do: () => { ev.done = true; n.say('Figured. Yellow as mustard.', 3); n.script = (dt, me) => me.moveTo(me.pos.x + 30, me.pos.z, 1.6, dt); }, next: null }] } };
+      { text: 'Not today.', do: () => { ev.done = true; n.say('Figured. Yellow as mustard.', 3); n.script = Town.leave; }, next: null }] } };
     const ev = { kind: 'duel', n }; this.events.push(ev); UI.toast(`${nm} blocks the trail`, '');
   },
   eventsTick() {
@@ -4232,7 +4254,7 @@ const Town = {
       if (far) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) ev.c.on = false; if (ev.it) Interact.remove(ev.it); if (ev.n && NPC.all.includes(ev.n) && !Duel.on) NPC.despawn(ev.n); this.events = this.events.filter(e => e !== ev); } }
   },
   update(dt) {
-    this.alarmT -= dt; this.lawT -= dt; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
+    this.alarmT -= dt; this.lawT -= dt; if (this.lawT < -10) this.lawCaller = null; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
     const c = this.lawCaller, P = Game.player; // the lawman who came to check gives one warning when he finds you
     if (c && c.alive && c.state !== 'pursue' && c.state !== 'combat' && c.distP < 8 && c.seesPlayer && Game.time - this.warnedAt > 90) { this.warnedAt = Game.time; this.lawCaller = null; c.face(P.pos); c.say('Keep that iron holstered in my town. Next shot costs you.', 4); UI.toast('Warned by the law: no more shooting in town', 'bad'); }
   },
@@ -4261,11 +4283,11 @@ const Duel = {
     const P = Game.player, n = this.n, muzzle = new THREE.Vector3(); this.phase = 'done'; P.anim.play('recoil'); P.rig.R.hand.getWorldPosition(muzzle);
     const chest = new THREE.Vector3(n.pos.x, n.pos.y + 1.2, n.pos.z), me = new THREE.Vector3(P.pos.x, P.pos.y + 1.2, P.pos.z);
     if (how === 'win' || how === 'spare') { Sfx.shot(false); FX.tracer(muzzle, chest, 'none'); S.stats.duels = (S.stats.duels || 0) + 1; Skills.gain('gun', 6);
-      if (how === 'spare') { Brawl.disarm(n); n.hostileToPlayer = false; n.state = 'scripted'; n.say('You could\'ve killed me. I won\'t forget it.', 4); Rep.honor(3, 'spared a duelist'); n.script = (dt, me2) => me2.moveTo(me2.pos.x + 30, me2.pos.z, 2.4, dt); this.show('You shot the gun from their hand', 'won'); }
+      if (how === 'spare') { Brawl.disarm(n); n.hostileToPlayer = false; n.state = 'scripted'; n.say('You could\'ve killed me. I won\'t forget it.', 4); Rep.honor(3, 'spared a duelist'); n.script = Town.leave; this.show('You shot the gun from their hand', 'won'); }
       else { n.takeHit({ dmg: 999, from: P, gun: 'revolver', zone: 'body' }); Inv.money(Math.round(rand(6, 14) * 100) / 100, 'from the duelist\'s purse'); this.show('You were faster', 'won'); journal(`Outdrew ${n.name} on the trail.`); } }
     else { Sfx.shot(false); FX.tracer(new THREE.Vector3(n.pos.x, n.pos.y + 1.3, n.pos.z), me, 'none'); P.hurt(how === 'early' ? 45 : 55, n, 'gun'); n.say(how === 'early' ? 'Cheat! You drew early!' : 'Too slow, Wren.', 3); if (how === 'early') Rep.honor(-3, 'drew early in a duel');
-      this.show(how === 'early' ? 'You drew too early' : 'Too slow', 'lost'); n.script = (dt, me2) => me2.moveTo(me2.pos.x + 30, me2.pos.z, 1.8, dt); }
-    const ev = Town.events.find(e => e.n === n); if (ev) ev.done = true; setTimeout(() => this.show(null), 2200); this.on = false; this.last = how;
+      this.show(how === 'early' ? 'You drew too early' : 'Too slow', 'lost'); n.script = Town.leave; }
+    const ev = Town.events.find(e => e.n === n); if (ev) ev.done = true; later(() => this.show(null), 2200); this.on = false; this.last = how;
   },
   stop() { this.on = false; this.show(null); },
 };
@@ -4419,7 +4441,7 @@ const UI = {
       case 'putbag': if (Inv.take(id)) S.h.bags[id] = (S.h.bags[id] || 0) + 1; break;
       case 'save': Save.save(); break; case 'load': this.close(); Save.load(); break;
       case 'saveslot': Save.save(false, id); break; case 'loadslot': this.close(); Save.load(id); break; case 'resume': this.close(); return; case 'camp': this.close(); Camp.make(); return;
-      case 'mute': if (Sfx.master) Sfx.master.gain.value = Sfx.master.gain.value ? 0 : 0.6; break;
+      case 'mute': if (Sfx.master) Sfx.master.gain.value = Sfx.master.gain.value ? 0 : (Settings.v.sound || 0.6); break;
       case 'cook': { const n = S.inv[id]; Inv.take(id, n); Inv.add(ITEMS[id].cook, n); Sfx.burst(3000, 0.6, 0.08); break; }
       case 'craft': Inv.take('sage'); Inv.take('berries', 2); Inv.add('tonic'); break;
       case 'rest': this.close(); Camp.rest(false, id === 'morning'); break;
@@ -4460,7 +4482,7 @@ const UI = {
     const h = S.time.hour, hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 15) * 15; $('clock').textContent = `Day ${S.time.day} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} · ${{ clear: 'Clear', cloudy: 'Overcast', rain: 'Rain', storm: 'Thunderstorm', fog: 'Fog' }[Sky.weather]}`;
     const ob = $('objective'); if (Missions.active) { const objs = Missions.objectives().filter(o => !o.check(Missions.ctx) && !(o.optional && Missions.ctx.m.opt[o.id])); const main = objs.find(o => !o.optional) || objs[0]; ob.hidden = !main; if (main) ob.innerHTML = `<small>${esc(Missions.defs[Missions.active].title)}</small>${esc(typeof main.text === 'function' ? main.text(Missions.ctx) : main.text)}`; } else ob.hidden = true;
     const w = $('wanted'); w.hidden = !(S.wanted || S.bounty > 0); if (!w.hidden) w.textContent = S.wanted ? `WANTED · $${S.bounty.toFixed(2)}` : `Bounty $${S.bounty.toFixed(2)}`; w.style.background = S.wanted ? 'var(--brick)' : 'rgba(29,42,37,.7)';
-    $('cross').hidden = !P.aiming; $('cross').classList.toggle('lock', !!(P.hover && P.hover.h)); if (P.aiming) $('cross').style.setProperty('--s', (1 + P.spread() * 45).toFixed(3)); // red over a target, wider while the spread blooms const am = $('ammo'); am.hidden = P.weapon === 'fists'; if (!am.hidden) am.textContent = P.weapon === 'revolver' ? `${S.ammoClip.revolver} | ${Inv.count('ammo_rev')}` : `${S.ammoClip.rifle} | ${Inv.count('ammo_rifle')}`;
+    $('cross').hidden = !P.aiming; $('cross').classList.toggle('lock', !!(P.hover && P.hover.h)); if (P.aiming) $('cross').style.setProperty('--s', (1 + P.spread() * 45).toFixed(3)); /* red over a target, wider while the spread blooms */ const am = $('ammo'); am.hidden = P.weapon === 'fists'; if (!am.hidden) am.textContent = P.weapon === 'revolver' ? `${S.ammoClip.revolver} | ${Inv.count('ammo_rev')}` : `${S.ammoClip.rifle} | ${Inv.count('ammo_rifle')}`;
     const wind = P.weapon === 'fists' && P.state === 'ground' && !P.grab && NPC.all.some(n => n.windT > 0 && n.alive && !n.downed && n.distP < 3); // an enemy is winding up a punch: block now to counter
     const cue = $('cue'); if (cue) { const show = wind && !P.blocking && Settings.v.hints !== false; if (cue.hidden === show) cue.hidden = !show; } const bb = document.querySelector('#tctx [data-b="block"]'); if (bb && bb.classList.contains('cue') !== wind) bb.classList.toggle('cue', wind);
     if (Input.touch) { const ctx = { reload: P.weapon !== 'fists' && S.ammoClip[P.weapon] < (P.weapon === 'rifle' ? 5 : 6) && Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev') > 0, weapon: !!(S.weapons.revolver || S.weapons.rifle), block: P.state === 'ground' && P.weapon === 'fists' && (this.threat() || P.blocking), grab: P.state === 'ground' && P.weapon === 'fists' && !P.grab && NPC.all.some(n => Brawl.canGrab(n) && n.distP < 1.9 && (n.hostileToPlayer || n.state === 'combat')), shove: !!P.grab, dodge: P.state === 'ground' && this.threat(), whistle: P.state !== 'ride' && H.distP > 14 };
@@ -4484,9 +4506,9 @@ const UI = {
 /* ---------- Camp ---------- */
 const Camp = {
   fire: null,
-  canMake() { const P = Game.player; return !this.fire && Inv.count('kit') && Math.hypot(P.pos.x + 40, P.pos.z - 20) >= 60 && Math.hypot(P.pos.x + 118, P.pos.z - 94) >= 30 && !S.wanted; },
-  make() { const P = Game.player; if (this.fire) { UI.toast('Your camp is already set up.'); return; } if (!Inv.count('kit')) { UI.toast('You need a camp kit.', 'bad'); return; } if (Math.hypot(P.pos.x + 40, P.pos.z - 20) < 60 || Math.hypot(P.pos.x + 118, P.pos.z - 94) < 30) { UI.toast('Too close to town to make camp.', 'bad'); return; } if (S.wanted) { UI.toast('Can\'t make camp while the law is after you.', 'bad'); return; } if (NPC.all.some(n => n.state === 'combat' && n.alive && !n.downed) || P.state !== 'ground') { UI.toast('Not now.', 'bad'); return; }
-    const f = fwd(P.yaw); const x = P.pos.x + f.x * 2, z = P.pos.z + f.z * 2; P.anim.play('kneel', { loop: true }); setTimeout(() => { P.anim.stop('kneel'); this.spawn(x, z); S.camp = { x, z }; Missions.emit('camp', {}); }, 1200); },
+  canMake() { const P = Game.player; return !this.fire && !this.pending && Inv.count('kit') && Math.hypot(P.pos.x + 40, P.pos.z - 20) >= 60 && Math.hypot(P.pos.x + 118, P.pos.z - 94) >= 30 && !S.wanted; },
+  make() { const P = Game.player; if (this.pending) return; if (this.fire) { UI.toast('Your camp is already set up.'); return; } if (!Inv.count('kit')) { UI.toast('You need a camp kit.', 'bad'); return; } if (Math.hypot(P.pos.x + 40, P.pos.z - 20) < 60 || Math.hypot(P.pos.x + 118, P.pos.z - 94) < 30) { UI.toast('Too close to town to make camp.', 'bad'); return; } if (S.wanted) { UI.toast('Can\'t make camp while the law is after you.', 'bad'); return; } if (NPC.all.some(n => n.state === 'combat' && n.alive && !n.downed) || P.state !== 'ground') { UI.toast('Not now.', 'bad'); return; }
+    const f = fwd(P.yaw); const x = P.pos.x + f.x * 2, z = P.pos.z + f.z * 2; P.anim.play('kneel', { loop: true }); this.pending = true; const gen = Game.gen; setTimeout(() => { this.pending = false; P.anim.stop('kneel'); if (gen !== Game.gen || this.fire) return; this.spawn(x, z); S.camp = { x, z }; Missions.emit('camp', {}); }, 1200); },
   spawn(x, z) { const g = World.campfire(x, z, false); const bed = M(GEO.box, '#4f7ca8', 0.9, 0.15, 2, 1.8, 0.08, 0); g.add(bed); const tent = M(GEO.cone, '#d9c58f', 1.5, 1.6, 1.5, -1.8, 0.8, 1.6); tent.geometry = new THREE.ConeGeometry(1, 1, 4); g.add(tent); this.fire = { g, x, z }; this.it = Interact.add({ pos: () => ({ x, y: Terrain.height(x, z), z }), r: 2.6, pri: 0.3, opts: () => [{ label: 'Use campfire', fn: () => UI.open('camp') }] }); },
   pack() { if (!this.fire) return; Game.scene.remove(this.fire.g); Game.fires = Game.fires.filter(f => f.g !== this.fire.g); Interact.remove(this.it); this.fire = null; S.camp = null; },
   rest(safehouse, morning) { const P = Game.player; if (NPC.all.some(n => n.state === 'combat' && n.alive && !n.downed)) { UI.toast('You can\'t rest with enemies nearby.', 'bad'); return; } let hrs = 3; if (morning || safehouse) { hrs = ((24 - S.time.hour) + 7) % 24 || 24; } UI.banner(safehouse ? 'The Greer farm' : 'Camp', `Rested ${Math.round(hrs)} hours`); Sky.advance(hrs); S.p.hp = S.p.maxHp; S.p.st = S.p.maxSt; S.p.hpCore = Math.max(S.p.hpCore, 70); S.h.st = Game.horse.maxSt(); if (safehouse) { S.p.hpCore = 100; if (!S.h.bags.oats) S.h.bags.oats = 1; } Save.save(true); },
@@ -4554,6 +4576,7 @@ const Post = {
               occ += max(0.0, dot(N, v / dist) - 0.2) * (1.0 - smoothstep(Rw * 0.7, Rw * 1.8, dist)); }
             c *= 1.0 - uAO * clamp(occ / 8.0 * 1.6, 0.0, 1.0) * (1.0 - smoothstep(20.0, 60.0, z)); }
           c += texture2D(tBloom, vUv).rgb * uBloom;
+          c = c * (1.0 + uNight * 0.45) + vec3(0.010, 0.016, 0.032) * uNight; // night: moonlit, not black
           if (uGod > 0.0) c += texture2D(tGod, vUv).rgb * uGodCol * uGod;
           // grade: gentle S-curve contrast, richer colour, cool shadows and warm highlights (warmer at golden hour)
           float l = luma(c); c = mix(vec3(l), c, 1.12 + uWarm * 0.08); c = (c - 0.5) * 1.08 + 0.5;
@@ -4628,19 +4651,20 @@ const Game = {
   },
   restoreFromState(silent) {
     // rebuild dynamic world from S (used for new game, load, mission retry)
-    Brawl.clear(); Town.clear(); for (const n of NPC.all.slice()) NPC.despawn(n); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
+    this.gen = (this.gen || 0) + 1; if (Dialog.open) Dialog.close(); if (Fishing.on) Fishing.stop(); Camp.pending = false; // timers from before this point stand down
+    Brawl.clear(); Town.clear(); for (const n of NPC.all.slice()) NPC.despawn(n); Riders.clear(); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
     STORY._cab = STORY._cave = false; if (STORY._trail) { for (const m of STORY._trail) this.scene.remove(m); STORY._trail = null; }
     const P = this.player; P.state = 'ground'; P.carry = null; P.alive = true; P.weapon = 'fists'; P.teleport(S.p.x, S.p.z, S.p.yaw); P.buildRig();
     const H = this.horse; H.pos.set(S.h.x, Col.ground(S.h.x, S.h.z, 99), S.h.z); H.yaw = S.h.yaw; H.rider = null; H.speed = 0; H.state = 'idle'; H.box.visible = !!S.horseCarry; H.cargoMesh = null;
     if (S.horseCarry && S.horseCarry.id.startsWith('npc:')) S.horseCarry = null;
-    Camp.fire && Camp.pack(); if (S.camp) Camp.spawn(S.camp.x, S.camp.z);
+    const camp = S.camp; Camp.fire && Camp.pack(); if (camp) { S.camp = camp; Camp.spawn(camp.x, camp.z); } // pack() clears S.camp, so keep the saved one
     World.apply(); this.populateWildlife();
     Missions.active = null; Missions.ctx = null; Missions._silent = true; Missions.refresh(); Missions._silent = false; Missions.resume();
     if (S.carry) { const c = Carry.make(S.carry, P.pos.x, P.pos.z); P.carry = c; c.carried = true; S.carry = null; }
     Sky.weather = S.weather.kind; this.cam.snap = true; this.cam.yaw = P.state === 'ride' ? H.yaw : P.yaw; this.cam.pitch = 0.3; Law.searchC = S.wanted ? { x: S.p.x, z: S.p.z } : null;
   },
   syncState() { const P = this.player; S.p.x = P.pos.x; S.p.z = P.pos.z; S.p.yaw = P.yaw; S.h.x = this.horse.pos.x; S.h.z = this.horse.pos.z; S.carry = P.carry && !P.carry.npc ? P.carry.id : null; },
-  newDay() { S.h.fed = Math.max(0, S.h.fed - 25); for (const n of NPC.all.slice()) if (!n.alive && n.tags.includes('generic')) NPC.despawn(n); if (this.running) { World.apply(); journal(`Day ${S.time.day}.`); } },
+  newDay() { S.h.fed = Math.max(0, S.h.fed - 25); for (const n of NPC.all.slice()) if (!n.alive && n.tags.includes('generic') && !n.tags.includes('bgen')) NPC.despawn(n); /* a bounty's body keeps its proof */ if (this.running) { World.apply(); journal(`Day ${S.time.day}.`); } },
   populateWildlife() {
     const herds = [[-95, -30], [40, 75], [-170, 40], [90, 150], [-110, 150], [170, -20]]; for (const [x, z] of herds) for (let i = 0; i < 3; i++) Animal.spawn('deer', x + rand(-6, 6), z + rand(-6, 6));
     const bunnies = [[-80, 60], [-20, 60], [20, -40], [-130, -40], [100, 30], [-60, -100], [130, 100], [-180, 120]]; for (const [x, z] of bunnies) Animal.spawn('rabbit', x, z);
@@ -4666,7 +4690,7 @@ const Game = {
     const P = this.player, H = this.horse; Input.tick(dt);
     if (!Dialog.open && !UI.panelOpen) { if (Input.hit('tab') || Input.hit('i') || Input.tb('menu')) UI.open('items'); else if (Input.hit('m')) UI.open('map'); else if (Input.hit('j')) UI.open('journal'); }
     else if (UI.panelOpen && (Input.hit('escape') || Input.hit('tab') || Input.tb('menu'))) UI.close();
-    if (UI.panelOpen && !Missions.failing) { UI.update(0); return; } // menus pause the world
+    if (UI.panelOpen || Missions.failing) { UI.update(0); return; } // menus and the fail screen pause the world
     Sky.update(dt); P.update(dt); H.update(dt); Fishing.update(dt);
     for (const n of NPC.all) { const d = Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.update(dt, d > 110 && !n.tags.includes('story')); }
     for (const a of Animal.all) a.update(dt, a.distP > 150);
@@ -4698,7 +4722,7 @@ class CamRig {
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
     dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { dx *= 0.55; dy *= 0.55; } // finer thumb aim // zoomed in: same feel per degree
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
-    if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') return this.convo(dt);
+    if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') { if (P.rig && P.rig.root) P.rig.root.visible = true; return this.convo(dt); }
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
     // auto-recenter behind the direction of travel when the player isn't steering the camera
     const moveSp = riding ? H.speed : Math.hypot(P.vel.x, P.vel.z);
@@ -4724,11 +4748,12 @@ class CamRig {
     // spring arm: walls (raycast), solid colliders and terrain (sampled along the arm); pull in fast, ease back out slowly
     this.ray.set(base, toC); this.ray.far = len;
     const hit = this.ray.intersectObjects(this.blockers(base), false)[0]; let d = hit ? Math.max(0.5, hit.distance - 0.3) : len;
-    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && this.solidAt(x, y, z))) { d = Math.max(0.5, t - d / 8); break; } }
+    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && (this.solidAt(x, y, z) || World.inCanopy(x, y, z)))) { d = Math.max(0.5, t - d / 8); break; } }
     this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = V[4].copy(base).addScaledVector(toC, Math.min(this.collD, len));
     const gh = Terrain.height(p.x, p.z) + 0.35; if (p.y < gh) p.y = gh;
     if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-(aim ? 60 : 18) * dt)); // no trailing while aiming: the reticle stays glued to the mouse
     this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
+    if (P.rig && P.rig.root) P.rig.root.visible = this.pos.distanceTo(base) > 0.85 || P.state === 'ride'; // pressed into a corner: don't look out from inside Wren's head
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
     const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }

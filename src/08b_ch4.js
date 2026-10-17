@@ -184,7 +184,7 @@ const CH4 = {
 };
 
 Missions.def({ id: 'ch4', type: 'main', chapter: 4, title: 'Night at Willow Bridge', giver: 'cora', summary: 'Sheriff Pike asked Cora for a late supper and a full flask. He\'s meeting someone at midnight.',
-  prereq: () => ['done', 'failed'].includes(Missions.st('m3').status),
+  prereq: () => ['done', 'failed', 'unavailable'].includes(Missions.st('m3').status), // the story goes on even if the Greers' stand never happened
   blocked: () => S.chars.pike === 'dead' ? 'Sheriff Pike is dead. Whatever he was hiding died with him.' : S.chars.pike === 'left' || S.chars.pike === 'jailed' ? 'Sheriff Pike is gone from the valley.' : null,
   start: () => { const n = NPC.byKey(S.chars.cora === 'dead' ? 'mae' : 'cora'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : null; },
   stages: [

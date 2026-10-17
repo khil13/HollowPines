@@ -42,6 +42,7 @@ const Post = {
               occ += max(0.0, dot(N, v / dist) - 0.2) * (1.0 - smoothstep(Rw * 0.7, Rw * 1.8, dist)); }
             c *= 1.0 - uAO * clamp(occ / 8.0 * 1.6, 0.0, 1.0) * (1.0 - smoothstep(20.0, 60.0, z)); }
           c += texture2D(tBloom, vUv).rgb * uBloom;
+          c = c * (1.0 + uNight * 0.45) + vec3(0.010, 0.016, 0.032) * uNight; // night: moonlit, not black
           if (uGod > 0.0) c += texture2D(tGod, vUv).rgb * uGodCol * uGod;
           // grade: gentle S-curve contrast, richer colour, cool shadows and warm highlights (warmer at golden hour)
           float l = luma(c); c = mix(vec3(l), c, 1.12 + uWarm * 0.08); c = (c - 0.5) * 1.08 + 0.5;

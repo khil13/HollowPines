@@ -59,7 +59,7 @@ const Sky = {
     this.glare.position.copy(this.sunM.position); this.glare.material.opacity = sy > -0.05 ? (0.08 + dusk * 0.4) * (1 - this.cloud * 0.8) : 0; this.glare.scale.setScalar(70 + dusk * 90); WIND.uTime.value += dt; WIND.uStrength.value = damp(WIND.uStrength.value, storm ? 2.8 : raining ? 2.0 : this.cloud > 0.4 ? 1.4 : 1, 0.3, dt);
     // warm low sun and long shadows at golden hour; at night the 'sun' becomes a dim blue moonlight and the world goes properly dark
     this.sun.intensity = day * (1 - this.cloud * 0.55) * (0.95 + dusk * 0.2) + (1 - day) * 0.16; this.sun.color.set('#fff1d6').lerp(new THREE.Color('#ff8a3a'), dusk).lerp(new THREE.Color('#8fa8e0'), 1 - day); if (day < 0.2) this.sun.position.set(P.x - sx * 80, P.y + 60, P.z - 30);
-    this.hemi.intensity = 0.13 + day * 0.47; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.05 + day * 0.07 + this.flash * 1.4; if (this.flash > 0.05) Game.scene.background = hor.clone().lerp(new THREE.Color('#e8eeff'), this.flash * 0.8);
+    this.hemi.intensity = 0.17 + day * 0.43; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.065 + day * 0.055 + this.flash * 1.4; if (this.flash > 0.05) Game.scene.background = hor.clone().lerp(new THREE.Color('#e8eeff'), this.flash * 0.8);
     this.cloudMat.color.set(raining ? '#8e979e' : '#ffffff'); for (const c of this.clouds.children) { c.position.x += dt * 1.5; if (c.position.x > 280) c.position.x = -280; c.visible = Math.random() < 2 && (c.id % 3 < 1 + this.cloud * 2); }
     this.rain.visible = raining; if (raining) { this.rain.position.set(Game.cam.pos.x, Game.cam.pos.y - 8, Game.cam.pos.z); const a = this.rain.geometry.attributes.position.array; for (let i = 0; i < a.length; i += 6) { a[i + 1] -= dt * 26; a[i + 4] -= dt * 26; if (a[i + 1] < 0) { a[i + 1] += 22; a[i + 4] += 22; } } this.rain.geometry.attributes.position.needsUpdate = true; }
     const lampOn = h > 19 || h < 6.2; for (const l of Game.lamps) l.intensity = lampOn ? 1.15 + (1 - day) * 0.6 : 0; // lanterns matter once it's dark
@@ -102,7 +102,7 @@ function gatherable(kind, x, z) {
   let fruit; if (kind === 'berries') { g.add(M(GEO.ico, '#4f8a3c', 0.7, 0.55, 0.7, 0, 0.45, 0)); fruit = new THREE.Group(); for (let i = 0; i < 9; i++) { const a = i * 2.4; fruit.add(M(GEO.sphLo, '#5b4a9c', 0.07, 0.07, 0.07, Math.cos(a) * 0.55, 0.45 + Math.sin(i) * 0.3, Math.sin(a) * 0.55)); } g.add(fruit); Col.circle(x, z, 0.5, y, y + 1, { block: false }); }
   else { fruit = new THREE.Group(); for (let i = 0; i < 6; i++) { const l = M(GEO.cone, '#7fa7a0', 0.06, 0.5, 0.06, Math.cos(i) * 0.12, 0.25, Math.sin(i) * 0.12); l.rotation.z = Math.cos(i) * 0.3; fruit.add(l); } fruit.add(M(GEO.sphLo, '#6a7fd0', 0.05, 0.05, 0.05, 0, 0.5, 0)); g.add(fruit); }
   const o = { id, kind, x, z, y, fruit }; Gather.push(o);
-  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
+  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Skills.gain('survive', 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
   return o;
 }
 const DoorSys = {
@@ -250,6 +250,9 @@ const World = {
       T[kind].push([x, h, z, s, R() * TAU, R()]); Col.circle(x, z, (kind === 'oak' ? 0.42 : 0.32) * s + 0.08, h - 1, h + 6, { block: true, cover: true });
     }
     for (const [x, z] of [[-14, 40], [-70, 44], [-28, -6], [-80, 0], [-5, 34]]) { const h = Terrain.height(x, z); T.oak.push([x, h, z, 1.25, R() * TAU, R()]); Col.circle(x, z, 0.6, h - 1, h + 6, { block: true, cover: true }); }
+    // canopy volumes (centre height and radius per tree kind) so the camera stops at the leaves instead of passing through them
+    const CAN = { pine: [2.9, 1.9], fir: [3.2, 1.4], oak: [4.2, 2.6], aspen: [4.0, 1.3] }; this.canopy = new Map();
+    for (const k in CAN) for (const [x, h, z, s] of T[k]) { const key = Math.floor(x / 8) * 1000 + Math.floor(z / 8); if (!this.canopy.has(key)) this.canopy.set(key, []); this.canopy.get(key).push([x, h + CAN[k][0] * s, z, CAN[k][1] * s]); }
     const bark = toon('#6b4a2f'), barkL = toon('#e7e2d6'), barkD = toon('#857b70');
     const W = (c, amp, leaf = 0) => windMat(c, amp, leaf);
     inst(cylUp, bark, T.pine, (d, [x, h, z, s]) => { d.position.set(x, h - 0.2, z); d.scale.set(0.24 * s, 2.2 * s, 0.24 * s); d.rotation.set(0, 0, 0); });
@@ -298,6 +301,7 @@ const World = {
     const RG = mulberry(5); let nb = 0, ns = 0; for (let i = 0; i < 600 && (nb < 34 || ns < 30); i++) { const x = (RG() - 0.5) * 420, z = (RG() - 0.5) * 420; if (avoid(x, z)) continue; const h = Terrain.height(x, z); if (h < WORLD.waterY + 0.6 || h > 20) continue; if (nb < 34 && RG() < 0.5) { gatherable('berries', x, z); nb++; } else if (ns < 30) { gatherable('sage', x, z); ns++; } }
     for (const [x, z] of [[-30, 48], [-80, 0], [-20, -10], [-160, -70], [-60, -128], [-110, 60]]) gatherable(x % 20 ? 'berries' : 'sage', x, z);
   },
+  inCanopy(x, y, z) { if (!this.canopy) return false; const i0 = Math.floor(x / 8), j0 = Math.floor(z / 8); for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const l = this.canopy.get(i * 1000 + j); if (l) for (const c of l) { const dx = x - c[0], dy = (y - c[1]) * 1.25, dz = z - c[2]; if (dx * dx + dy * dy + dz * dz < c[3] * c[3]) return true; } } return false; },
   cullChunks() { const P = Game.cam.pos, f = Game.cam.dir(), r = { low: 55, medium: 70, high: 90 }[Game.quality] || 80; for (const g of this.grassChunks || []) { const dx = g.userData.c.x - P.x, dz = g.userData.c.z - P.z, d = Math.hypot(dx, dz); g.visible = d < r + 28 && (d < 40 || (dx * f.x + dz * f.z) / d > -0.2); } },
   horizon() {
     const sc = Game.scene, R = mulberry(77), g = new THREE.Group(); sc.add(g);

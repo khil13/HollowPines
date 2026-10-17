@@ -65,7 +65,7 @@ const Interiors = {
     for (const [x, z] of [[-5.3, -1.5], [2.0, 3.6], [-1.6, 3.6]]) this.put(b, GEO.cyl, '#b08a3a', 0.18, 0.25, 0.18, x, 0, z);
     { const x = -5.64, y = 2.4, z = -1.0; this.put(b, GEO.box, '#5a3a22', 0.05, 0.4, 0.3, x, y, z); for (const s of [-1, 1]) { this.put(b, GEO.box, '#e6dcc5', 0.05, 0.5, 0.05, x + 0.05, y + 0.35, z + s * 0.25, { rx: s * 0.6 }); this.put(b, GEO.box, '#e6dcc5', 0.05, 0.3, 0.05, x + 0.05, y + 0.55, z + s * 0.45, { rx: s * 1.1 }); } } // antlers
     this.frame(b, 5.64, 1.9, 1.2, -Math.PI / 2, 1.4, 0.9, '#c97b5a'); this.frame(b, 5.64, 1.9, -2.0, -Math.PI / 2, 0.8, 1.0, '#6a7fb0');
-    this.barrel(b, 4.9, -3.6, false); this.barrel(b, 5.3, -2.9, false); // decorative: Cora walks round the end of the bar this.lamp(b, -3.5, -2.6, 2.95); this.lamp(b, 3.5, -2.6, 2.95);
+    this.barrel(b, 4.9, -3.6, false); this.barrel(b, 5.3, -2.9, false); /* decorative: Cora walks round the end of the bar */ this.lamp(b, -3.5, -2.6, 2.95); this.lamp(b, 3.5, -2.6, 2.95);
   },
   mae(b) { if (!b) return; // door N: the back wall is +z
     this.rug(b, 0.3, 0.3, 2.4, 1.8, '#9dbf8a', '#c97b5a'); this.table(b, 1.6, -0.6, 1.2, 0.8); this.chair(b, 1.0, -0.6, Math.PI / 2); this.chair(b, 2.25, -0.6, -Math.PI / 2);

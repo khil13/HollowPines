@@ -100,11 +100,11 @@ class Player {
     if (this.canAct()) {
       if (Input.hit('c') || Input.tb('crouch')) { this.crouch = !this.crouch; Input.setBtnState('crouch', this.crouch); }
       if (Input.hit('1')) this.setWeapon('fists'); if (Input.hit('2') && S.weapons.revolver) this.setWeapon('revolver'); if (Input.hit('3') && S.weapons.rifle) this.setWeapon('rifle');
-      if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon();
+      if ((Input.hit('v') || Input.tb('weapon')) && !this.carry) this.cycleWeapon();
       if (Input.hit('h') || Input.tb('whistle')) this.whistle();
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (Input.hit('b') || Input.tb('camp')) Camp.make();
-      if ((Input.hit('x') || Input.tb('dodge')) && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
+      if ((Input.hit('x') || Input.tb('dodge')) && !this.grab && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
     const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !this.grab && !aiming && this.state === 'ground'; this.blockT = this.blocking ? (this.blockT || 0) + dt : 0; // how long the guard has been up (a fresh one counters)
@@ -183,6 +183,7 @@ class Player {
     // brandishing at townsfolk
     if (aiming && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
     if (!atk || this.cool > 0 || this.anim.busy()) return;
+    if (this.carry) return; // hands full
     if (this.weapon !== 'fists' && (aiming || this.state === 'swim' ? false : true) && !aiming) { return this.shoot(false); }
     if (this.weapon !== 'fists' && aiming) return this.shoot(true);
     if (this.carry || this.grab) return; if (this.blocking && Brawl.tryGrab(this)) return; if (S.p.st < 6) { UI.toast('Too tired to swing', 'bad'); return; }
@@ -236,10 +237,10 @@ class Player {
     if (this.state !== 'ride') { const back = from && from.pos && Math.cos(angDiff(this.yaw, Math.atan2(from.pos.x - this.pos.x, from.pos.z - this.pos.z))) < 0; this.anim.play(back ? 'hitB' : 'hit', { replace: false }); } UI.flash(); Game.shake(0.25); this.anim.expr = 'alarm'; setTimeout(() => this.anim.expr = 'calm', 900);
     if (S.p.hp <= 0) this.knockout(from);
   }
-  knockout(from) { S.p.hp = 0; this.state = 'down'; this.downT = 0; this.dropCarry(); if (Game.horse.rider === this) Game.horse.rider = null; UI.toast('You were knocked out', 'bad'); if (Missions.active) setTimeout(() => Missions.fail('Wren was knocked out.'), 1800); }
+  knockout(from) { this.koBy = from; S.p.hp = 0; this.state = 'down'; this.downT = 0; this.dropCarry(); if (Game.horse.rider === this) Game.horse.rider = null; UI.toast('You were knocked out', 'bad'); if (Missions.active) { const id = Missions.active, gen = Game.gen; setTimeout(() => { if (Missions.active === id && Game.gen === gen) Missions.fail('Wren was knocked out.'); }, 1800); } }
   updDown(dt) { this.downT += dt; this.anim.update(dt, { state: 'down', speed: 0 }); this.place();
     if (this.downT > 3.5 && !Missions.failing) { this.state = 'ground'; this.anim.play('standup'); S.p.hp = S.p.maxHp * 0.5; const lose = Math.round(S.money * 0.1 * 100) / 100; if (lose > 0) Inv.money(-lose, 'lost while out cold');
-      if (Town.huntersNear()) Town.captured(); else if (S.wanted) { Law.surrender(); } else { Sky.advance(3); this.teleport(-30, 34, 0); UI.toast('Doc Pell patched you up.', ''); } for (const n of NPC.all) if (n.hostileToPlayer && !n.tags.includes('story')) n.calm(); } }
+      if (this.koBy && this.koBy.tags && this.koBy.tags.includes('hunter')) Town.captured(); /* only the hunters themselves haul you in */ else if (S.wanted) { Law.surrender(); } else { Sky.advance(3); this.teleport(-30, 34, 0); UI.toast('Doc Pell patched you up.', ''); } for (const n of NPC.all) if (n.hostileToPlayer && !n.tags.includes('story')) n.calm(); } }
   // carrying world objects (strongbox, hogtied outlaw)
   pickCarry(obj) { this.anim.play('pickup', { on: { grab: () => { this.carry = obj; obj.carried = true; if (obj.onPick) obj.onPick(); Sfx.pickup(); } } }); if (this.weapon !== 'fists') this.weapon = 'fists'; }
   dropCarry() { if (!this.carry) return; const c = this.carry; this.carry = null; c.carried = false; const f = fwd(this.yaw); const x = this.pos.x + f.x * 0.9, z = this.pos.z + f.z * 0.9; c.mesh.position.set(x, Col.ground(x, z, this.pos.y + 1) + (c.h || 0.2), z); if (c.onDrop) c.onDrop(x, z); }
@@ -356,7 +357,7 @@ const TOWN_NODES = {}; const PLACES = {};
 const NPC = {
   all: [], byKey(k) { return this.all.find(n => n.key === k); },
   spawn(cfg) { const n = new Person(cfg); this.all.push(n); return n; },
-  despawn(n) { Game.scene.remove(n.rig.root); if (n.anim.dispose) n.anim.dispose(); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
+  despawn(n) { if (n.mount) { const h = n.mount; n.mount = null; h.rider = null; h.remove(); } Game.scene.remove(n.rig.root); if (n.anim.dispose) n.anim.dispose(); Interact.remove(n.it); const i = HURTABLE.indexOf(n); if (i >= 0) HURTABLE.splice(i, 1); this.all = this.all.filter(x => x !== n); },
 };
 function townPath(fx, fz, tx, tz) {
   // BFS over town graph from nearest node to node nearest target
@@ -384,7 +385,7 @@ class Person {
       if (this.witness && this.state !== 'combat') return [{ label: `Pay off ($8)`, disabled: S.money < 8, fn: () => this.payoff() }, { label: 'Intimidate', crime: true, fn: () => this.intimidate() }];
       return [];
     }
-    if (this.isAsleep()) return []; // no prompts on a sleeper (and none crowding the lockbox beside the bedroll)
+    if (this.isAsleep()) return ['mae', 'ezra', 'pike', 'doc', 'cora'].includes(this.key) && !p.crouch ? [{ label: `Wake ${this.name}`, fn: () => { this.wakeT = 60; this.face(p.pos); this.say(pick(['Mm? Oh, it\'s you. What is it?', 'This had better be important.', 'Wren? At this hour?']), 3); } }] : []; // townsfolk you know can be woken (standing, not sneaking); none crowding the lockbox beside a bedroll
     if (this.state === 'handsup') return Game.player.aiming && !this.robbed ? [{ label: `Rob ${this.name}`, crime: true, fn: () => this.rob() }] : [];
     const o = []; const tree = this.talk ? this.talk(this) : null;
     if (tree) o.push({ label: `Talk to ${this.name}`, fn: () => Dialog.start(this, tree) });
@@ -418,7 +419,7 @@ class Person {
   intimidate() { Game.player.anim.play('taunt'); const ok = Math.random() < (Game.player.weapon !== 'fists' ? 0.8 : 0.5); if (ok) { this.witness = null; this.state = 'routine'; this.say('A-alright. I never saw a thing.'); Rep.honor(-3, 'intimidation'); if (this.key) Rep.rel(this.key, -12); } else { this.say('You don\'t scare me!'); this.state = 'report'; this.sp = 6; } }
   investigate(pos) { if (this.hostileToPlayer || this.lawman && S.wanted) return; if (this.brave > 0.5 && this.state === 'routine') { this.state = 'investigate'; this.invPos = pos; this.invT = 10; this.path = null; this.say('What was that?'); } }
   hearShot(pos, src) {
-    if (!this.alive || this.downed) return; if (this.group && this.state !== 'combat') { this.alertGroup(src && src.isPlayer ? src.pos : pos); return; }
+    if (!this.alive || this.downed || this.panicked) return; if (this.group && this.state !== 'combat') { this.alertGroup(src && src.isPlayer ? src.pos : pos); return; }
     if (this.hostileToPlayer || this.state === 'combat') return;
     if (this.lawful && !this.lawman && Town.inTown(pos.x, pos.z) && this.brave < 0.7 && Town.panic(this, pos)) return; // in town folks run indoors
     if (this.lawman && src && src.isPlayer && Town.inTown(pos.x, pos.z)) Town.lawCheck(this, pos);
@@ -426,23 +427,24 @@ class Person {
     if (this.lawman && !S.wanted && src && src.isPlayer && Math.hypot(pos.x - this.pos.x, pos.z - this.pos.z) < 35) this.investigate(pos);
   }
   fightPlayer(fists) { this.hostileToPlayer = true; this.state = 'combat'; this.fists = fists || !this.gun; this.anim.expr = 'angry'; if (this.gunM && !this.fists) this.gunM.visible = true; }
-  pursue() { this.state = 'pursue'; this.path = null; this.warned = false; if (this.gunM) this.gunM.visible = true; this.anim.expr = 'angry'; }
+  pursue() { this.state = 'pursue'; this.path = null; this.warned = false; if (this.gunM && this.gun) this.gunM.visible = true; this.anim.expr = 'angry'; }
   calm() { this.hostileToPlayer = false; if (this.alive && !this.downed && !this.tags.includes('story')) this.state = 'routine'; this.path = null; if (this.gunM) this.gunM.visible = false; this.anim.expr = 'calm'; this.warned = false; }
   alertGroup(pos) { for (const n of NPC.all) if (n.group === this.group && n.alive && !n.downed && n.state !== 'combat' && Math.hypot(n.pos.x - this.pos.x, n.pos.z - this.pos.z) < 45) { n.fightPlayer(); n.alert = 1; n.lastSeen = pos ? { x: pos.x, z: pos.z } : null; } Missions.emit('alarm', { group: this.group }); }
   takeHit(o) {
     if (!this.alive) return; const fromP = o.from && o.from.isPlayer;
     if (fromP && o.melee && !this.hostileToPlayer && this.state !== 'combat' && (this.alert || 0) < 0.5 && Game.player.crouch && !this.seesPlayer && (this.group || !this.lawful)) { this.knockdown(); Sfx.punch(); UI.toast('Silent takedown', 'good'); return; }
     this.hp -= o.dmg * (o.melee && this.stunT > 0 ? 1.5 : 1); this.anim.play('hit', { replace: false }); this.anim.expr = 'alarm'; if (o.gun) FX.impact({ x: this.pos.x, y: this.pos.y + (o.zone === 'head' ? 1.55 : o.zone === 'legs' ? 0.6 : 1.1), z: this.pos.z }, 'blood'); if (o.dir) { this.pos.x += o.dir.x * (o.melee ? 0.35 : 0.15); this.pos.z += o.dir.z * (o.melee ? 0.35 : 0.15); }
-    if (fromP && this.lawful && !this.hostileToPlayer && !this.witness) { Law.crime(this.hp <= 0 && !o.melee ? 'murder' : 'assault', this.pos, { victim: this, noise: o.gun ? 60 : 0 }); }
+    if (this.hp <= 0 && STORY.essential(this)) this.knockoutOnly = true; // essential story characters go down, not out
+    if (fromP && this.lawful && !this.hostileToPlayer && !this.witness) { Law.crime(this.hp <= 0 && !o.melee && !this.knockoutOnly ? 'murder' : 'assault', this.pos, { victim: this, noise: o.gun ? 60 : 0 }); }
     if (fromP && this.group) this.alertGroup(Game.player.pos);
     if (fromP && this.lawful && !this.lawman && this.alive && this.hp > 0 && o.melee && this.brave > 0.55) { this.fightPlayer(true); this.say(pick(['You want a fight? You got one!', 'Why you...!'])); }
     Brawl.react(this, o);
     if (this.hp <= 0) { if (o.melee || this.knockoutOnly) this.knockdown(); else { this.setDead(); if (fromP) { S.stats.kills++; Missions.emit('kill', { npc: this }); } } }
   }
-  knockdown() { this.downed = true; this.downT = this.tags.includes('bounty') || this.tags.includes('outlaw') ? 1e9 : 30; /* hideout outlaws stay down */ this.state = 'down'; this.hp = 0; Sfx.burst(250, 0.3, 0.2); Missions.emit('ko', { npc: this }); if (this.gunM) this.gunM.visible = false; }
+  knockdown() { if (this.panicked) { this.panicked = this.hid = this.crouchC = false; this.script = null; } this.stunT = 0; this.floorT = 0; this.shoveV = null; this.regun = null; this.pickT = 0; if (this.anim.actions) this.anim.actions = this.anim.actions.filter(a => a.name !== 'punch' && a.name !== 'hook'); this.downed = true; this.downT = this.tags.includes('bounty') || this.tags.includes('outlaw') ? 1e9 : 30; /* hideout outlaws stay down */ this.state = 'down'; this.hp = 0; Sfx.burst(250, 0.3, 0.2); Missions.emit('ko', { npc: this }); if (this.gunM) this.gunM.visible = false; }
   setDead(silent) { this.alive = false; this.state = 'dead'; this.lootable = !silent; if (this.key && !this.tags.includes('generic')) { S.chars[this.key] = 'dead'; if (!silent) journal(`${this.name} is dead.`, 'fate'); } if (this.gunM) this.gunM.visible = false; this.anim.expr = 'calm'; }
-  lootBody(p) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.looted = true; const cash = Math.round(rand(1, 6) * 100) / 100; Inv.money(cash, 'from the body'); if (this.gun) Inv.add(this.gun === 'rifle' ? 'ammo_rifle' : 'ammo_rev', 4); if (this.loot) this.loot(); if (this.lawful) Law.crime('looting', this.pos, {}); }, 1300); }
-  hogtie(p) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.hogtied = true; UI.toast(`${this.name} is hogtied`); Missions.emit('hogtie', { npc: this }); }, 1500); }
+  lootBody(p) { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); this.looted = true; const cash = Math.round(rand(1, 6) * 100) / 100; Inv.money(cash, 'from the body'); if (this.gun) Inv.add(this.gun === 'rifle' ? 'ammo_rifle' : 'ammo_rev', 4); if (this.loot) this.loot(); if (this.lawful) Law.crime('looting', this.pos, {}); }, 1300); }
+  hogtie(p) { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); this.hogtied = true; UI.toast(`${this.name} is hogtied`); Missions.emit('hogtie', { npc: this }); }, 1500); }
   asCarry() { const n = this; return { id: 'npc:' + this.key, label: this.name, h: 0.3, stowable: true, mesh: this.rig.root, npc: this, onPick() { n.carried = true; }, onDrop(x, z) { n.carried = false; n.pos.set(x, Col.ground(x, z, 99), z); } }; }
   perceive() {
     const P = Game.player; const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z, d = Math.hypot(dx, dz); this.distP = d;
@@ -467,6 +469,7 @@ class Person {
     if (!this.alive) { this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); return; }
     if (this.downed) { this.downT -= dt; this.anim.update(dt, { state: 'down', speed: 0 }); this.place(); if (this.downT <= 0 && !this.hogtied) { this.downed = false; this.hp = this.maxHp * 0.5; this.anim.play('standup'); if (this.lawful && !this.lawman) { this.state = 'report'; this.witness = { type: 'assault', value: Law.VALUES.assault, pos: { x: this.pos.x, z: this.pos.z } }; this.say('You\'ll pay for that!'); } else this.fightPlayer(); } return; }
     if (Brawl.npcTick(this, dt)) return; // grabbed, shoved to the ground, or reeling
+    if (this.panicked && this.state !== 'scripted') { this.panicked = this.hid = this.crouchC = false; this.script = null; } // pulled out of hiding (knocked down, witnessing, a mission): forget the panic
     this.perceiveT -= dt; if (this.perceiveT <= 0) { this.perceiveT = far ? 1 : 0.2; this.perceive(); }
     if (far && this.state === 'routine' && !this.group) { const e = this.schedEntry(); if (e) { const pl = PLACES[e[2]]; if (pl && Math.hypot(pl.x - this.pos.x, pl.z - this.pos.z) > 2) { this.pos.set(pl.x, Col.ground(pl.x, pl.z, 99), pl.z); this.yaw = pl.yaw || 0; this.path = null; } this.act = pl ? pl.act : 'idle'; this.atPlace = true; } this.place(); return; }
     let animState = 'ground'; this.poseClip = null;
@@ -512,7 +515,7 @@ class Person {
     if (!P.alive || P.state === 'down') { this.sp = 0; return; }
     if (this.regun && Brawl.regunTick(this, dt)) return;
     if (this.fists || !this.gun || d < 2.4) { // melee
-      if (d > 1.5) this.moveTo(P.pos.x, P.pos.z, 4.6, dt, 1.4); else { this.sp = 0; this.shootT -= dt; if (this.shootT <= 0) { this.shootT = rand(0.9, 1.6); Brawl.windup(this); this.anim.play(pick(['punch', 'hook']), { on: { hit: () => { if (Math.hypot(P.pos.x - this.pos.x, P.pos.z - this.pos.z) < 1.9 && !this.stunT && !Brawl.counter(P, this)) { P.hurt(this.fists ? 9 : 12, this, 'melee'); Sfx.punch(); } } } }); } }
+      if (d > 1.5) this.moveTo(P.pos.x, P.pos.z, 4.6, dt, 1.4); else { this.sp = 0; this.shootT -= dt; if (this.shootT <= 0) { this.shootT = rand(0.9, 1.6); Brawl.windup(this); this.anim.play(pick(['punch', 'hook']), { on: { hit: () => { if (Math.hypot(P.pos.x - this.pos.x, P.pos.z - this.pos.z) < 1.9 && !(this.stunT > 0) && this.alive && !this.downed && !this.grabbed && this.state === 'combat' && !Brawl.counter(P, this)) { P.hurt(this.fists ? 9 : 12, this, 'melee'); Sfx.punch(); } } } }); } }
       return;
     }
     if (this.gunM) this.gunM.visible = true; this.anim.layers.aim = 1; this.anim.layers.rifle = this.gun === 'rifle' ? 1 : 0;

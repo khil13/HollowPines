@@ -51,12 +51,13 @@ const CH5 = {
       const cr = (k, nm, x, z, lk, o) => { const old = NPC.byKey(k); if (old) NPC.despawn(old); return NPC.spawn(Object.assign({ key: k, name: nm, x, z, lawful: false, state: 'scripted', wild: true, gun: 'revolver', hp: 120, maxHp: 120, tags: ['story', 'ch5', 'ally', 'crane'], look: lk }, o)); };
       cr('dutchy', 'Dutchy Moss', T_OVERLOOK.x - 3, T_OVERLOOK.z + 3, { skin: '#f0c4a0', shirt: '#b5a17a', hair: '#e2c06a', hatColor: '#8b7d6b', scale: 0.95 });
       if (S.chars.fenwick !== 'dead') cr('fenwick', 'Fenwick Crane', T_OVERLOOK.x - 5, T_OVERLOOK.z + 1, { skin: '#d9a07a', shirt: '#3b3b3b', coat: '#5a3a2a', hair: '#2b1d14', mustache: '#2b1d14', hatColor: '#1b1b1b', stout: 1.1 }, { gun: 'rifle' });
-      else cr('sal', 'Sal', T_OVERLOOK.x - 5, T_OVERLOOK.z + 1, { skin: '#b07a55', shirt: '#7a3b3b', hair: '#1b1b1b', hatColor: '#4a3b30' });
+      else if (S.chars.sal !== 'dead') cr('sal', 'Sal', T_OVERLOOK.x - 5, T_OVERLOOK.z + 1, { skin: '#b07a55', shirt: '#7a3b3b', hair: '#1b1b1b', hatColor: '#4a3b30' });
     }
     for (const a of this.allies()) { a.script = (dt, me) => this.allyAI(me, dt); a.talk = n => this.stage() === 'plan' ? this.council() : null; }
   },
   allies() { return NPC.all.filter(n => n.tags.includes('ally') && n.tags.includes('ch5') && n.alive); },
-  lead() { return NPC.byKey('marshal') || NPC.byKey('fenwick') || NPC.byKey('sal') || NPC.byKey('dutchy'); },
+  live(k) { const n = NPC.byKey(k); return n && n.alive && !n.downed ? n : null; },
+  lead() { return this.live('marshal') || this.live('fenwick') || this.live('sal') || this.live('dutchy'); }, // only the living can lead
   despawn() { for (const n of NPC.all.slice()) if (n.tags.includes('ch5')) NPC.despawn(n); },
   cleanup() { this.despawn(); if (S.chars.pike !== 'dead' && S.chars.pike !== 'left' && !NPC.byKey('pike')) World.apply(); },
 
@@ -70,9 +71,9 @@ const CH5 = {
     }
     let t = null, td = 1e9; for (const f of foes) { const d = this.dist(me.pos, f.pos); if (d < td) { td = d; t = f; } }
     if (td > 17) me.moveTo(t.pos.x, t.pos.z, 4.4, dt, 14); else { me.sp = damp(me.sp, 0, 6, dt); me.face(t.pos); }
-    me.allyAim = true; me.anim.layers.aim = 1; me.anim.layers.rifle = me.gun === 'rifle' ? 1 : 0; if (me.gunM) me.gunM.visible = true;
+    me.allyAim = true; me.anim.layers.aim = 1; me.anim.layers.rifle = me.gun === 'rifle' ? 1 : 0; if (me.gunM && me.gun && !me.fists) me.gunM.visible = true;
     me.shootT = (me.shootT ?? rand(0.6, 1.4)) - dt;
-    if (me.shootT <= 0 && td < 32) { me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
+    if (me.shootT <= 0 && td < 32 && me.gun && !me.fists) { // a disarmed ally can't shoot me.shootT = rand(1.3, 2.4); if (!Col.los(me.pos.x, me.pos.y + 1.5, me.pos.z, t.pos.x, t.pos.y + 1.2, t.pos.z)) return;
       const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); const hit = Math.random() < 0.45; FX.tracer(m, new THREE.Vector3(t.pos.x + (hit ? 0 : rand(-1.2, 1.2)), t.pos.y + 1.2, t.pos.z + (hit ? 0 : rand(-1.2, 1.2)))); Sfx.shot(me.gun === 'rifle'); me.anim.play('recoil');
       if (hit) t.takeHit({ dmg: me.gun === 'rifle' ? 45 : 32, from: me, gun: me.gun, dir: fwd(me.yaw) }); }
   },
@@ -133,7 +134,7 @@ const CH5 = {
     const c = ctx.m.c, v = NPC.byKey('vane');
     if (!v || !v.alive) return this.end(c.plan === 'cranes' ? 'cranes' : 'gun');
     if (c.plan === 'law') { const m = NPC.byKey('marshal'); if (m) { m.script = (dt, me) => { if (me.moveTo(v.pos.x, v.pos.z, 3, dt, 1.4)) { me.face(v.pos); c.cuffT = (c.cuffT || 0) + dt; if (c.cuffT > 2 && !c.ended) { me.say('Silas Vane, you\'re under arrest.', 4); this.end('law'); } } }; } else this.end('law'); }
-    else if (c.plan === 'cranes') { const k = NPC.byKey('fenwick') || NPC.byKey('sal') || NPC.byKey('dutchy'); if (k) { k.script = (dt, me) => { if (me.moveTo(v.pos.x, v.pos.z, 3.4, dt, 4)) { me.face(v.pos); c.execT = (c.execT || 0) + dt; if (c.execT > 0.4 && !c.execSaid) { c.execSaid = 1; me.say('The Cranes don\'t hold with courts, Vane.', 3); } if (c.execT > 2.2 && v.alive) { const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); FX.tracer(m, new THREE.Vector3(v.pos.x, v.pos.y + 1.2, v.pos.z)); Sfx.shot(false); v.setDead(); this.end('cranes'); } } }; } else this.end('cranes'); }
+    else if (c.plan === 'cranes') { const k = this.live('fenwick') || this.live('sal') || this.live('dutchy'); if (k) { k.script = (dt, me) => { if (me.moveTo(v.pos.x, v.pos.z, 3.4, dt, 4)) { me.face(v.pos); c.execT = (c.execT || 0) + dt; if (c.execT > 0.4 && !c.execSaid) { c.execSaid = 1; me.say('The Cranes don\'t hold with courts, Vane.', 3); } if (c.execT > 2.2 && v.alive) { const m = new THREE.Vector3(); me.rig.R.hand.getWorldPosition(m); FX.tracer(m, new THREE.Vector3(v.pos.x, v.pos.y + 1.2, v.pos.z)); Sfx.shot(false); v.setDead(); this.end('cranes'); } } }; } else this.end('cranes'); }
     else { // alone: Vane blocks the way out
       c.standoff = 0; STORY.hint('Get Eli out through the gate.');
     }
@@ -182,7 +183,7 @@ const CH5 = {
 Missions.def({ id: 'ch5', type: 'main', chapter: 5, title: 'The Ledger', giver: 'none', summary: 'Eli is held at Survey Camp 3, Tamarack Pass, up the trail north of Coyote Mill.',
   prereq: () => ['done', 'failed', 'unavailable'].includes(Missions.st('ch4').status),
   start: () => ({ x: T_TRAILHEAD.x, z: T_TRAILHEAD.z, y: Terrain.height(T_TRAILHEAD.x, T_TRAILHEAD.z) + 2.4 }),
-  tick: (dt, m) => { if (m.status === 'available' && !Missions.active && !Missions.failing && CH5.dist(Game.player.pos, T_TRAILHEAD) < 10) Missions.start('ch5'); }, // RDR2-style: riding into the marker starts it
+  tick: (dt, m) => { if (m.status === 'available' && !Missions.active && !Missions.failing && !S.wanted && !Town.hunters().some(h => h.alive && !h.downed) && CH5.dist(Game.player.pos, T_TRAILHEAD) < 10) Missions.start('ch5'); } /* not with the law or hunters on your tail */, // RDR2-style: riding into the marker starts it
   stages: [
     { id: 'ride', text: 'Ride up the trail to Tamarack Pass.', enter: ctx => { if (ctx.resumed && !ctx.rew) return CH5.rewind(ctx); CH5.spawn(); },
       objectives: [O.goto('overlook', 'Ride to the overlook below Survey Camp 3', T_OVERLOOK.x, T_OVERLOOK.z, 9)] },

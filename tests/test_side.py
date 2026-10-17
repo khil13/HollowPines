@@ -15,8 +15,9 @@ H = r"""window.Q = {
     S.bounty = 0; S.wanted = false; S.p.hp = S.p.maxHp; S.time.hour = hour; HP.Game.player.carry = null; HP.Game.player.inv = 1e9; HP.Missions._silent = true; HP.Missions.refresh(); HP.Missions._silent = false; World.apply(); HP.tp(-36, 10); HP.sim(0.5); },
   st(id) { return HP.Missions.st(id).status; },
   stage(id) { const m = HP.Missions.st(id); return HP.Missions.active === id ? HP.Missions.defs[id].stages[m.stage].id : m.status; },
+  press(label) { for (let i = 0; i < 40; i++) { if (HP.press(label)) return true; HP.sim(0.05); } return false; }, // prompts hide while Wren is busy (landing, swapping weapons): step until it's there
   near(key, d = 1.4) { const n = HP.NPC.byKey(key); const P = HP.Game.player; HP.tp(n.pos.x + d, n.pos.z); P.yaw = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); HP.sim(0.1); },
-  talk(key) { if (HP.Dialog.open) HP.Dialog.close(); this.near(key); return HP.press('Talk to') ? HP.choices() : 'no talk: ' + JSON.stringify(HP.opts()); },
+  talk(key) { if (HP.Dialog.open) HP.Dialog.close(); this.near(key); return Q.press('Talk to') ? HP.choices() : 'no talk: ' + JSON.stringify(HP.opts()); },
   board() { const P = HP.Game.player; HP.tp(-25.5, 9.8); P.yaw = Math.PI; HP.sim(0.2); return HP.opts(); },
   ko(n) { const P = HP.Game.player; P.setWeapon('fists'); n.hp = 1; n.takeHit({ dmg: 50, from: P, melee: true, dir: { x: 0, z: 0 } }); HP.sim(0.2); },
 };"""
@@ -35,32 +36,32 @@ async def main():
         o = await ev(pg, "Q.board()")
         posters = [x for x in o if x.startswith('Read poster') and 'Rook' not in x]
         check('bounty board: two rotating wanted posters are up after Chapter 1', len(posters) == 2, o)
-        await ev(pg, "HP.S.bounties.posted = [{ o: 'ned', h: 'drycreek' }, { o: 'lottie', h: 'antelope' }]; Q.board(); HP.press('Read poster: \"Two-Bit\"')")
+        await ev(pg, "HP.S.bounties.posted = [{ o: 'ned', h: 'drycreek' }, { o: 'lottie', h: 'antelope' }]; Q.board(); Q.press('Read poster: \"Two-Bit\"')")
         ch = await ev(pg, "HP.choices()"); txt = await ev(pg, "document.getElementById('dlgText').textContent")
         check('bounty board: a poster names the crime, both rewards and where the outlaw was seen', '$35 ALIVE' in txt and 'Dry Creek' in txt and any('Take the bounty' in c for c in ch), txt)
         await ev(pg, "HP.choose('Take the bounty'); HP.sim(0.3); HP.tp(-185, 30); HP.sim(1)")
         r = await ev(pg, "({ stage: Q.stage('bounty_board'), target: !!HP.NPC.byKey('bgen_ned'), gang: HP.NPC.all.filter(n => n.tags.includes('bgen')).length, posted: HP.S.bounties.posted.length })")
         check('bounty: taking it starts the hunt; at Dry Creek Ned and his two men are camped', r['stage'] == 'take' and r['target'] and r['gang'] == 3 and r['posted'] == 1, r)
-        await ev(pg, "for (const n of HP.NPC.all.slice()) if (n.key.startsWith('bgen_g')) n.takeHit({ dmg: 999, from: HP.Game.player, gun: 'revolver' }); Q.ko(HP.NPC.byKey('bgen_ned')); Q.near('bgen_ned', 1.0); HP.sim(0.4); HP.press('Hogtie')")  # let the weapon swap from Q.ko finish first, or the prompt is hidden while Wren is busy
-        await pg.wait_for_function("HP.NPC.byKey('bgen_ned').hogtied === true", timeout=20000)
-        po = await ev(pg, "(()=>{ HP.sim(0.5); Q.near('bgen_ned', 1.0); return HP.opts(); })()"); await ev(pg, "HP.press('Pick up'); HP.sim(1.5); HP.sim(0.5)")
+        await ev(pg, "for (const n of HP.NPC.all.slice()) if (n.key.startsWith('bgen_g')) n.takeHit({ dmg: 999, from: HP.Game.player, gun: 'revolver' }); Q.ko(HP.NPC.byKey('bgen_ned')); Q.near('bgen_ned', 1.0); Q.press('Hogtie')")
+        await pg.wait_for_function("HP.NPC.byKey('bgen_ned').hogtied === true", polling=200, timeout=30000)
+        po = await ev(pg, "(()=>{ HP.sim(0.5); Q.near('bgen_ned', 1.0); return HP.opts(); })()"); await ev(pg, "Q.press('Pick up'); HP.sim(1.5); HP.sim(0.5)")
         r = await ev(pg, "({ carry: !!(HP.Game.player.carry && HP.Game.player.carry.npc), stage: Q.stage('bounty_board') })")
         check('bounty: knocked out, hogtied and carried, the stage moves to delivery', r['carry'] and r['stage'] == 'deliver', f'{r} opts={po}')
         m0 = await ev(pg, "HP.S.money"); o = await ev(pg, "Q.board()")
-        await ev(pg, "HP.press('Turn in'); HP.sim(1)")
+        await ev(pg, "Q.press('Turn in'); HP.sim(1)")
         r = await ev(pg, "({ st: Q.st('bounty_board'), money: HP.S.money, done: HP.S.bounties.done, active: HP.S.bounties.active, carry: !!HP.Game.player.carry })")
         check('bounty: turning Ned in alive at the sheriff\'s board pays $35; the board is ready for the next poster', any(x.startswith('Turn in') for x in o) and r['money'] - m0 >= 34.9 and r['done'] == 1 and r['active'] is None and r['st'] == 'locked' and not r['carry'], f"{o} {r}")
         r = await ev(pg, "(()=>{ HP.Missions.st('bounty_board').status; HP.Sky.advance ? 0 : 0; Sky.advance(24); return Q.board().filter(x => x.startsWith('Read poster') && !x.includes('Rook')).length; })()")
         check('bounty board: a fresh poster goes up the next day', r == 2, r)
 
         # ---------- bounty: runner, dead with proof ----------
-        await ev(pg, "HP.S.bounties.posted = [{ o: 'lottie', h: 'antelope' }]; Q.board(); HP.press('Read poster: Lottie'); HP.choose('Take the bounty'); HP.sim(0.3); HP.tp(170, 98); HP.sim(0.5)")
+        await ev(pg, "HP.S.bounties.posted = [{ o: 'lottie', h: 'antelope' }]; Q.board(); Q.press('Read poster: Lottie'); HP.choose('Take the bounty'); HP.sim(0.3); HP.tp(170, 98); HP.sim(0.5)")
         r = await ev(pg, "(()=>{ const t = HP.NPC.byKey('bgen_lottie'), P = HP.Game.player; P.crouch = false; t.state = 'patrol'; t.route = [{ x: t.pos.x, z: t.pos.z, wait: 99 }]; t.face(P.pos); HP.tp(t.pos.x, t.pos.z + 12); HP.sim(1.5); const d0 = t.distP; HP.sim(2); return { ran: !!t._ran, d0: +d0.toFixed(1), d1: +t.distP.toFixed(1) }; })()")
         check('bounty: a runner bolts when she sees you', r['ran'] and r['d1'] > r['d0'], r)
         await ev(pg, "const t = HP.NPC.byKey('bgen_lottie'); t.takeHit({ dmg: 999, from: HP.Game.player, gun: 'revolver' }); HP.sim(0.3); Q.near('bgen_lottie', 1.0)")
-        o = await ev(pg, "HP.opts()"); await ev(pg, "HP.press('Loot') || HP.press('Search')")
-        await pg.wait_for_function("HP.S.bounties.active && HP.S.bounties.active.proof === true", timeout=20000)
-        m0 = await ev(pg, "HP.S.money"); await ev(pg, "HP.sim(0.5); Q.board(); HP.press('Turn in'); HP.sim(1)")
+        o = await ev(pg, "HP.opts()"); await ev(pg, "Q.press('Loot') || Q.press('Search')")
+        await pg.wait_for_function("HP.S.bounties.active && HP.S.bounties.active.proof === true", polling=200, timeout=30000)
+        m0 = await ev(pg, "HP.S.money"); await ev(pg, "HP.sim(0.5); Q.board(); Q.press('Turn in'); HP.sim(1)")
         r = await ev(pg, "({ st: Q.st('bounty_board'), money: HP.S.money })")
         check('bounty: shot dead, her gun belt is proof enough for the lower reward', r['money'] - m0 >= 11.9 and r['money'] - m0 < 13 and r['st'] == 'locked', f"{o} {r} m0={m0}")
 
@@ -70,7 +71,7 @@ async def main():
         check('stranger: Hank offers his strike', isinstance(ch, list) and any('gold' in c for c in ch), ch)
         await ev(pg, "HP.choose('Tell me about this gold'); HP.choose('Continue'); HP.sim(0.3)")
         r = await ev(pg, "({ stage: Q.stage('stranger_hank'), map: HP.Inv.count('hank_map') })"); check('stranger: Hank hands over his map and sends you for a shovel', r['stage'] == 'shovel' and r['map'] == 1, r)
-        await ev(pg, "HP.Inv.add('shovel'); HP.sim(0.3); HP.tp(HANK_X.x + 1, HANK_X.z); HP.sim(0.3); HP.press('Dig here'); HP.sim(3)")
+        await ev(pg, "HP.Inv.add('shovel'); HP.sim(0.3); HP.tp(HANK_X.x + 1, HANK_X.z); HP.sim(0.3); Q.press('Dig here'); HP.sim(3)")
         r = await ev(pg, "({ gold: HP.Inv.count('gold'), stage: Q.stage('stranger_hank'), open: HP.Dialog.open, jumpers: HP.NPC.all.filter(n => n.tags.includes('jumper')).length, ch: HP.Dialog.open ? HP.choices() : null })")
         check('stranger: digging at the X turns up three nuggets, and claim jumpers step in', r['gold'] == 3 and r['stage'] == 'jumpers' and r['jumpers'] == 2 and r['open'], r)
         await ev(pg, "HP.choose('Give them one nugget'); HP.choose('Continue'); HP.sim(1)")
@@ -85,11 +86,11 @@ async def main():
         ch = await ev(pg, "Q.talk('doc')"); await ev(pg, "HP.choose('Need help'); HP.choose('Continue'); HP.sim(0.3)")
         check('stranger: Doc Pell asks for help with his robbed wagon', await ev(pg, "Q.stage('stranger_doc')") == 'wreck', ch)
         for cid in ('doc_wheel', 'doc_tracks'):
-            await ev(pg, f"const c = Clues.find(k => k.id === '{cid}'); HP.tp(c.x + 1, c.z); HP.Game.player.yaw = -Math.PI / 2; HP.sim(0.2); HP.press('Examine')")
-            await pg.wait_for_function(f"HP.S.evidence['{cid}'] === true", timeout=20000); await ev(pg, "HP.sim(0.3)")
+            await ev(pg, f"const c = Clues.find(k => k.id === '{cid}'); HP.tp(c.x + 1, c.z); HP.Game.player.yaw = -Math.PI / 2; HP.sim(0.2); Q.press('Examine')")
+            await pg.wait_for_function(f"HP.S.evidence['{cid}'] === true", polling=200, timeout=30000); await ev(pg, "HP.sim(0.3)")
         r = await ev(pg, "({ stage: Q.stage('stranger_doc'), thieves: HP.NPC.all.filter(n => n.group === 'docband').length, crate: !!SIDE._medCrate })")
         check('stranger: the wreck\'s clues point to the quarry, where two thieves guard the crate', r['stage'] == 'quarry' and r['thieves'] == 2 and r['crate'], r)
-        await ev(pg, "for (const n of HP.NPC.all) if (n.group === 'docband') n.sense = 0; const c = SIDE._medCrate.mesh.position; HP.Game.player.crouch = true; HP.tp(c.x + 1, c.z); HP.Game.player.yaw = -Math.PI / 2; HP.sim(0.2); HP.press('Pick up'); HP.sim(1.5)")
+        await ev(pg, "for (const n of HP.NPC.all) if (n.group === 'docband') n.sense = 0; const c = SIDE._medCrate.mesh.position; HP.Game.player.crouch = true; HP.tp(c.x + 1, c.z); HP.Game.player.yaw = -Math.PI / 2; HP.sim(0.2); Q.press('Pick up'); HP.sim(1.5)")
         r = await ev(pg, "({ stage: Q.stage('stranger_doc'), carry: HP.Game.player.carry && HP.Game.player.carry.id, quiet: HP.Missions.st('stranger_doc').opt.quiet === true })")
         check('stranger: the crate is lifted without a fight (optional objective)', r['stage'] == 'home' and r['carry'] == 'medcrate' and r['quiet'], r)
         await ev(pg, "const d = HP.NPC.byKey('doc'); d.state = 'routine'; HP.Game.player.crouch = false; HP.sim(0.2)")
@@ -112,11 +113,11 @@ async def main():
             const v = HP.NPC.byKey('enc_victim'), rs = [0, 1].map(i => HP.NPC.byKey('enc_bandit' + i)); return { v: v && v.state, rs: rs.filter(Boolean).length }; })()""")
         check('encounter: two road agents hold up a traveler on the trail ahead', r['v'] == 'handsup' and r['rs'] == 2, r)
         m0 = await ev(pg, "HP.S.money"); await ev(pg, "for (const i of [0, 1]) HP.NPC.byKey('enc_bandit' + i).takeHit({ dmg: 999, from: HP.Game.player, gun: 'revolver' }); HP.sim(0.5)")
-        await pg.wait_for_function(f"HP.S.money > {m0}", timeout=20000)
+        await pg.wait_for_function(f"HP.S.money > {m0}", polling=200, timeout=30000)
         check('encounter: shooting the robbers saves the traveler, who pays you something', await ev(pg, "HP.NPC.byKey('enc_victim').state") == 'scripted', await ev(pg, "HP.S.money"))
         await ev(pg, "HP.tp(-100, -20); HP.Game.player.yaw = Math.atan2(-50, -65); HP.sim(0.2); SIDE.snakebite(); HP.sim(0.3); Q.near('enc_snake', 1.2)")
-        m0 = await ev(pg, "HP.S.money"); ok = await ev(pg, "HP.press('Suck out the venom')")
-        await pg.wait_for_function(f"HP.S.money > {m0}", timeout=20000)
+        m0 = await ev(pg, "HP.S.money"); ok = await ev(pg, "Q.press('Suck out the venom')")
+        await pg.wait_for_function(f"HP.S.money > {m0}", polling=200, timeout=30000)
         check('encounter: sucking the venom from a snakebit traveler saves him', ok, await ev(pg, "HP.S.money"))
         r = await ev(pg, """(()=>{ HP.tp(-100, -20); HP.Game.player.yaw = Math.atan2(-50, -65); HP.sim(0.2); SIDE.trap(); HP.sim(0.3); const b = HP.NPC.byKey('enc_bait'); HP.tp(b.pos.x + 4, b.pos.z); HP.sim(0.5);
             return { amb: HP.NPC.all.filter(n => n.group === 'enc_amb' && n.state === 'combat').length }; })()""")

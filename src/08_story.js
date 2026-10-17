@@ -185,7 +185,7 @@ const STORY = {
     return {
       start: { text: 'This here\'s private property. Crane property. You lost, lady?', choices: [
         { text: 'Bribe him ($15)', cond: () => S.money >= 15, why: 'Need $15', do: () => { Inv.money(-15, 'to Dutchy'); S.decisions.m1_dutchy = 'bribed'; Rep.rel('dutchy', 25); STORY.distractGang(me); }, next: 'bribed' },
-        { text: 'Threaten him (gun drawn)', cond: () => Game.player.weapon !== 'fists', why: 'Draw a gun first', do: () => { S.decisions.m1_dutchy = 'threatened'; Rep.rel('dutchy', -20); me.fled = true; me.state = 'scripted'; me.say('Don\'t shoot! I\'m gone!'); me.script = (dt, n) => { n.moveTo(170, -40, 5, dt); }; setTimeout(() => { const f = NPC.byKey('fenwick') || NPC.byKey('sal'); if (f && f.alive && !m.c.boxTaken) { f.say('Dutchy? What\'s he yelling about?'); f.alertGroup(Game.player.pos); } }, 7000); }, next: 'threat' },
+        { text: 'Threaten him (gun drawn)', cond: () => Game.player.weapon !== 'fists', why: 'Draw a gun first', do: () => { S.decisions.m1_dutchy = 'threatened'; Rep.rel('dutchy', -20); me.fled = true; me.state = 'scripted'; me.say('Don\'t shoot! I\'m gone!'); me.script = (dt, n) => { n.moveTo(170, -40, 5, dt); }; later(() => { const f = NPC.byKey('fenwick') || NPC.byKey('sal'); if (f && f.alive && !m.c.boxTaken) { f.say('Dutchy? What\'s he yelling about?'); f.alertGroup(Game.player.pos); } }, 7000); }, next: 'threat' },
         { text: '"Fenwick sent for me." (bluff)', cond: () => S.honor > -20, why: 'Your reputation precedes you', do: () => { S.decisions.m1_dutchy = 'bluffed'; Rep.rel('dutchy', -5); }, next: 'bluff' },
         { text: 'Back off', do: () => { m.c.dutchy = 0; m.c.dutchyWarned = (m.c.dutchyWarned || 0) + 1; if (m.c.dutchyWarned > 1) { me.say('I warned you!'); me.alertGroup(Game.player.pos); } }, next: null },
         { text: 'Attack', do: () => { S.decisions.m1_dutchy = 'fought'; me.alertGroup(Game.player.pos); }, next: null },
@@ -274,7 +274,7 @@ Missions.def({ id: 'm2', type: 'main', chapter: 2, title: 'Cold Trail', giver: '
 Missions.defs.m2.stages.forEach(s => s.fail = [{ check: () => S.chars.mae === 'dead' && S.decisions.journal === 'mae', why: 'Mae Holloway is dead.' }]);
 
 Missions.def({ id: 'm3', type: 'main', chapter: 3, title: "Greer's Stand", giver: 'ezra', summary: 'Eli\'s journal says the Greers are next. Railroad men have come to collect.',
-  prereq: () => Missions.st('m2').status === 'done',
+  prereq: () => ['done', 'failed'].includes(Missions.st('m2').status),
   blocked: () => S.chars.ezra === 'dead' ? 'Ezra Greer is dead. There is no one left to stand.' : S.locations.farm !== 'occupied' ? 'The Greer farm is empty.' : null,
   start: () => { const n = NPC.byKey('ezra'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: FARM.x, z: FARM.z }; },
   stages: [
@@ -307,19 +307,20 @@ Missions.def({ id: 'bounty_rook', type: 'bounty', title: 'Wanted: Rook Malloy', 
   start: () => ({ x: -25.5, z: 8.6, y: 5 }),
   stages: [
     { id: 'find', text: 'Find Rook\'s camp near the Shallow Ford.', objectives: [O.goto('camp', 'Find Rook\'s camp', riverX(-120) + 22, -128, 22)], enter: () => STORY.spawnRook() },
-    { id: 'take', text: 'Bring him in. Knock him out and hogtie him for the full $40.', objectives: [O.check('sub', 'Subdue Rook Malloy', () => { const r = NPC.byKey('rook'); return !r || !r.alive || r.hogtied; }, () => { const r = NPC.byKey('rook'); return r && r.alive ? { x: r.pos.x, z: r.pos.z, y: r.pos.y + 2.4, enemy: true } : null; })],
+    { id: 'take', text: 'Bring him in. Knock him out and hogtie him for the full $40.', enter: ctx => { if (ctx.resumed) STORY.spawnRook(); }, objectives: [O.check('sub', 'Subdue Rook Malloy', () => { const r = NPC.byKey('rook'); return !r || !r.alive || r.hogtied; }, () => { const r = NPC.byKey('rook'); return r && r.alive ? { x: r.pos.x, z: r.pos.z, y: r.pos.y + 2.4, enemy: true } : null; })],
       on: { kill: (d, ctx) => { if (d.npc.key === 'rook') { d.npc.loot = () => { S.flags.rook_proof = true; UI.toast('Took Rook\'s gun belt as proof'); }; } } } },
-    { id: 'deliver', text: 'Bring Rook (or proof) to Sheriff Pike.', objectives: [O.flag('turn', () => NPC.byKey('rook') && NPC.byKey('rook').alive ? 'Carry Rook to the sheriff (stow him on your horse)' : 'Search Rook\'s body, then see the sheriff', 'rook_done', () => { const n = NPC.byKey('pike'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: -22, z: 8 }; })] },
+    { id: 'deliver', text: 'Bring Rook (or proof) to Sheriff Pike.', enter: ctx => { if (ctx.resumed && !NPC.byKey('rook') && S.chars.rook === 'dead') S.flags.rook_proof = true; }, objectives: [O.flag('turn', () => NPC.byKey('rook') && NPC.byKey('rook').alive ? 'Carry Rook into the sheriff\'s office (your horse can haul him most of the way)' : 'Search Rook\'s body, then see the sheriff', 'rook_done', () => { const n = NPC.byKey('pike'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: -22, z: 8 }; })] },
   ],
   complete: ctx => { ctx.m.outcome = S.decisions.rook === 'alive' ? 'Brought Rook Malloy in alive ($40)' : 'Brought proof of Rook\'s death ($15)'; },
   cleanup: () => { const r = NPC.byKey('rook'); if (r) NPC.despawn(r); },
   failOutcome: () => 'Rook Malloy got away.',
 });
-Missions.defs.bounty_rook.stages.forEach(s => s.fail = [{ check: () => S.chars.pike === 'dead', why: 'There is no sheriff to pay the bounty.' }]);
+Missions.defs.bounty_rook.stages.forEach(s => s.fail = [{ check: () => S.chars.pike === 'dead' || S.chars.pike === 'left', why: 'There is no sheriff to pay the bounty.' }]);
 
 
 /* ---------- Mission helpers ---------- */
 Object.assign(STORY, {
+  essential(n) { return n.key === 'mae' || (n.key === 'ezra' && !['done', 'failed'].includes(Missions.st('m3').status)); }, // story givers can be knocked down, never killed (like RDR2's essential characters)
   ensureBox() { const P = Game.player; if (S.flags.m1_delivered || S.horseCarry || (P.carry && P.carry.id === 'strongbox') || Carry.list.some(c => c.id === 'strongbox')) return; const f = fwd(P.yaw); Carry.make('strongbox', P.pos.x + f.x, P.pos.z + f.z); },
   cabinClues() {
     if (this._cab) return; this._cab = true;
@@ -338,7 +339,7 @@ Object.assign(STORY, {
     const lead = S.chars.fenwick === 'alive' ? 'fenwick' : 'sal'; const members = [lead, 'jeb']; if (S.chars.rook === 'alive' && !S.flags.rook_done) members.push('rook');
     const spot = [[-76, -118], [-80, -122], [-72, -114]];
     members.forEach((k, i) => { const look = k === 'fenwick' ? { skin: '#d9a07a', shirt: '#3b3b3b', coat: '#5a3a2a', hair: '#2b1d14', mustache: '#2b1d14', hatColor: '#1b1b1b', stout: 1.1 } : k === 'rook' ? { skin: '#e2a57c', shirt: '#5a2a2a', hair: '#1b1b1b', hatColor: '#2b2b2b', mustache: '#1b1b1b' } : { skin: '#e8b48c', shirt: '#4a6a4a', hair: '#6b4a2f', hatColor: '#3b2a1e', stout: 1.2 };
-      if (NPC.byKey(k)) NPC.despawn(NPC.byKey(k)); const n = NPC.spawn({ key: k, name: NPCNAMES[k] || (k === 'jeb' ? 'Jeb' : 'Sal'), x: spot[i][0], z: spot[i][1], look, lawful: false, group: 'crane', state: 'patrol', gun: k === 'fenwick' ? 'rifle' : 'revolver', hp: k === 'fenwick' ? 140 : 90, maxHp: 140, tags: ['crane', 'ambush', 'story'], wild: true, accuracy: 0.42, fleeHp: k === 'fenwick' ? 0 : 25, route: [{ x: -62 + i * 2, z: -136, wait: 30 }] }); n.flanker = i === 1; if (S.decisions.m1_dutchy === 'bribed' && S.chars.dutchy !== 'dead') n.sense = 0.45; });
+      if (NPC.byKey(k)) NPC.despawn(NPC.byKey(k)); const n = NPC.spawn({ key: k, name: NPCNAMES[k] || (k === 'jeb' ? 'Jeb' : 'Sal'), x: spot[i][0], z: spot[i][1], look, lawful: false, group: 'crane', state: 'patrol', gun: k === 'fenwick' ? 'rifle' : 'revolver', hp: k === 'fenwick' ? 140 : 90, maxHp: 140, tags: ['crane', 'ambush', 'story'], wild: true, accuracy: 0.42, fleeHp: k === 'fenwick' ? 0 : 25, route: [{ x: -62 + i * 2, z: -136, wait: 30 }] }); if (S.decisions.m1_dutchy === 'bribed' && S.chars.dutchy !== 'dead') n.sense = 0.45; });
     if (dutchyAlly) { const d = NPC.spawn({ key: 'dutchy', name: 'Dutchy Moss', x: -58, z: -134, look: { skin: '#f0c4a0', shirt: '#b5a17a', hair: '#e2c06a', hatColor: '#8b7d6b', scale: 0.95 }, lawful: false, state: 'scripted', wild: true, tags: ['story'] }); d.say('Psst! Calloway! They\'re coming for that book. Follow me, there\'s a goat path!', 5); m.c.phase = 'follow'; m.c.followT = 0; m.c.lost = 0;
       const path = [[-48, -134], [-38, -128], [-30, -116], [-28, -100], [-34, -84]]; d.ri = 0; d.script = (dt, me) => { const p = path[me.ri]; if (!p) { me.sp = 0; return; } const dP = me.distP || 0; if (dP > 9) { me.sp = 0; me.face(Game.player.pos); return; } if (me.moveTo(p[0], p[1], 2.6, dt, 1)) me.ri++; }; }
     else { m.c.phase = 'fight'; m.c.fought = 1; for (const n of NPC.all) if (n.tags.includes('ambush')) { n.fightPlayer(); } UI.toast(S.flags.crane_unaware ? 'They followed the journal\'s trail, not you. Too late now.' : '"That\'s her! Calloway!"', 'bad'); }
@@ -346,7 +347,8 @@ Object.assign(STORY, {
     ctx.d.stages[3].on = { alarm: (d, c) => { if (c.m.c.phase === 'follow') { c.m.c.phase = 'fight'; c.m.c.fought = 1; c.d.stages[3].objectives = [O.defeat('amb', 'Survive the Crane ambush', 'ambush')]; } } };
   },
   ambushUpdate(dt, ctx) {
-    const m = ctx.m; if (m.c.phase === 'follow') { const d = NPC.byKey('dutchy'); if (!d || !d.alive) { m.c.phase = 'fight'; return; } if (Game.player.cool > 0.2 && Game.player.weapon !== 'fists') m.c.shot = 1;
+    const m = ctx.m; if (m.c.phase === 'follow') { const d = NPC.byKey('dutchy'); if (!d || !d.alive || d.downed || d.state !== 'scripted') { // no guide left: it's a fight now
+      m.c.phase = 'fight'; m.c.fought = 1; ctx.d.stages[3].objectives = [O.defeat('amb', 'Survive the Crane ambush', 'ambush')]; for (const n of NPC.all) if (n.tags.includes('ambush') && n.alive && !n.downed) n.fightPlayer(); UI.toast('"There she is!" The Cranes have spotted you.', 'bad'); return; } if (Game.player.cool > 0.2 && Game.player.weapon !== 'fists') m.c.shot = 1;
       if (d.ri >= 5) { m.c.followDone = 1; m.c.dutchyHelped = 1; d.say('Go on. Tell Mae I\'m sorry about the box.', 5); Rep.rel('dutchy', 20); S.chars.dutchy = 'ally'; for (const n of NPC.all.slice()) if (n.tags.includes('ambush')) NPC.despawn(n); journal('Dutchy Moss led me down a goat path past the Crane ambush. He\'s done with the gang.', 'decision'); } }
   },
   pikeIntercept(dt, ctx) {
@@ -368,7 +370,7 @@ Object.assign(STORY, {
       kept: { text: 'Then you\'re responsible for what happens to it. And to you.', on: () => { pk.state = 'routine'; } },
     };
   },
-  spawnRook() { if (NPC.byKey('rook') || S.chars.rook !== 'alive') return; const x = riverX(-120) + 22, z = -126; NPC.spawn({ key: 'rook', name: 'Rook Malloy', x, z, look: { skin: '#e2a57c', shirt: '#5a2a2a', hair: '#1b1b1b', hatColor: '#2b2b2b', mustache: '#1b1b1b' }, lawful: false, group: 'rook', state: 'patrol', gun: 'revolver', hp: 70, maxHp: 70, tags: ['bounty', 'story'], wild: true, accuracy: 0.35, route: [{ x, z, wait: 20 }, { x: x - 6, z: z - 4, wait: 8 }] }); },
+  spawnRook() { if (NPC.byKey('rook') || S.chars.rook !== 'alive') return; const x = riverX(-120) + 22, z = -126; const r = NPC.spawn({ key: 'rook', name: 'Rook Malloy', x, z, look: { skin: '#e2a57c', shirt: '#5a2a2a', hair: '#1b1b1b', hatColor: '#2b2b2b', mustache: '#1b1b1b' }, lawful: false, group: 'rook', state: 'patrol', gun: 'revolver', hp: 70, maxHp: 70, tags: ['bounty', 'story'], wild: true, accuracy: 0.35, route: [{ x, z, wait: 20 }, { x: x - 6, z: z - 4, wait: 8 }] }); r.loot = () => { S.flags.rook_proof = true; UI.toast('Took Rook\'s gun belt as proof'); }; }, // proof however and wherever he falls
   m3Spawn(ctx) {
     if (ctx.m.c.spawned && NPC.byKey('brock')) return; ctx.m.c.spawned = 1;
     const thug = (k, nm, x, z, o) => { if (NPC.byKey(k)) NPC.despawn(NPC.byKey(k)); return NPC.spawn(Object.assign({ key: k, name: nm, x, z, lawful: false, group: 'rail', gun: 'revolver', hp: 90, maxHp: 90, tags: ['rail', 'story'], wild: true, fleeHp: 30, accuracy: 0.4, state: 'scripted', look: { skin: '#e8b48c', shirt: '#3b3b5b', vest: '#5a5a5a', hair: '#3b2a1e', hatColor: '#2b2b2b' } }, o)); };
@@ -379,7 +381,7 @@ Object.assign(STORY, {
     const nell = NPC.byKey('nell'); if (nell) { nell.pos.set(-108, Col.ground(-108, 79.6, 9), 79.6); nell.state = 'tied'; nell.yaw = 0; nell.talk = null; nell.opts = p => nell.state === 'tied' ? [{ label: 'Untie Nell', fn: () => STORY.freeNell(p, nell) }] : Person.prototype.opts.call(nell, p); }
     const ez = NPC.byKey('ezra'); if (ez) { ez.state = 'scripted'; ez.script = (dt, me) => { me.moveTo(-126, 93, 1.4, dt); me.face(Game.player.pos); }; }
   },
-  freeNell(p, nell) { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); nell.state = 'scripted'; nell.script = (dt, me) => me.moveTo(-126, 92, 4, dt); nell.say('Thank God. Ezra!', 3); S.flags.m3_nell_free = true; Rep.rel('ezra', 10); Rep.faction('greer', 10); journal('Untied Nell Greer in the barn.', 'decision'); }, 1500); },
+  freeNell(p, nell) { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); nell.state = 'scripted'; nell.script = (dt, me) => me.moveTo(-126, 92, 4, dt); nell.say('Thank God. Ezra!', 3); S.flags.m3_nell_free = true; Rep.rel('ezra', 10); Rep.faction('greer', 10); journal('Untied Nell Greer in the barn.', 'decision'); }, 1500); },
   m3Update(dt, ctx) {
     const gil = NPC.byKey('gil'), nell = NPC.byKey('nell');
     if (S.flags.m3_confronted && !S.flags.m3_nell_free && S.decisions.m3 === 'fight' && !ctx.m.c.nellHurtChk) { ctx.m.c.nellHurtChk = 1; if (gil && gil.alive && !gil.downed) { S.flags.nell_hurt = true; journal('Gil struck Nell when the shooting started. She\'ll heal, but Ezra won\'t forget I went in shooting first.', 'decision'); UI.toast('Gil struck Nell!', 'bad'); } }
@@ -387,7 +389,7 @@ Object.assign(STORY, {
   },
   brockTree(me) {
     const nellFree = () => !!S.flags.m3_nell_free;
-    const peaceful = (how) => { S.decisions.m3 = how; S.flags.m3_confronted = true; for (const n of NPC.all) if (n.group === 'rail' && n.alive && !n.downed) { n.state = 'scripted'; n.fled = true; n.script = (dt, x) => x.moveTo(40, 70, 3.2, dt); } setTimeout(() => { for (const n of NPC.all.slice()) if (n.group === 'rail') NPC.despawn(n); }, 25000); if (!nellFree()) { S.flags.m3_nell_free = true; const nl = NPC.byKey('nell'); if (nl) { nl.state = 'scripted'; nl.script = (dt, x) => x.moveTo(-126, 92, 3, dt); } } };
+    const peaceful = (how) => { S.decisions.m3 = how; S.flags.m3_confronted = true; for (const n of NPC.all) if (n.group === 'rail' && n.alive && !n.downed) { n.state = 'scripted'; n.fled = true; n.script = (dt, x) => x.moveTo(40, 70, 3.2, dt); } later(() => { for (const n of NPC.all.slice()) if (n.group === 'rail') NPC.despawn(n); }, 25000); if (!nellFree()) { S.flags.m3_nell_free = true; const nl = NPC.byKey('nell'); if (nl) { nl.state = 'scripted'; nl.script = (dt, x) => x.moveTo(-126, 92, 3, dt); } } };
     return {
       start: { text: () => nellFree() ? 'You the Calloway woman? Funny. Mrs. Greer just walked out of that barn on her own. Mr. Vane\'s got a note here says this family owes eighty dollars.' : 'Calloway. Thought you\'d turn up. Mrs. Greer\'s resting in the barn with my associate. Nobody needs to get hurt. This family owes Halvorsen eighty dollars or a signature.', on: () => { S.flags.m3_confronted_seen = true; }, choices: [
         { text: 'Show him Eli\'s journal: "A marshal will want to read this."', cond: () => Inv.count('journal') || Inv.count('journal_copy'), why: 'You don\'t have Eli\'s journal or a copy', do: () => { peaceful('evidence'); Rep.faction('railroad', -30); S.flags.vane_warned = true; }, next: 'ev' },
@@ -444,20 +446,20 @@ const Encounters = {
   snare() { // a deer caught in a poacher's snare: free it, or put it down for the hide
     S.flags.snareDay = S.time.day; const s = this.spot(22); const deer = Animal.spawn('deer', s.x, s.z); deer.state = 'snared'; deer.scare = () => {}; deer.cfg = Object.assign({}, deer.cfg, { sense: 0 });
     const stake = M(GEO.box, '#6b4a2f', 0.08, 0.6, 0.08, s.x + 0.6, Terrain.height(s.x, s.z) + 0.3, s.z); Game.scene.add(stake); UI.toast('You hear a deer thrashing in the brush', '');
-    const it = Interact.add({ pos: () => deer.pos, r: 2.2, pri: 0.8, opts: p => !deer.alive || deer.freed ? [] : [{ label: 'Free the deer from the snare', fn: () => { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); deer.freed = true; deer.state = 'flee'; deer.fleeFrom = { x: p.pos.x, z: p.pos.z }; deer.fleeT = 10; deer.scare = Beast.prototype.scare; Rep.honor(3, 'freed a snared deer'); journal('Cut a deer loose from a poacher\'s snare.'); Game.scene.remove(stake); Interact.remove(it); Missions.emit('snare', { freed: true }); }, 1400); } }] });
+    const it = Interact.add({ pos: () => deer.pos, r: 2.2, pri: 0.8, opts: p => !deer.alive || deer.freed ? [] : [{ label: 'Free the deer from the snare', fn: () => { p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); deer.freed = true; deer.state = 'flee'; deer.fleeFrom = { x: p.pos.x, z: p.pos.z }; deer.fleeT = 10; deer.scare = Beast.prototype.scare; Rep.honor(3, 'freed a snared deer'); journal('Cut a deer loose from a poacher\'s snare.'); Game.scene.remove(stake); Interact.remove(it); Missions.emit('snare', { freed: true }); }, 1400); } }] });
     this.lastSnare = deer; const orig = deer.update.bind(deer); deer.update = (dt, far) => { if (deer.state === 'snared' && deer.alive && !deer.freed) { deer.speed = 0; deer.rear = Math.sin(Game.time * 6) > 0.6 ? 0.5 : 0; deer.anim.update(dt, { speed: 0, alert: true, rear: deer.rear }); deer.rig.root.position.copy(deer.pos); return; } orig(dt, far); };
   },
   brawl() { // two men squaring off outside the saloon; step in, place a bet, or let the deputy sort it
     S.flags.brawlDay = S.time.day; const abe = NPC.byKey('abe'); if (!abe || !abe.alive) return;
     const cy = NPC.spawn({ key: 'cyrus', name: 'Cyrus Webb', x: -38, z: 15, look: { skin: '#e2a57c', shirt: '#8a3b3b', hair: '#3b2a1e', hatColor: '#5a4a3a', beard: '#3b2a1e', stout: 1.15 }, brave: 0.8, state: 'scripted', tags: ['generic'], wild: true });
     abe.state = 'scripted'; abe.pos.set(-41, abe.pos.y, 15); const face = (a, b) => { a.yaw = Math.atan2(b.pos.x - a.pos.x, b.pos.z - a.pos.z); };
-    let t = 0, phase = 'argue'; const end = (msg) => { phase = 'done'; cy.say(msg || 'Fine. FINE.', 3); abe.state = 'routine'; abe.goal = null; cy.state = 'scripted'; cy.script = (dt, me) => me.moveTo(10, 20, 1.6, dt); setTimeout(() => NPC.all.includes(cy) && NPC.despawn(cy), 40000); };
+    let t = 0, phase = 'argue'; const end = (msg) => { phase = 'done'; cy.say(msg || 'Fine. FINE.', 3); abe.state = 'routine'; abe.goal = null; cy.state = 'scripted'; cy.script = (dt, me) => me.moveTo(10, 20, 1.6, dt); later(() => NPC.all.includes(cy) && NPC.despawn(cy), 40000); };
     const lines = [[abe, 'You marked that deck, Webb!'], [cy, 'Say that again, Tull.'], [abe, 'I\'ll say it louder!'], [cy, 'Then step into the street.']]; let li = 0;
-    const scr = (dt, me) => { if (phase === 'done') return; me.sp = 0; face(abe, cy); face(cy, abe); t += dt / 2; if (phase === 'argue') { if (t > 2.5 * (li + 1) && li < lines.length) { lines[li][0].say(lines[li][1], 3); lines[li][0].anim.play('taunt'); li++; } if (t > 13) { phase = 'fight'; } } else if (phase === 'fight') { if (Math.random() < dt) { const [a, b] = Math.random() < 0.5 ? [abe, cy] : [cy, abe]; a.anim.play(pick(['punch', 'hook'])); setTimeout(() => { b.anim.play('hit'); Sfx.punch(); }, 180); } if (t > 26) { const dep = NPC.byKey('lyle'); if (dep) dep.say('Break it up, you two!', 3); end('Alright, alright, Deputy.'); } } };
+    const scr = (dt, me) => { if (phase === 'done') return; me.sp = 0; face(abe, cy); face(cy, abe); t += dt / 2; if (phase === 'argue') { if (t > 2.5 * (li + 1) && li < lines.length) { lines[li][0].say(lines[li][1], 3); lines[li][0].anim.play('taunt'); li++; } if (t > 13) { phase = 'fight'; } } else if (phase === 'fight') { if (Math.random() < dt) { const [a, b] = Math.random() < 0.5 ? [abe, cy] : [cy, abe]; a.anim.play(pick(['punch', 'hook'])); later(() => { b.anim.play('hit'); Sfx.punch(); }, 180); } if (t > 26) { const dep = NPC.byKey('lyle'); if (dep) dep.say('Break it up, you two!', 3); end('Alright, alright, Deputy.'); } } };
     abe.script = scr; cy.script = scr; UI.toast('Shouting outside the Pine Knot', '');
     cy.talk = () => phase === 'done' ? null : { start: { text: 'Stay out of this, stranger. This is between me and Tull.', choices: [
       { text: 'Break it up. Nobody needs a black eye today.', do: () => { Rep.rel('lyle', 0); Rep.honor(2, 'kept the peace'); Rep.faction('town', 3); S.npcMem.abe = Object.assign(S.npcMem.abe || {}, { helped: true }); end('...Not worth it.'); abe.say('Thanks, Miss Calloway.', 3); }, next: null },
-      { text: 'Two dollars says Tull knocks you flat. (Bet $2)', cond: () => S.money >= 2, do: () => { Inv.money(-2, 'bet'); phase = 'fight'; t = 13; setTimeout(() => { const win = Math.random() < 0.55; if (win) { Inv.money(4, 'won the bet'); abe.say('Ha!', 2); } else { cy.say('Pay up!', 2); } end(); }, 9000); }, next: null },
+      { text: 'Two dollars says Tull knocks you flat. (Bet $2)', cond: () => S.money >= 2, do: () => { Inv.money(-2, 'bet'); phase = 'fight'; t = 13; later(() => { const win = Math.random() < 0.55; if (win) { Inv.money(4, 'won the bet'); abe.say('Ha!', 2); } else { cy.say('Pay up!', 2); } end(); }, 9000); }, next: null },
       { text: 'Carry on.', next: null } ] } };
   },
   spot(dist) { const P = Game.player, f = fwd(P.yaw); const x = P.pos.x + f.x * dist, z = P.pos.z + f.z * dist; return { x, z }; },
@@ -465,7 +467,7 @@ const Encounters = {
     const ida = NPC.spawn({ key: 'ida', name: 'Ida Fairweather', x: s.x, z: s.z, look: IDA_LOOK, brave: 0.4, wild: true, state: 'scripted', tags: ['generic'], talk: n => this.idaTree(n, cart) }); ida.script = (dt, me) => { me.sp = 0; if (me.distP < 25) { me.face(Game.player.pos); if (!me._called) { me._called = 1; me.say('Hello? Please! My wheel\'s busted!', 4); } } };
     UI.toast('Someone is calling for help nearby', ''); },
   idaTree(n, cart) {
-    const done = (helped) => { S.flags.ida_helped = helped; n.state = 'scripted'; n.script = (dt, me) => me.moveTo(-40, 20, 1.8, dt); setTimeout(() => { NPC.despawn(n); Game.scene.remove(cart); if (helped) World.apply(); }, 30000); };
+    const done = (helped) => { S.flags.ida_helped = helped; n.state = 'scripted'; n.script = (dt, me) => me.moveTo(-40, 20, 1.8, dt); later(() => { NPC.despawn(n); Game.scene.remove(cart); if (helped) World.apply(); }, 30000); };
     return { start: { text: 'Bless you for stopping. Ida Fairweather. My cart threw a wheel and I haven\'t eaten since yesterday. I\'m headed for Juniper Gap.', choices: [
       { text: 'Give her canned beans', cond: () => Inv.count('beans'), why: 'No beans', do: () => { Inv.take('beans'); Rep.honor(4, 'helped a stranger'); done(true); }, next: 'thanks' },
       { text: 'Give her a sage tonic', cond: () => Inv.count('tonic'), why: 'No tonic', do: () => { Inv.take('tonic'); Rep.honor(5, 'helped a stranger'); Inv.money(5, 'from Ida'); done(true); }, next: 'thanks' },
@@ -474,5 +476,5 @@ const Encounters = {
     ] }, thanks: { text: 'I won\'t forget this. If you\'re ever in the saloon, the first drink is mine. And I keep my eyes open.' }, bye: { text: 'I... see. Well. Good day.' } };
   },
   craneAmbush() { S.flags.lastAmbushDay = S.time.day; const P = Game.player; UI.toast('"There\'s Calloway!" Crane riders!', 'bad');
-    for (let i = 0; i < 2; i++) { const a = P.yaw + (i ? 0.6 : -0.6), x = P.pos.x + Math.sin(a) * 32, z = P.pos.z + Math.cos(a) * 32; const n = Riders.spawnRider({ key: 'crane_amb' + i, name: 'Crane gunman', look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b' }, lawful: false, group: 'crane_r', gun: 'revolver', hp: 80, maxHp: 80, tags: ['generic', 'random'], fleeHp: 20, accuracy: 0.35 }, 'chase', x, z, a + Math.PI); n.hostileToPlayer = true; n.anim.expr = 'angry'; /* they ride in */ setTimeout(() => { if (NPC.all.includes(n)) NPC.despawn(n); }, 180000); } },
+    for (let i = 0; i < 2; i++) { const a = P.yaw + (i ? 0.6 : -0.6), x = P.pos.x + Math.sin(a) * 32, z = P.pos.z + Math.cos(a) * 32; const n = Riders.spawnRider({ key: 'crane_amb' + i, name: 'Crane gunman', look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b' }, lawful: false, group: 'crane_r', gun: 'revolver', hp: 80, maxHp: 80, tags: ['generic', 'random'], fleeHp: 20, accuracy: 0.35 }, 'chase', x, z, a + Math.PI); n.hostileToPlayer = true; n.anim.expr = 'angry'; /* they ride in */ later(() => { if (NPC.all.includes(n)) NPC.despawn(n); }, 180000); } },
 };
