@@ -1,7 +1,7 @@
 """Atmosphere and combat effects: the sun's arc matches the day, a long golden hour, dark nights where lanterns
 matter, valley mist at dawn, and gunfight effects (muzzle flash and smoke, dirt where misses land, blood on hits,
 enemy muzzle smoke, gallop dust) that clean themselves up. Plus the render pipeline: post-processing tiers, textured
-buildings, the dense grass field and the water shader."""
+buildings, the dense grass field, leafy trees, light shafts, mud, puddles and footprints, and the water shader."""
 import asyncio, json
 from run import boot
 from playwright.async_api import async_playwright
@@ -67,6 +67,18 @@ async def main():
         r = await ev(pg, """(()=>{ const u = Terrain.waterU; HP.S.weather.kind = 'clear'; HP.S.weather.next = 99; HP.S.time.hour = 12; HP.sim(0.5, X.F); const t0 = u.uTime.value, top = u.uTop.value.equals(Sky.domeU.top.value), cam = u.uCamPos.value.distanceTo(HP.Game.camera.position) < 0.01, dry = u.uRain.value;
             Sky.weather = HP.S.weather.kind = 'rain'; HP.sim(4, X.F); const wet = u.uRain.value; HP.S.weather.kind = 'clear'; Sky.weather = 'clear'; HP.sim(0.1, X.F); return { moves: u.uTime.value > t0, top, cam, dry: +dry.toFixed(2), wet: +wet.toFixed(2), depth: !!u.tH.value }; })()""")
         check('water: reflects the current sky, ripples over time, knows its depth, and roughens in the rain', r['moves'] and r['top'] and r['cam'] and r['depth'] and r['dry'] < 0.1 and r['wet'] > 0.6, r)
+        r = await ev(pg, "({ near: Grass.mesh.geometry.instanceCount, far: Grass.far ? Grass.far.geometry.instanceCount : 0, farIn: Grass.LF.uIn.value, farS: Grass.LF.uS.value, nearS: Grass.L.uS.value })")
+        check('grass: a sparser ring of wide blades carries the meadow out past the dense patch, fading in where it fades out', r['far'] > 20000 and r['farS'] > 2 * r['nearS'] and abs(r['farIn'] - r['nearS'] * 0.3) < 0.01, r)
+        r = await ev(pg, """(()=>{ const leafy = Object.keys(_windMats).filter(k => !k.endsWith('/0')).length; return { leafy }; })()""")
+        check('trees: oak, aspen, pine and fir canopies and bushes use the leafy-clump material', r['leafy'] >= 8, r)
+        r = await ev(pg, """(()=>{ HP.S.weather.kind = 'clear'; Sky.weather = 'clear'; Sky.cloud = 0; HP.S.weather.next = 99; const look = h => { HP.S.time.hour = h; HP.sim(0.1, X.F); const s = Sky.sunM.position, P = HP.Game.cam.pos; HP.Game.cam.yaw = Math.atan2(s.x - P.x, s.z - P.z); HP.Game.cam.pitch = 0; HP.sim(0.1, X.F); return Post.godRays(HP.Game.camera); };
+            const eve = look(19.4), noon = look(13), night = look(23.5); HP.S.time.hour = 19.4; HP.sim(0.1, X.F); const s = Sky.sunM.position, P = HP.Game.cam.pos; HP.Game.cam.yaw = Math.atan2(s.x - P.x, s.z - P.z) + Math.PI; HP.sim(0.1, X.F); const away = Post.godRays(HP.Game.camera); HP.S.time.hour = 12;
+            return { eve: +eve.toFixed(2), noon: +noon.toFixed(2), night, away }; })()""")
+        check('light shafts: strong toward a low evening sun, faint at noon, none at night or facing away from the sun', r['eve'] > 0.4 and 0 < r['noon'] < r['eve'] and r['night'] == 0 and r['away'] == 0, r)
+        r = await ev(pg, """(()=>{ const P = HP.Game.player; HP.S.weather.kind = 'clear'; Sky.weather = 'clear'; Sky.wet = 0; HP.tp(-95, 30); HP.sim(0.2, X.F); FX.prints.forEach(p => FX.scene.remove(p.m)); FX.prints = []; P.yaw = 0; HP.Game.cam.yaw = 0; Input.keys.add('w'); HP.sim(2, X.F); const dry = FX.prints.length;
+            Sky.weather = HP.S.weather.kind = 'rain'; Sky.wet = 1; HP.tp(-30, 19.5); P.yaw = -Math.PI / 2; HP.Game.cam.yaw = -Math.PI / 2; HP.sim(2.5, X.F); Input.keys.delete('w'); const mud = FX.prints.length - dry; const gw = Terrain.groundU.uWet.value, gr = Terrain.groundU.uRain.value;
+            Sky.weather = HP.S.weather.kind = 'clear'; Sky.wet = 0; HP.sim(0.1, X.F); return { dry, mud, gw, gr }; })()""")
+        check('mud: after rain the trails turn to mud with puddles, and boots leave prints in it (none on dry grass)', r['dry'] == 0 and r['mud'] >= 4 and r['gw'] > 0.9 and r['gr'] == 1, r)
         await ev(pg, "Settings.set('quality', 'low')")
 
         bad = [e for e in errs if 'favicon' not in e]

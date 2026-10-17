@@ -35,10 +35,10 @@ const UI = {
   hitmark(head) { const c = $('cross'); c.classList.add('hit'); c.classList.toggle('head', !!head); clearTimeout(this._hm); this._hm = setTimeout(() => c.classList.remove('hit', 'head'), head ? 220 : 120); Sfx.tone(head ? 1500 : 1100, 0.04, 0.05, 'triangle'); },
   flash() { $('vignette').style.boxShadow = 'inset 0 0 140px 50px rgba(200,40,40,.55)'; setTimeout(() => $('vignette').style.boxShadow = '', 250); },
   /* ---------- panels ---------- */
-  open(kind) { if (Missions.failing) return; this.panelOpen = true; Input.uiOpen = true; if (document.pointerLockElement) document.exitPointerLock(); $('panel').hidden = false; $('pClose').hidden = false; if (['items', 'journal', 'story', 'map', 'horse', 'system'].includes(kind)) this.tab = kind; this.kind = kind; this.render(); },
+  open(kind) { if (Missions.failing) return; this.panelOpen = true; Input.uiOpen = true; if (document.pointerLockElement) document.exitPointerLock(); $('panel').hidden = false; $('pClose').hidden = false; if (['items', 'wren', 'journal', 'story', 'map', 'horse', 'system'].includes(kind)) this.tab = kind; this.kind = kind; this.render(); },
   close(force) { if (Missions.failing && !force) return; this.panelOpen = false; Input.uiOpen = Dialog.open; $('panel').hidden = true; },
   render() {
-    const k = this.kind; const tabs = { system: 'Game', items: 'Satchel', journal: 'Journal', story: 'Story', map: 'Map', horse: 'Horse' };
+    const k = this.kind; const tabs = { system: 'Game', items: 'Satchel', wren: 'Wren', journal: 'Journal', story: 'Story', map: 'Map', horse: 'Horse' };
     if (k === 'shop' || k === 'camp') { $('pTabs').innerHTML = ''; } else { $('pTabs').innerHTML = Object.entries(tabs).map(([t, n]) => `<button class="${this.tab === t ? 'on' : ''}" data-t="${t}">${n}</button>`).join(''); $('pTabs').querySelectorAll('button').forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.kind = this.tab; this.render(); }); }
     const body = $('pBody'); const fn = { shop: 'renderShop', camp: 'renderCamp' }[k] || 'render_' + this.tab; $('pTitle').textContent = k === 'shop' ? 'Holloway General Store' : k === 'camp' ? 'Camp' : tabs[this.tab]; body.innerHTML = this[fn](); this.bind(body);
     if (this.tab === 'map' && k === 'map') this.drawBigMap(); if (this.tab === 'system' && k === 'system') this.bindSettings();
@@ -77,6 +77,16 @@ const UI = {
     h += '<div class="sec">Store in saddlebags</div><div class="list">' + Object.entries(S.inv).filter(([id]) => ['food', 'pelt', 'valuable', 'horse', 'herb'].includes(ITEMS[id]?.cat)).map(([id, n]) => this.itemRow(id, n, `<button data-act="putbag:${id}" ${H.distP > 5 ? 'disabled' : ''}>Store</button>`)).join('') + '</div>';
     if (H.distP > 5) h += '<p style="font-weight:700;color:#7b7a68">Stand next to your horse to use the saddlebags.</p>'; return h;
   },
+  render_wren() { // character page: standing, cores, skills and perks, record
+    const h = S.honor, sk = Object.entries(SKILLS).map(([k, d]) => { const l = Skills.lv(k), x = Skills.st()[k] || 0, nx = Skills.next(k), lo = Skills.XP[l - 1], pct = nx ? (x - lo) / (nx - lo) * 100 : 100;
+      return `<div class="skill"><b>${d.name} ${ROMAN[l - 1]}</b> <small>· from ${d.how}${nx ? ` · ${Math.floor(x)}/${nx} xp` : ' · mastered'}</small><div class="bar"><b style="width:${pct.toFixed(0)}%"></b></div>${d.perks.map((p, i) => `<div class="perk ${l >= i + 2 ? '' : 'off'}">${l >= i + 2 ? '★' : '☆'} ${ROMAN[i + 1]}: ${esc(p)}</div>`).join('')}</div>`; }).join('');
+    const st = S.stats, row = (a, b) => `<div class="stat"><span>${a}</span><span>${b}</span></div>`;
+    return `<div class="sec">Standing</div><b>${Skills.honorRank()}</b> <small>(honor ${h > 0 ? '+' : ''}${h})</small><div class="honor"><i style="left:calc(${(h + 100) / 2}% - 2px)"></i></div><small style="color:#5b5a48">${esc(Skills.honorNote())}</small>
+      ${S.bounty > 0 ? row('Bounty on your head', '$' + S.bounty.toFixed(2)) : ''}
+      <div class="sec">Body</div>${row('Health', `${S.p.hp.toFixed(0)}/${S.p.maxHp} · core ${S.p.hpCore.toFixed(0)}%`)}${row('Stamina', `${S.p.st.toFixed(0)}/${S.p.maxSt} · core ${S.p.stCore.toFixed(0)}%`)}
+      <div class="sec">Skills</div>${sk}
+      <div class="sec">Record</div>${row('Duels won', st.duels || 0)}${row('Counters', st.counters || 0)}${row('Disarming shots', st.disarms || 0)}${row('Kills', st.kills)}${row('Pelts', st.pelts)}${row('Fish', st.fish)}${row('Crimes', st.crimes)}`;
+  },
   render_system() {
     const V = Settings.v, slots = Save.slots();
     const slotRow = sl => `<div class="slot"><div class="grow">${sl.id === 'auto' ? 'Autosave' : 'Slot ' + sl.id}${sl.meta ? `<br><small style="color:#5b5a48">Day ${sl.meta.day} · Chapter ${sl.meta.ch} · $${sl.meta.money.toFixed(2)} · ${new Date(sl.meta.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small>` : '<br><small style="color:#7b7a68">Empty</small>'}</div>${sl.id !== 'auto' ? `<button class="btn alt" data-act="saveslot:${sl.id}">Save here</button>` : ''}<button class="btn" data-act="loadslot:${sl.id}" ${sl.meta ? '' : 'disabled'}>Load</button></div>`;
@@ -88,6 +98,12 @@ const UI = {
     <label class="range"><input type="checkbox" id="setInv" ${V.invertY ? 'checked' : ''}> Invert vertical look</label>
     <label class="range"><input type="checkbox" id="setAuto" ${V.autoCam ? 'checked' : ''}> Camera follows behind you while moving</label>
     <label class="range"><input type="checkbox" id="setLock" ${V.mouseLock !== false ? 'checked' : ''}> Lock the mouse to the game on click (Esc releases it; dragging works either way)</label>
+    <div class="sec">Touch controls</div>
+    <label class="range">Touch look speed<input type="range" id="setTsens" min="0.4" max="2.5" step="0.05" value="${V.tsens || 1}"><span>${(V.tsens || 1).toFixed(2)}</span></label>
+    <label class="range">Button size <select id="setBtn">${[[0.85, 'Small'], [1, 'Medium'], [1.2, 'Large']].map(([v, n]) => `<option value="${v}" ${+V.btnScale === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label class="range"><input type="checkbox" id="setLefty" ${V.lefty ? 'checked' : ''}> Left-handed layout (stick on the right, buttons on the left)</label>
+    <label class="range"><input type="checkbox" id="setRun" ${V.autoRun !== false ? 'checked' : ''}> Push the stick to the edge to run</label>
+    <label class="range"><input type="checkbox" id="setHap" ${V.haptics !== false ? 'checked' : ''}> Vibration on hits, counters and level-ups</label>
     <div class="sec">Graphics & sound</div>
     <label class="range">Quality <select id="setQ">${['auto', 'low', 'medium', 'high'].map(q => `<option value="${q}" ${V.quality === q ? 'selected' : ''}>${q[0].toUpperCase() + q.slice(1)}${q === 'auto' ? ` (${Game.quality})` : ''}</option>`).join('')}</select></label>
     <label class="range">Volume<input type="range" id="setVol" min="0" max="1" step="0.05" value="${V.sound}"><span>${Math.round(V.sound * 100)}%</span></label>
@@ -97,6 +113,9 @@ const UI = {
     const on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); };
     on('setSens', 'input', e => { Settings.set('sens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); });
     on('setZoom', 'input', e => { Game.cam.zoom = +e.target.value; Settings.set('zoom', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(1); });
+    on('setTsens', 'input', e => { Settings.set('tsens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); });
+    on('setBtn', 'change', e => { Settings.set('btnScale', +e.target.value); Input.applyLayout(); }); on('setLefty', 'change', e => { Settings.set('lefty', e.target.checked); Input.applyLayout(); });
+    on('setRun', 'change', e => Settings.set('autoRun', e.target.checked)); on('setHap', 'change', e => Settings.set('haptics', e.target.checked));
     on('setInv', 'change', e => Settings.set('invertY', e.target.checked)); on('setAuto', 'change', e => Settings.set('autoCam', e.target.checked));
     on('setLock', 'change', e => { Settings.set('mouseLock', e.target.checked); if (!e.target.checked && document.pointerLockElement) document.exitPointerLock(); });
     on('setQ', 'change', e => Settings.set('quality', e.target.value)); on('setVol', 'input', e => { Settings.set('sound', +e.target.value); e.target.nextElementSibling.textContent = Math.round(e.target.value * 100) + '%'; });
@@ -170,10 +189,12 @@ const UI = {
     const ob = $('objective'); if (Missions.active) { const objs = Missions.objectives().filter(o => !o.check(Missions.ctx) && !(o.optional && Missions.ctx.m.opt[o.id])); const main = objs.find(o => !o.optional) || objs[0]; ob.hidden = !main; if (main) ob.innerHTML = `<small>${esc(Missions.defs[Missions.active].title)}</small>${esc(typeof main.text === 'function' ? main.text(Missions.ctx) : main.text)}`; } else ob.hidden = true;
     const w = $('wanted'); w.hidden = !(S.wanted || S.bounty > 0); if (!w.hidden) w.textContent = S.wanted ? `WANTED · $${S.bounty.toFixed(2)}` : `Bounty $${S.bounty.toFixed(2)}`; w.style.background = S.wanted ? 'var(--brick)' : 'rgba(29,42,37,.7)';
     $('cross').hidden = !P.aiming; $('cross').classList.toggle('lock', !!(P.hover && P.hover.h)); if (P.aiming) $('cross').style.setProperty('--s', (1 + P.spread() * 45).toFixed(3)); // red over a target, wider while the spread blooms const am = $('ammo'); am.hidden = P.weapon === 'fists'; if (!am.hidden) am.textContent = P.weapon === 'revolver' ? `${S.ammoClip.revolver} | ${Inv.count('ammo_rev')}` : `${S.ammoClip.rifle} | ${Inv.count('ammo_rifle')}`;
-    if (Input.touch) { const ctx = { reload: P.weapon !== 'fists' && S.ammoClip[P.weapon] < (P.weapon === 'rifle' ? 5 : 6) && Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev') > 0, weapon: !!(S.weapons.revolver || S.weapons.rifle), block: P.state === 'ground' && P.weapon === 'fists' && (this.threat() || P.blocking), dodge: P.state === 'ground' && this.threat(), whistle: P.state !== 'ride' && H.distP > 14 };
+    const wind = P.weapon === 'fists' && P.state === 'ground' && !P.grab && NPC.all.some(n => n.windT > 0 && n.alive && !n.downed && n.distP < 3); // an enemy is winding up a punch: block now to counter
+    const cue = $('cue'); if (cue) { const show = wind && !P.blocking && Settings.v.hints !== false; if (cue.hidden === show) cue.hidden = !show; } const bb = document.querySelector('#tctx [data-b="block"]'); if (bb && bb.classList.contains('cue') !== wind) bb.classList.toggle('cue', wind);
+    if (Input.touch) { const ctx = { reload: P.weapon !== 'fists' && S.ammoClip[P.weapon] < (P.weapon === 'rifle' ? 5 : 6) && Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev') > 0, weapon: !!(S.weapons.revolver || S.weapons.rifle), block: P.state === 'ground' && P.weapon === 'fists' && (this.threat() || P.blocking), grab: P.state === 'ground' && P.weapon === 'fists' && !P.grab && NPC.all.some(n => Brawl.canGrab(n) && n.distP < 1.9 && (n.hostileToPlayer || n.state === 'combat')), shove: !!P.grab, dodge: P.state === 'ground' && this.threat(), whistle: P.state !== 'ride' && H.distP > 14 };
       for (const [k, v] of Object.entries(ctx)) { const b = document.querySelector(`#tctx [data-b="${k}"]`); if (b && b.hidden === v) b.hidden = !v; }
       const aimB = $('tAim'); if (aimB.hidden !== (P.weapon === 'fists')) aimB.hidden = P.weapon === 'fists'; if (P.weapon === 'fists' && Input.aimToggle) { Input.aimToggle = false; aimB.classList.remove('on'); }
-      $('tCrouch').hidden = P.state === 'ride'; $('tJump').textContent = P.state === 'ride' ? 'Hop' : 'Jump'; const atk = document.querySelector('#tcluster [data-b="attack"]'), at = P.weapon === 'fists' ? 'Attack' : `Shoot<br><small>${S.ammoClip[P.weapon]} | ${Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev')}</small>`; if (atk._t !== at) { atk._t = at; atk.innerHTML = at; } const wb = document.querySelector('#tctx [data-b="weapon"]'); if (wb) wb.textContent = P.weapon === 'fists' ? 'Draw gun' : P.weapon === 'revolver' ? (S.weapons.rifle ? 'Rifle' : 'Fists') : 'Fists'; }
+      $('tCrouch').hidden = P.state === 'ride'; $('tJump').textContent = P.state === 'ride' ? 'Hop' : 'Jump'; const atk = document.querySelector('#tcluster [data-b="attack"]'), at = P.grab ? 'Punch' : P.weapon === 'fists' ? 'Attack' : `Shoot<br><small>${S.ammoClip[P.weapon]} | ${Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev')}</small>`; if (atk._t !== at) { atk._t = at; atk.innerHTML = at; } const wb = document.querySelector('#tctx [data-b="weapon"]'); if (wb) wb.textContent = P.weapon === 'fists' ? 'Draw gun' : P.weapon === 'revolver' ? (S.weapons.rifle ? 'Rifle' : 'Fists') : 'Fists'; }
     const hc = $('horseCard'), nearH = P.state === 'ride' || (H.distP < 5 && !Dialog.open && !this.panelOpen); hc.hidden = !nearH; if (nearH) { const html = `${esc(S.h.name)} · bond ${H.bondLevel()} <span>Stamina<i><b style="width:${(S.h.st / H.maxSt() * 100).toFixed(0)}%"></b></i></span>${S.h.fed < 30 ? ' · hungry' : ''}${S.h.dirt > 0.15 ? ' · dusty' : ''}`; if (hc._h !== html) { hc._h = html; hc.innerHTML = html; } }
     this.miniT = (this.miniT || 0) - dt; if (this.miniT <= 0) { this.miniT = 0.1; this.drawMini(); }
     this.tags();

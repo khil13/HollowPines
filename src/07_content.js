@@ -102,7 +102,7 @@ function gatherable(kind, x, z) {
   let fruit; if (kind === 'berries') { g.add(M(GEO.ico, '#4f8a3c', 0.7, 0.55, 0.7, 0, 0.45, 0)); fruit = new THREE.Group(); for (let i = 0; i < 9; i++) { const a = i * 2.4; fruit.add(M(GEO.sphLo, '#5b4a9c', 0.07, 0.07, 0.07, Math.cos(a) * 0.55, 0.45 + Math.sin(i) * 0.3, Math.sin(a) * 0.55)); } g.add(fruit); Col.circle(x, z, 0.5, y, y + 1, { block: false }); }
   else { fruit = new THREE.Group(); for (let i = 0; i < 6; i++) { const l = M(GEO.cone, '#7fa7a0', 0.06, 0.5, 0.06, Math.cos(i) * 0.12, 0.25, Math.sin(i) * 0.12); l.rotation.z = Math.cos(i) * 0.3; fruit.add(l); } fruit.add(M(GEO.sphLo, '#6a7fd0', 0.05, 0.05, 0.05, 0, 0.5, 0)); g.add(fruit); }
   const o = { id, kind, x, z, y, fruit }; Gather.push(o);
-  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, kind === 'berries' ? 2 : 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
+  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
   return o;
 }
 const DoorSys = {
@@ -240,7 +240,7 @@ const World = {
     const avoid = (x, z, pad = 0) => { if (trailDist(x, z) < 4.5 + pad) return true; for (const c of CAMPS) if (Math.hypot(x - c.x, z - c.z) < c.r + 3 + pad) return true; for (const f of FLATS) if (Math.hypot(x - f.x, z - f.z) < f.r + 5 + pad) return true; if (Math.abs(x - riverX(z)) < 12) return true; for (const p of PONDS) if (Math.hypot(x - p.x, z - p.z) < p.r + 3) return true; if (Math.hypot(x - riverX(-120) - 22, z + 128) < 10) return true; return false; };
     const forestD = (x, z) => fbm(x * 0.012 + 50, z * 0.012, 3) + (z < -100 ? 0.22 : 0) + fbm(x * 0.05, z * 0.05, 2) * 0.25;
     const inst = (geo, mat, list, fn, shadow = true) => { const m = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); m.count = list.length; list.forEach((t, i) => { fn(dummy, t, i); dummy.updateMatrix(); m.setMatrixAt(i, dummy.matrix); }); m.castShadow = shadow; m.receiveShadow = true; m.frustumCulled = false; sc.add(m); if (shadow) Game.treeCasters.push(m); return m; };
-    const coneUp = new THREE.ConeGeometry(1, 1, 8); coneUp.translate(0, 0.5, 0); const cylUp = new THREE.CylinderGeometry(0.7, 1, 1, 7); cylUp.translate(0, 0.5, 0); const blob = new THREE.IcosahedronGeometry(1, 1);
+    const coneUp = new THREE.ConeGeometry(1, 1, 12, 3); coneUp.translate(0, 0.5, 0); const cylUp = new THREE.CylinderGeometry(0.7, 1, 1, 7); cylUp.translate(0, 0.5, 0); const blob = new THREE.IcosahedronGeometry(1, 2);
     // --- trees: pine, fir, oak, aspen, dead snag; clustered by a forest density field with clearings
     const T = { pine: [], fir: [], oak: [], aspen: [], snag: [] };
     for (let i = 0; i < 9000 && Object.values(T).reduce((a, l) => a + l.length, 0) < 1700; i++) {
@@ -251,15 +251,15 @@ const World = {
     }
     for (const [x, z] of [[-14, 40], [-70, 44], [-28, -6], [-80, 0], [-5, 34]]) { const h = Terrain.height(x, z); T.oak.push([x, h, z, 1.25, R() * TAU, R()]); Col.circle(x, z, 0.6, h - 1, h + 6, { block: true, cover: true }); }
     const bark = toon('#6b4a2f'), barkL = toon('#e7e2d6'), barkD = toon('#857b70');
-    const W = (c, amp) => windMat(c, amp);
+    const W = (c, amp, leaf = 0) => windMat(c, amp, leaf);
     inst(cylUp, bark, T.pine, (d, [x, h, z, s]) => { d.position.set(x, h - 0.2, z); d.scale.set(0.24 * s, 2.2 * s, 0.24 * s); d.rotation.set(0, 0, 0); });
-    [['#2f6b45', 0], ['#3a7d4f', 1], ['#4b9160', 2]].forEach(([c, k]) => inst(coneUp, W(c, 0.05), T.pine, (d, [x, h, z, s, r, v]) => { d.position.set(x, h + (1.3 + k * 1.25) * s, z); d.scale.set((2.1 - k * 0.55) * s * (0.9 + v * 0.2), (2.5 - k * 0.3) * s, (2.1 - k * 0.55) * s); d.rotation.set(0, r + k, 0); }));
+    [['#2f6b45', 0], ['#3a7d4f', 1], ['#4b9160', 2]].forEach(([c, k]) => inst(coneUp, W(c, 0.05, 0.14), T.pine, (d, [x, h, z, s, r, v]) => { d.position.set(x, h + (1.3 + k * 1.25) * s, z); d.scale.set((2.1 - k * 0.55) * s * (0.9 + v * 0.2), (2.5 - k * 0.3) * s, (2.1 - k * 0.55) * s); d.rotation.set(0, r + k, 0); }));
     inst(cylUp, bark, T.fir, (d, [x, h, z, s]) => { d.position.set(x, h - 0.2, z); d.scale.set(0.2 * s, 2.5 * s, 0.2 * s); d.rotation.set(0, 0, 0); });
-    [['#24563a', 0], ['#2c6542', 1], ['#356f4a', 2], ['#3e7a52', 3]].forEach(([c, k]) => inst(coneUp, W(c, 0.04), T.fir, (d, [x, h, z, s, r]) => { d.position.set(x, h + (1.1 + k * 1.5) * s, z); d.scale.set((1.45 - k * 0.3) * s, (2.6 - k * 0.25) * s, (1.45 - k * 0.3) * s); d.rotation.set(0, r + k, 0); }));
+    [['#24563a', 0], ['#2c6542', 1], ['#356f4a', 2], ['#3e7a52', 3]].forEach(([c, k]) => inst(coneUp, W(c, 0.04, 0.12), T.fir, (d, [x, h, z, s, r]) => { d.position.set(x, h + (1.1 + k * 1.5) * s, z); d.scale.set((1.45 - k * 0.3) * s, (2.6 - k * 0.25) * s, (1.45 - k * 0.3) * s); d.rotation.set(0, r + k, 0); }));
     inst(cylUp, bark, T.oak, (d, [x, h, z, s]) => { d.position.set(x, h - 0.2, z); d.scale.set(0.28 * s, 2.6 * s, 0.28 * s); d.rotation.set(0, 0, 0); });
-    [['#5f9a3e', 0, 0, 3.6, 2.0], ['#74ad4b', 0.8, -0.4, 4.3, 1.4], ['#6aa244', -0.9, 0.5, 4.0, 1.3], ['#86b95a', 0.1, 0.3, 4.9, 1.1]].forEach(([c, ox, oz, oy, r0]) => inst(blob, W(c, 0.06), T.oak, (d, [x, h, z, s, r, v]) => { d.position.set(x + (ox * Math.cos(r) - oz * Math.sin(r)) * s, h + oy * s, z + (ox * Math.sin(r) + oz * Math.cos(r)) * s); d.scale.set(r0 * s, r0 * 0.82 * s, r0 * s); d.rotation.set(v, r, 0); }));
+    [['#5f9a3e', 0, 0, 3.6, 2.0], ['#74ad4b', 0.8, -0.4, 4.3, 1.4], ['#6aa244', -0.9, 0.5, 4.0, 1.3], ['#86b95a', 0.1, 0.3, 4.9, 1.1]].forEach(([c, ox, oz, oy, r0]) => inst(blob, W(c, 0.06, 0.32), T.oak, (d, [x, h, z, s, r, v]) => { d.position.set(x + (ox * Math.cos(r) - oz * Math.sin(r)) * s, h + oy * s, z + (ox * Math.sin(r) + oz * Math.cos(r)) * s); d.scale.set(r0 * s, r0 * 0.82 * s, r0 * s); d.rotation.set(v, r, 0); }));
     inst(cylUp, barkL, T.aspen, (d, [x, h, z, s]) => { d.position.set(x, h - 0.2, z); d.scale.set(0.16 * s, 3.6 * s, 0.16 * s); d.rotation.set(0, 0, 0); });
-    [['#b9c95a', 3.4, 1.15], ['#d4c75a', 4.4, 0.9]].forEach(([c, oy, r0]) => inst(blob, W(c, 0.08), T.aspen, (d, [x, h, z, s, r]) => { d.position.set(x, h + oy * s, z); d.scale.set(r0 * s, r0 * 1.5 * s, r0 * s); d.rotation.set(0, r, 0); }));
+    [['#b9c95a', 3.4, 1.15], ['#d4c75a', 4.4, 0.9]].forEach(([c, oy, r0]) => inst(blob, W(c, 0.08, 0.28), T.aspen, (d, [x, h, z, s, r]) => { d.position.set(x, h + oy * s, z); d.scale.set(r0 * s, r0 * 1.5 * s, r0 * s); d.rotation.set(0, r, 0); }));
     inst(cylUp, barkD, T.snag, (d, [x, h, z, s]) => { d.position.set(x, h - 0.2, z); d.scale.set(0.2 * s, 3.6 * s, 0.2 * s); d.rotation.set(0, 0, 0.06); });
     inst(cylUp, barkD, T.snag, (d, [x, h, z, s, r]) => { d.position.set(x, h + 2.2 * s, z); d.scale.set(0.07 * s, 1.4 * s, 0.07 * s); d.rotation.set(0.9, r, 0); });
     // --- fallen logs and stumps (climbable cover)
@@ -274,7 +274,7 @@ const World = {
     inst(GEO.dod, toon('#7d9254'), rocks.filter(r => r[3] > 0.9), (d, [x, h, z, s, r]) => { d.position.set(x, h + s * 0.86, z); d.scale.set(s * 0.72, s * 0.22, s * 0.8); d.rotation.set(0, r, 0); }, false);
     // --- bushes
     const bushes = []; for (let i = 0; i < 3000 && bushes.length < 650; i++) { const x = (R() - 0.5) * 450, z = (R() - 0.5) * 450; if (avoid(x, z, -1.5)) continue; const fd = forestD(x, z); if (R() > 0.25 + fd) continue; const h = Terrain.height(x, z); if (h < WORLD.waterY + 0.5 || h > 26) continue; bushes.push([x, h, z, 0.5 + R() * 0.7, R() * TAU, R()]); }
-    inst(blob, W('#5c8a3c', 0.08), bushes, (d, [x, h, z, s, r]) => { d.position.set(x, h + 0.35 * s, z); d.scale.set(s, s * 0.7, s); d.rotation.set(0, r, 0); });
+    inst(blob, W('#5c8a3c', 0.08, 0.3), bushes, (d, [x, h, z, s, r]) => { d.position.set(x, h + 0.35 * s, z); d.scale.set(s, s * 0.7, s); d.rotation.set(0, r, 0); });
     inst(new THREE.IcosahedronGeometry(1, 0), W('#78a64e', 0.1), bushes, (d, [x, h, z, s, r, v]) => { d.position.set(x + 0.35 * s, h + 0.55 * s, z - 0.2 * s); d.scale.set(s * 0.6, s * 0.5, s * 0.6); d.rotation.set(v, r, 0); }, false);
     // --- grass & flowers in chunks (distance-culled, wind-animated)
     const tuftG = new THREE.ConeGeometry(0.16, 1, 3, 1, true); tuftG.translate(0, 0.5, 0); const blades = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.12, 0, 0.05), new THREE.Vector3(-0.08, 0, 0.1)];

@@ -24,8 +24,8 @@ const Interact = {
 /* ---------- Law: crimes only matter if someone actually witnesses them ---------- */
 const Law = {
   searchC: null, searchR: 70, seenT: 0, recogT: 0, lastCrimeT: -99,
-  VALUES: { theft: 5, trespass: 2, assault: 10, murder: 35, brandish: 3, breakin: 6, looting: 4, robbery: 15 },
-  NAMES: { theft: 'Theft', trespass: 'Trespassing', assault: 'Assault', murder: 'Murder', brandish: 'Threatening', breakin: 'Breaking in', looting: 'Looting a body', robbery: 'Robbery' },
+  VALUES: { disturb: 3, theft: 5, trespass: 2, assault: 10, murder: 35, brandish: 3, breakin: 6, looting: 4, robbery: 15 },
+  NAMES: { disturb: 'Disturbing the peace', theft: 'Theft', trespass: 'Trespassing', assault: 'Assault', murder: 'Murder', brandish: 'Threatening', breakin: 'Breaking in', looting: 'Looting a body', robbery: 'Robbery' },
   crime(type, pos, o = {}) {
     if (o.region === 'wild' && !NPC.all.some(n => n.alive && n.lawful && Math.hypot(n.pos.x - pos.x, n.pos.z - pos.z) < 30)) return [];
     S.stats.crimes++; const value = (this.VALUES[type] || 3) + (o.value || 0); const ws = [];

@@ -41,7 +41,7 @@ async def main():
         await ev(pg, "HP.choose('Take the bounty'); HP.sim(0.3); HP.tp(-185, 30); HP.sim(1)")
         r = await ev(pg, "({ stage: Q.stage('bounty_board'), target: !!HP.NPC.byKey('bgen_ned'), gang: HP.NPC.all.filter(n => n.tags.includes('bgen')).length, posted: HP.S.bounties.posted.length })")
         check('bounty: taking it starts the hunt; at Dry Creek Ned and his two men are camped', r['stage'] == 'take' and r['target'] and r['gang'] == 3 and r['posted'] == 1, r)
-        await ev(pg, "for (const n of HP.NPC.all.slice()) if (n.key.startsWith('bgen_g')) n.takeHit({ dmg: 999, from: HP.Game.player, gun: 'revolver' }); Q.ko(HP.NPC.byKey('bgen_ned')); Q.near('bgen_ned', 1.0); HP.press('Hogtie')")
+        await ev(pg, "for (const n of HP.NPC.all.slice()) if (n.key.startsWith('bgen_g')) n.takeHit({ dmg: 999, from: HP.Game.player, gun: 'revolver' }); Q.ko(HP.NPC.byKey('bgen_ned')); Q.near('bgen_ned', 1.0); HP.sim(0.4); HP.press('Hogtie')")  # let the weapon swap from Q.ko finish first, or the prompt is hidden while Wren is busy
         await pg.wait_for_function("HP.NPC.byKey('bgen_ned').hogtied === true", timeout=20000)
         po = await ev(pg, "(()=>{ HP.sim(0.5); Q.near('bgen_ned', 1.0); return HP.opts(); })()"); await ev(pg, "HP.press('Pick up'); HP.sim(1.5); HP.sim(0.5)")
         r = await ev(pg, "({ carry: !!(HP.Game.player.carry && HP.Game.player.carry.npc), stage: Q.stage('bounty_board') })")

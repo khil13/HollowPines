@@ -30,7 +30,7 @@ function fbm(x, y, oct = 4) { let s = 0, a = 1, f = 1, n = 0; for (let i = 0; i 
 /* ---------- Input ---------- */
 const Input = {
   keys: new Set(), pressed: new Set(), mouse: { dx: 0, dy: 0, l: false, r: false, lp: false }, wheel: 0,
-  touch: false, move: { x: 0, y: 0, mag: 0 }, look: { dx: 0, dy: 0 }, pinch: 0, btn: {}, btnP: new Set(), sprintToggle: false, aimToggle: false,
+  touch: false, move: { x: 0, y: 0, mag: 0 }, autoSprint: false, rimT: 0, look: { dx: 0, dy: 0 }, pinch: 0, btn: {}, btnP: new Set(), sprintToggle: false, aimToggle: false,
   locked: false, uiOpen: false,
   init(canvas) {
     addEventListener('keydown', e => { if (e.repeat) return; const k = e.key.toLowerCase(); this.keys.add(k); this.pressed.add(k); if (['tab', ' ', 'alt'].includes(k)) e.preventDefault(); });
@@ -46,13 +46,15 @@ const Input = {
     addEventListener('mousemove', e => { if (this.touch) return; if (this.locked || this.mouse.l || this.mouse.r) { this.mouse.dx += e.movementX || 0; this.mouse.dy += e.movementY || 0; } });
     canvas.addEventListener('wheel', e => { this.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
     // touch
-    const stick = document.getElementById('stick'), knob = document.getElementById('knob');
-    let stickId = null, sx = 0, sy = 0; const lookIds = new Map();
-    stick.addEventListener('pointerdown', e => { stickId = e.pointerId; const r = stick.getBoundingClientRect(); sx = r.left + r.width / 2; sy = r.top + r.height / 2; stick.setPointerCapture(e.pointerId); upd(e); e.preventDefault(); });
+    const stick = document.getElementById('stick'), knob = document.getElementById('knob'), lzone = document.getElementById('lzone');
+    let stickId = null, sx = 0, sy = 0; const lookIds = new Map(); stick.classList.add('idle');
+    stick.addEventListener('pointerdown', e => { stickId = e.pointerId; const r = stick.getBoundingClientRect(); sx = r.left + r.width / 2; sy = r.top + r.height / 2; try { stick.setPointerCapture(e.pointerId); } catch (err) {} stick.classList.remove('idle'); upd(e); e.preventDefault(); });
+    // floating stick: wherever the thumb lands on the left side of the screen becomes the centre of the stick
+    lzone.addEventListener('pointerdown', e => { if (stickId !== null) return; this.setTouch(true); stickId = e.pointerId; sx = e.clientX; sy = e.clientY; stick.classList.add('float'); stick.classList.remove('idle'); stick.style.left = (sx - 66) + 'px'; stick.style.top = (sy - 66) + 'px'; stick.style.bottom = 'auto'; stick.style.right = 'auto'; try { lzone.setPointerCapture(e.pointerId); } catch (err) {} upd(e); e.preventDefault(); });
     const upd = e => { let dx = e.clientX - sx, dy = e.clientY - sy; const m = Math.hypot(dx, dy), R = 55; if (m > R) { dx *= R / m; dy *= R / m; } knob.style.transform = `translate(${dx}px,${dy}px)`; this.move.x = dx / R; this.move.y = -dy / R; this.move.mag = Math.min(1, m / R); };
-    stick.addEventListener('pointermove', e => { if (e.pointerId === stickId) upd(e); });
-    const end = e => { if (e.pointerId === stickId) { stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; } };
-    stick.addEventListener('pointerup', end); stick.addEventListener('pointercancel', end); stick.addEventListener('lostpointercapture', end);
+    const mv = e => { if (e.pointerId === stickId) upd(e); }; stick.addEventListener('pointermove', mv); lzone.addEventListener('pointermove', mv);
+    const end = e => { if (e.pointerId === stickId) { stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; stick.classList.remove('float'); stick.classList.add('idle'); stick.style.left = stick.style.top = stick.style.bottom = stick.style.right = ''; } };
+    for (const el of [stick, lzone]) { el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end); el.addEventListener('lostpointercapture', end); }
     canvas.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') return; this.setTouch(true); lookIds.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
     const pinchD = () => { const a = [...lookIds.values()]; return a.length >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0; };
     canvas.addEventListener('pointermove', e => { const p = lookIds.get(e.pointerId); if (!p) return; const d0 = pinchD(); const nx = e.clientX, ny = e.clientY; if (lookIds.size >= 2) { p.x = nx; p.y = ny; this.pinch += pinchD() - d0; return; } this.look.dx += (nx - p.x); this.look.dy += (ny - p.y); p.x = nx; p.y = ny; });
@@ -74,6 +76,10 @@ const Input = {
   setTouch(v) { this.touch = v; document.body.classList.toggle('touch', v); document.getElementById('touch').hidden = !v || !Game.running; },
   down(k) { return this.keys.has(k); }, hit(k) { return this.pressed.has(k); }, tb(n) { return this.btnP.has(n); },
   setBtnState(n, on) { const b = document.querySelector(`#touch .tb[data-b="${n}"]`); if (b) b.classList.toggle('on', on); },
+  tick(dt) { // push the stick to the rim and hold it there to break into a run (let it back in to slow down)
+    if (this.move.mag > 0.95) this.rimT += dt; else { this.rimT = 0; if (this.move.mag < 0.7) this.autoSprint = false; } if (this.rimT > 0.3 && this.touch && Settings.v.autoRun !== false) this.autoSprint = true;
+    const k = document.getElementById('knob'); if (k && k.classList.contains('run') !== this.autoSprint) k.classList.toggle('run', this.autoSprint); },
+  applyLayout() { document.body.classList.toggle('lefty', !!Settings.v.lefty); const t = document.getElementById('touch'); if (t) t.style.setProperty('--tbs', Settings.v.btnScale || 1); },
   endFrame() { this.pressed.clear(); this.btnP.clear(); this.mouse.dx = this.mouse.dy = 0; this.mouse.lp = false; this.look.dx = this.look.dy = 0; this.wheel = 0; this.pinch = 0; }
 };
 
@@ -113,7 +119,7 @@ const Sfx = {
 
 /* ---------- Player settings (per browser) ---------- */
 const Settings = {
-  KEY: 'hollowpines_settings', v: { mouseLock: true, sens: 1, invertY: false, zoom: 4.6, quality: 'auto', autoCam: true, sound: 0.6, hints: true },
+  KEY: 'hollowpines_settings', v: { mouseLock: true, sens: 1, tsens: 1, invertY: false, zoom: 4.6, quality: 'auto', autoCam: true, sound: 0.6, hints: true, haptics: true, autoRun: true, btnScale: 1, lefty: false },
   load() { try { Object.assign(this.v, JSON.parse(localStorage.getItem(this.KEY) || '{}')); } catch (e) {} },
   save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.v)); } catch (e) {} },
   set(k, val) { this.v[k] = val; this.save(); if (k === 'quality' && typeof Game !== 'undefined' && Game.renderer) Game.applyQuality(); if (k === 'sound' && Sfx.master) Sfx.master.gain.value = val; },

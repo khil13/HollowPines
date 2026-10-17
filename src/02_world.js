@@ -65,7 +65,7 @@ const Terrain = {
     const n = WORLD.size / WORLD.res + 1; this.n = n; const H = new Float32Array(n * n); this.H = H;
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) H[j * n + i] = rawHeight(-WORLD.half + i * WORLD.res, -WORLD.half + j * WORLD.res);
     const g = new THREE.PlaneGeometry(WORLD.size, WORLD.size, n - 1, n - 1); g.rotateX(-Math.PI / 2);
-    const pos = g.attributes.position, col = new Float32Array(pos.count * 3); this.baseCol = col;
+    const pos = g.attributes.position, col = new Float32Array(pos.count * 3), dirtA = new Float32Array(pos.count); this.baseCol = col;
     const C = (h) => new THREE.Color(h);
     const grassA = C('#8db25a'), grassB = C('#6e9a47'), meadow = C('#b3b467'), forest = C('#5f7f3f'), dirt = C('#b89a6c'), rut = C('#9a7c55'), sand = C('#cdbd8f'), rock = C('#8b8880'), moss = C('#76875a'), snow = C('#f2f4f5'), mud = C('#7d6646'), tmp = new THREE.Color();
     for (let k = 0; k < pos.count; k++) {
@@ -76,8 +76,8 @@ const Terrain = {
       tmp.copy(grassA).lerp(grassB, clamp(nz * 2 + 0.5, 0, 1)); tmp.lerp(meadow, clamp(fbm(x * 0.012 + 9, z * 0.012, 2) * 2.2, 0, 0.7));
       tmp.lerp(forest, clamp((fbm(x * 0.012 + 50, z * 0.012, 3) + (z < -100 ? 0.25 : 0)) * 3, 0, 0.75));
       tmp.offsetHSL(0, 0, (h - 4) * 0.004);
-      const td = trailDist(x, z); if (td < 3.6) { tmp.lerp(dirt, smoothstep(3.6, 1.4, td)); if (td > 0.5 && td < 1.3) tmp.lerp(rut, 0.35); }
-      for (const p of PONDS) { const pd = Math.hypot(x - p.x, z - p.z); if (pd < p.r + 4) tmp.lerp(pd < p.r ? mud : moss, smoothstep(p.r + 4, p.r - 1, pd) * 0.7); }
+      const td = trailDist(x, z); dirtA[k] = smoothstep(3.8, 1.2, td); if (td < 3.6) { tmp.lerp(dirt, smoothstep(3.6, 1.4, td)); if (td > 0.5 && td < 1.3) tmp.lerp(rut, 0.35); }
+      for (const p of PONDS) { const pd = Math.hypot(x - p.x, z - p.z); if (pd < p.r + 4) { tmp.lerp(pd < p.r ? mud : moss, smoothstep(p.r + 4, p.r - 1, pd) * 0.7); dirtA[k] = Math.max(dirtA[k], smoothstep(p.r + 4, p.r, pd) * 0.8); } }
       const rd = Math.abs(x - riverX(z)); if (rd < 14 && h < WORLD.waterY + 1.4) tmp.lerp(sand, smoothstep(14, 9, rd));
       if (h < WORLD.waterY + 0.1) tmp.lerp(mud, 0.6);
       for (const f of FLATS.slice(0, 3)) { const d = Math.hypot(x - f.x, z - f.z); if (d < f.r * 0.75) tmp.lerp(dirt, 0.35 * smoothstep(f.r * 0.75, f.r * 0.3, d)); }
@@ -86,7 +86,19 @@ const Terrain = {
       col[k * 3] = tmp.r; col[k * 3 + 1] = tmp.g; col[k * 3 + 2] = tmp.b;
     }
     g.setAttribute('color', new THREE.BufferAttribute(col.slice(), 3)); g.computeVertexNormals();
-    this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: groundTexture() });
+    g.setAttribute('aDirt', new THREE.BufferAttribute(dirtA, 1));
+    // rain turns trails and pond edges to dark mud, and puddles gather in them, reflecting the sky, rings spreading where drops land
+    this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: groundTexture() }); this.groundU = { uWet: { value: 0 }, uRainT: { value: 0 }, uRain: { value: 0 }, uSkyC: { value: new THREE.Color('#cfe5ee') } }; const GU = this.groundU;
+    this.mat.onBeforeCompile = sh => { Object.assign(sh.uniforms, GU);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aDirt; varying float vDirt; varying vec3 vGp;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvDirt = aDirt; vGp = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet; uniform float uRainT; uniform float uRain; uniform vec3 uSkyC; varying float vDirt; varying vec3 vGp; float pud = 0.0;\n' + VNOISE3)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          if (uWet > 0.01) { float n = vn3(vec3(vGp.xz * 0.32, 1.7)) * 0.7 + vn3(vec3(vGp.xz * 1.1, 4.1)) * 0.3;
+            pud = smoothstep(0.62, 0.68, n + vDirt * 0.22 - (1.0 - uWet) * 0.5) * smoothstep(0.25, 0.6, vDirt) * uWet;
+            diffuseColor.rgb *= (1.0 - uWet * 0.3 * vDirt) * (1.0 - pud * 0.7); }`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          if (pud > 0.0) { vec2 cell = floor(vGp.xz * 1.4), f = fract(vGp.xz * 1.4) - 0.5; float hs = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5), ph = fract(uRainT * 0.9 + hs); f -= (vec2(hs, fract(hs * 7.31)) - 0.5) * 0.5; float ring = smoothstep(0.03, 0.0, abs(length(f) - ph * 0.35)) * (1.0 - ph) * uRain * step(0.35, fract(hs * 3.7));
+            totalEmissiveRadiance += uSkyC * pud * (0.24 + ring * 0.22); }`); };
     const mesh = new THREE.Mesh(g, this.mat); mesh.receiveShadow = true; scene.add(mesh); this.mesh = mesh;
     // water: a height texture tells every pixel how deep it is (clear shallows, dark depths, foam lapping the shore);
     // ripple normals reflect the sky with a fresnel falloff and catch a hard sun glint; rain roughens the surface
@@ -137,6 +149,7 @@ const Terrain = {
     if (u + v <= 1) return h00 + (h10 - h00) * u + (h01 - h00) * v;
     return h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
   },
+  groundUpdate(t) { const u = this.groundU; u.uWet.value = Sky.wet || 0; u.uRainT.value = t; u.uRain.value = Sky.raining && Sky.raining() ? 1 : 0; if (Game.scene.fog) u.uSkyC.value.copy(Game.scene.fog.color); },
   setWet(w) { const c = this.mesh.geometry.attributes.color, b = this.baseCol, k = 1 - w * 0.28; for (let i = 0; i < b.length; i++) c.array[i] = b[i] * k; c.needsUpdate = true; }
 };
 
@@ -288,20 +301,29 @@ function prop(parent, mesh, x, z, colR, h = 1, walk = false) { parent.add(mesh);
 
 /* ---------- wind-animated materials for foliage & grass ---------- */
 const WIND = { uTime: { value: 0 }, uStrength: { value: 1 } }; const _windMats = {};
-function windMat(color, amp) {
-  const k = color + amp; if (_windMats[k]) return _windMats[k]; if (!GRAD) toon('#fff');
+const VNOISE3 = `float h31(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+  float vn3(vec3 x){ vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(h31(i), h31(i + vec3(1,0,0)), f.x), mix(h31(i + vec3(0,1,0)), h31(i + vec3(1,1,0)), f.x), f.y), mix(mix(h31(i + vec3(0,0,1)), h31(i + vec3(1,0,1)), f.x), mix(h31(i + vec3(0,1,1)), h31(i + vec3(1,1,1)), f.x), f.y), f.z); }`;
+// leaf > 0 turns a smooth canopy into leafy clumps: a lumpy silhouette (noise pushes vertices in and out) and clumps of
+// light and dark leaves painted across it
+function windMat(color, amp, leaf = 0) {
+  const k = color + amp + '/' + leaf; if (_windMats[k]) return _windMats[k]; if (!GRAD) toon('#fff');
   const m = new THREE.MeshToonMaterial({ color, gradientMap: GRAD });
-  m.onBeforeCompile = sh => { sh.uniforms.uTime = WIND.uTime; sh.uniforms.uStr = WIND.uStrength; sh.uniforms.uAmp = { value: amp };
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; uniform float uAmp; uniform float uStr;').replace('#include <begin_vertex>', `#include <begin_vertex>
+  m.onBeforeCompile = sh => { sh.uniforms.uTime = WIND.uTime; sh.uniforms.uStr = WIND.uStrength; sh.uniforms.uAmp = { value: amp }; sh.uniforms.uLeaf = { value: leaf };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; uniform float uAmp; uniform float uStr; uniform float uLeaf; varying vec3 vLp;\n' + VNOISE3).replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec3 ip = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
       #else
         vec3 ip = vec3(0.0);
       #endif
+      vLp = position * 1.7 + ip * 0.37;
+      if (uLeaf > 0.0) { float ln = vn3(vLp) * 0.65 + vn3(vLp * 2.3) * 0.35; transformed += normalize(position + vec3(1e-4)) * (ln - 0.45) * uLeaf; }
       float hw = max(position.y + 0.5, 0.0);
       float ph = uTime * 1.6 + ip.x * 0.21 + ip.z * 0.17;
       transformed.x += (sin(ph) + 0.4 * sin(ph * 2.3)) * hw * uAmp * uStr * 0.6;
-      transformed.z += cos(ph * 0.8 + 1.3) * hw * uAmp * uStr * 0.4;`); };
+      transformed.z += cos(ph * 0.8 + 1.3) * hw * uAmp * uStr * 0.4;`);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uLeaf; varying vec3 vLp;\n' + VNOISE3)
+      .replace('#include <color_fragment>', '#include <color_fragment>\nif (uLeaf > 0.0) { float c = vn3(vLp * 2.6) * 0.6 + vn3(vLp * 6.5) * 0.4; diffuseColor.rgb *= 0.72 + 0.5 * c; }'); };
   m.customProgramCacheKey = () => 'wind';
   return _windMats[k] = m;
 }
