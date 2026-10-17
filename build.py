@@ -2,6 +2,8 @@ import glob,sys,base64,os,json
 shell=open('src/shell.html').read()
 js='\n'.join(open(f).read() for f in sorted(glob.glob('src/[0-9]*.js')))
 glb='<script>window.CHARACTER_GLB="'+base64.b64encode(open('assets/character.glb','rb').read()).decode()+'";</script>' if os.path.exists('assets/character.glb') else ''
+animals={os.path.splitext(os.path.basename(f))[0]: base64.b64encode(open(f,'rb').read()).decode() for f in sorted(glob.glob('assets/animals/*.glb'))}  # optional imported animals (03c_animals.js)
+glb+=('<script>window.ANIMAL_GLB='+json.dumps(animals)+';</script>') if animals else ''
 anims={os.path.splitext(os.path.basename(f))[0]: json.load(open(f)) for f in sorted(glob.glob('assets/anim/*.json'))}  # retargeted clips (tools/retarget.py)
 ext='<script>window.EXTRA_ANIMS='+json.dumps(anims,separators=(',',':'))+';</script>' if anims else ''
 cdn='<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>\n<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>'

@@ -110,7 +110,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 #menuBtn{width:36px;height:30px;border-radius:10px;border:2px solid rgba(244,234,211,.55);background:rgba(29,42,37,.6);color:var(--paper);font-size:17px;pointer-events:auto;display:grid;place-items:center;padding:0}
 #horseCard{pointer-events:none;background:rgba(29,42,37,.72);border-radius:12px;padding:6px 12px;font-weight:800;font-size:12.5px;display:flex;gap:10px;align-items:center;white-space:nowrap}
 #horseCard i{display:inline-block;width:54px;height:6px;border-radius:3px;background:#0005;overflow:hidden;vertical-align:middle;margin-left:4px}#horseCard i b{display:block;height:100%;background:var(--sky)}
-@media (max-height:520px){#tcluster{transform:scale(.86);transform-origin:right bottom}#tctx{bottom:calc(178px + env(safe-area-inset-bottom,0px))}#stick{transform:scale(.88);transform-origin:left bottom}#mini{width:82px!important;height:82px!important}#prompts{bottom:calc(16px + env(safe-area-inset-bottom,0px))!important}#toasts{max-width:220px}}
+@media (max-height:520px){#tcluster{transform:scale(.86);transform-origin:right bottom}#tctx{bottom:calc(178px + env(safe-area-inset-bottom,0px));flex-wrap:nowrap;max-width:calc(100vw - 190px)}#stick{transform:scale(.88);transform-origin:left bottom}#mini{width:76px!important;height:76px!important}#tr{flex-direction:row;align-items:flex-start}#prompts{bottom:calc(16px + env(safe-area-inset-bottom,0px))!important}#toasts{max-width:220px}}
 body.touch #ammo{display:none}
 /* phone controls: a floating stick wherever the left thumb lands, push to the rim to run, scalable buttons, left-handed swap */
 #lzone{position:absolute;left:0;top:22%;bottom:0;width:42%;pointer-events:auto}
@@ -136,6 +136,8 @@ body.touch #prompts{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
 #fish{left:50%;top:38%;transform:translate(-50%,-50%);background:rgba(29,42,37,.85);padding:12px 18px;border-radius:14px;text-align:center;font-weight:900;pointer-events:auto;min-width:220px}
 #fish .bar{height:12px;border-radius:6px;background:#0005;margin-top:8px;overflow:hidden}#fish .bar i{display:block;height:100%;background:var(--sage)}
 @media (max-width:640px){#mini{width:90px;height:90px}#tr{flex-direction:column-reverse}#clock{font-size:11.5px}#objective{left:max(12px,env(safe-area-inset-left,0px));transform:none;top:calc(58px + env(safe-area-inset-top,0px));max-width:calc(100% - 140px);text-align:left}#toasts{top:calc(118px + env(safe-area-inset-top,0px))}#horseCard{font-size:11.5px;flex-wrap:wrap;justify-content:center;white-space:normal;max-width:92vw}#objective{font-size:12px;max-width:46vw}}
+/* inside an embedding viewer on a phone (the artifact page), its header floats over the top of the frame: keep the HUD clear of it */
+body.framed #tl,body.framed #tr,body.framed #objective,body.framed #wanted,body.framed #toasts{margin-top:46px}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
 </style>
 
@@ -270,7 +272,7 @@ const Input = {
   tick(dt) { // push the stick to the rim and hold it there to break into a run (let it back in to slow down)
     if (this.move.mag > 0.95) this.rimT += dt; else { this.rimT = 0; if (this.move.mag < 0.7) this.autoSprint = false; } if (this.rimT > 0.3 && this.touch && Settings.v.autoRun !== false) this.autoSprint = true;
     const k = document.getElementById('knob'); if (k && k.classList.contains('run') !== this.autoSprint) k.classList.toggle('run', this.autoSprint); },
-  applyLayout() { document.body.classList.toggle('lefty', !!Settings.v.lefty); const t = document.getElementById('touch'); if (t) t.style.setProperty('--tbs', Settings.v.btnScale || 1); },
+  applyLayout() { document.body.classList.toggle('lefty', !!Settings.v.lefty); document.body.classList.toggle('framed', window.self !== window.top && matchMedia('(pointer:coarse)').matches); const t = document.getElementById('touch'); if (t) t.style.setProperty('--tbs', Settings.v.btnScale || 1); },
   endFrame() { this.pressed.clear(); this.btnP.clear(); this.mouse.dx = this.mouse.dy = 0; this.mouse.lp = false; this.look.dx = this.look.dy = 0; this.wheel = 0; this.pinch = 0; }
 };
 
@@ -993,36 +995,136 @@ const ACTIONS = {
 };
 
 /* ---------- Quadrupeds (horse, deer, wolf, rabbit) ---------- */
+// sculpted quadrupeds: overlapping rounded forms on the same joint hierarchy the animator drives (body, neck, head,
+// tail, two-part legs), so gaits, grazing, rearing and lying down all still work
+const QGEO = {
+  taperUp: new THREE.CylinderGeometry(0.6, 1, 1, 14),          // narrow top: necks, tails' docks
+  taperDown: new THREE.CylinderGeometry(1, 0.55, 1, 12),        // wide top: upper legs
+  hair: new THREE.CylinderGeometry(0.3, 1, 1, 10),              // flared tail hair
+  hoof: new THREE.CylinderGeometry(0.78, 1, 1, 10),
+  snout: new THREE.CylinderGeometry(0.62, 1, 1, 14).rotateX(Math.PI / 2), // along +z, narrowing toward the muzzle
+  ear: new THREE.ConeGeometry(1, 1, 8),
+  lock: new THREE.BoxGeometry(1, 1, 1).translate(0, -0.5, 0),     // a lock of mane hair hanging from its top
+};
+let GRAD8 = null; const _animalMats = {};
+function animalMat(c) { if (!GRAD8) { GRAD8 = new THREE.DataTexture(new Uint8Array([105, 140, 170, 195, 215, 232, 246, 255]), 8, 1, THREE.LuminanceFormat); GRAD8.minFilter = GRAD8.magFilter = THREE.LinearFilter; GRAD8.needsUpdate = true; }
+  return _animalMats[c] || (_animalMats[c] = new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8 })); }
+/* a smooth lofted tube: elliptical rings along a centreline in the y-z plane, capped at both ends. Each section is
+   [y, z, rx, ry] with rx the half-width (x) and ry the half-depth across the centreline. One continuous surface reads as
+   an animal's body far better than overlapping balls. */
+function loftGeo(secs, seg = 18) {
+  const pos = [], idx = [], n = secs.length, tan = new THREE.Vector3(), up = new THREE.Vector3(), X = new THREE.Vector3(1, 0, 0);
+  for (let i = 0; i < n; i++) {
+    const a = secs[Math.max(0, i - 1)], b = secs[Math.min(n - 1, i + 1)]; tan.set(0, b[0] - a[0], b[1] - a[1]).normalize(); up.crossVectors(tan, X);
+    const [y, z, rx, ry] = secs[i];
+    for (let k = 0; k < seg; k++) { const th = k / seg * TAU, c = Math.cos(th), sn = Math.sin(th); pos.push(c * rx, y + up.y * sn * ry, z + up.z * sn * ry); }
+  }
+  for (let i = 0; i < n - 1; i++) for (let k = 0; k < seg; k++) { const a = i * seg + k, b = i * seg + (k + 1) % seg, c2 = a + seg, d = b + seg; idx.push(a, c2, b, b, c2, d); }
+  const c0 = pos.length / 3; pos.push(0, secs[0][0], secs[0][1]); const c1 = c0 + 1; pos.push(0, secs[n - 1][0], secs[n - 1][1]);
+  for (let k = 0; k < seg; k++) { const k1 = (k + 1) % seg; idx.push(c0, k1, k); idx.push(c1, (n - 1) * seg + k, (n - 1) * seg + k1); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  // keep the winding outward whichever way the centreline runs
+  const m = Math.floor(n / 2) * seg, nr = g.attributes.normal;
+  if (pos[m * 3] * nr.getX(m) < 0) { const ix = g.index.array; for (let i = 0; i < ix.length; i += 3) { const t = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = t; } g.computeVertexNormals(); }
+  return g;
+}
+/* body plans per species, in units of the rig's dims (z along the body in bl, half-width in bw, half-depth in bh) */
+const QSHAPE = {
+  horse: { torso: [[-1.02, 0.12, 0.1, 0.12], [-0.94, 0.16, 0.62, 0.62], [-0.72, 0.12, 0.98, 0.95], [-0.42, 0.04, 1.0, 0.98], [0, -0.02, 1.0, 1.02], [0.4, 0.04, 0.92, 1.0], [0.74, 0.12, 0.76, 0.92], [0.96, 0.08, 0.5, 0.66], [1.06, 0.02, 0.1, 0.14]],
+    neck: [[-0.18, 0.08, 0.5, 0.95], [0.1, 0, 0.44, 0.78], [0.45, -0.04, 0.34, 0.55], [0.85, -0.04, 0.27, 0.4], [1.02, -0.02, 0.22, 0.3], [1.1, -0.02, 0.05, 0.08]],
+    head: [[-0.3, 0.06, 0.12, 0.14], [-0.2, 0.02, 0.27, 0.3], [-0.02, -0.06, 0.32, 0.4], [0.25, -0.02, 0.26, 0.3], [0.62, -0.06, 0.2, 0.22], [0.95, -0.1, 0.19, 0.21], [1.1, -0.12, 0.14, 0.15], [1.16, -0.12, 0.04, 0.05]] },
+  deer: { torso: [[-1.02, 0.12, 0.1, 0.12], [-0.92, 0.12, 0.7, 0.72], [-0.6, 0.08, 1.0, 0.96], [-0.2, 0, 0.98, 0.92], [0.2, -0.04, 0.96, 1.0], [0.6, 0.04, 0.86, 0.96], [0.92, 0.08, 0.56, 0.7], [1.04, 0.04, 0.1, 0.14]],
+    neck: [[-0.15, 0.06, 0.48, 0.7], [0.2, 0, 0.4, 0.55], [0.6, -0.02, 0.32, 0.42], [0.95, 0, 0.28, 0.34], [1.06, 0, 0.06, 0.08]],
+    head: [[-0.28, 0.06, 0.14, 0.16], [-0.18, 0.04, 0.34, 0.36], [0.05, 0, 0.36, 0.38], [0.4, -0.04, 0.26, 0.26], [0.78, -0.08, 0.17, 0.17], [0.94, -0.08, 0.12, 0.12], [1.0, -0.08, 0.03, 0.03]] },
+  wolf: { torso: [[-1.02, 0.1, 0.1, 0.12], [-0.92, 0.1, 0.66, 0.66], [-0.6, 0.06, 0.88, 0.8], [-0.2, 0.04, 0.84, 0.78], [0.2, 0, 0.94, 0.98], [0.56, -0.04, 1.02, 1.12], [0.86, 0.02, 0.88, 1.0], [1.04, 0.06, 0.5, 0.6], [1.12, 0.06, 0.1, 0.12]],
+    neck: [[-0.3, 0.04, 0.9, 1.1], [0.2, 0, 0.82, 0.95], [0.7, 0, 0.66, 0.74], [1.05, 0, 0.5, 0.56], [1.15, 0, 0.1, 0.12]],
+    head: [[-0.3, 0.04, 0.16, 0.18], [-0.2, 0.06, 0.42, 0.38], [0.05, 0.04, 0.46, 0.4], [0.32, -0.02, 0.3, 0.26], [0.65, -0.06, 0.18, 0.16], [0.92, -0.06, 0.13, 0.12], [1.0, -0.06, 0.04, 0.04]] },
+};
+const _loftCache = {};
+function quadLoft(t, part, dims) { const k = t + part; if (_loftCache[k]) return _loftCache[k];
+  const sh = QSHAPE[t][part], { bl, bw, bh } = dims, h = dims.head;
+  const secs = part === 'torso' ? sh.map(([z, y, rx, ry]) => [y * bh, z * bl, rx * bw, ry * bh])
+    : part === 'neck' ? sh.map(([y, z, rx, ry]) => { const f = bw * (t === 'horse' ? 0.95 : t === 'deer' ? 0.75 : 0.62); return [y * dims.neck, z * dims.neck, rx * f * 0.8, ry * f]; })
+    : sh.map(([z, y, rx, ry]) => [y * h, z * h, rx * h, ry * h]);
+  return _loftCache[k] = loftGeo(secs, part === 'neck' ? 18 : 20); }
+function legLoft(t, dims, front, part) { const k = t + 'leg' + front + part; if (_loftCache[k]) return _loftCache[k];
+  const { bw, bh } = dims, ul = dims.leg * 0.5 + bh * 0.25, ll = dims.leg * 0.5, w = t === 'wolf' ? 1.15 : 1;
+  const secs = part === 'up' ? (front ? [[0.2 * bw, 0, 0.3 * bw, 0.5 * bw], [0, 0.02, 0.32 * bw, 0.5 * bw], [-ul * 0.45, 0.02, 0.24 * bw, 0.34 * bw], [-ul * 0.85, 0, 0.15 * bw * w, 0.19 * bw * w], [-ul * 1.02, 0, 0.12 * bw * w, 0.14 * bw * w]]
+                                      : [[0.25 * bw, 0, 0.36 * bw, 0.62 * bw], [0, -0.02, 0.38 * bw, 0.62 * bw], [-ul * 0.45, -0.04, 0.27 * bw, 0.42 * bw], [-ul * 0.85, -0.02, 0.14 * bw * w, 0.22 * bw * w], [-ul * 1.02, -0.03, 0.11 * bw * w, 0.16 * bw * w]])
+    : [[0.04, 0, 0.12 * bw * w, 0.15 * bw * w], [-ll * 0.12, 0, 0.1 * bw * w, 0.13 * bw * w], [-ll * 0.5, 0, 0.08 * bw * w, 0.1 * bw * w], [-ll * 0.82, 0.01, 0.1 * bw * w, 0.12 * bw * w], [-ll * 0.92, 0.015, 0.085 * bw * w, 0.1 * bw * w], [-ll * 0.98, 0.02, 0.06 * bw, 0.07 * bw]];
+  return _loftCache[k] = loftGeo(secs, 14); }
 function makeQuad(o) {
+  if (AnimalAssets.has(o.type)) return makeModelQuad(o); // an uploaded model replaces the code-built body (03c_animals.js)
   const t = o.type, s = o.scale || 1; const col = o.color, dark = o.dark || '#3a2a20';
-  const dims = { horse: { bl: 1.0, bw: 0.42, bh: 0.48, leg: 0.95, neck: 0.75, head: 0.5 }, deer: { bl: 0.7, bw: 0.28, bh: 0.32, leg: 0.8, neck: 0.55, head: 0.32 }, wolf: { bl: 0.62, bw: 0.24, bh: 0.28, leg: 0.5, neck: 0.3, head: 0.3 }, rabbit: { bl: 0.2, bw: 0.15, bh: 0.15, leg: 0.12, neck: 0.05, head: 0.14 } }[t];
+  const dims = { horse: { bl: 1.0, bw: 0.42, bh: 0.48, leg: 0.95, neck: 0.8, head: 0.52 }, deer: { bl: 0.7, bw: 0.28, bh: 0.32, leg: 0.82, neck: 0.6, head: 0.32 }, wolf: { bl: 0.62, bw: 0.24, bh: 0.28, leg: 0.52, neck: 0.32, head: 0.3 }, rabbit: { bl: 0.2, bw: 0.15, bh: 0.15, leg: 0.12, neck: 0.05, head: 0.14 } }[t];
+  const { bl, bw, bh } = dims, h = dims.head, R = mulberry((col.charCodeAt(1) || 7) * 31 + bl * 100);
+  const shade = (c, k) => '#' + new THREE.Color(c).multiplyScalar(k).getHexString();
+  const Q = c => animalMat(c); // soft shading so the smooth bodies read as rounded, not faceted
+  const L = (geo, c) => new THREE.Mesh(geo, Q(c));
   const root = new THREE.Group(); const vis = new THREE.Group(); vis.scale.setScalar(s); root.add(vis);
-  const body = new THREE.Group(); body.position.y = dims.leg + dims.bh * 0.6; vis.add(body);
-  body.add(M(GEO.sph, col, dims.bw, dims.bh, dims.bl)); if (o.belly) body.add(M(GEO.sph, o.belly, dims.bw * 0.9, dims.bh * 0.7, dims.bl * 0.8, 0, -dims.bh * 0.3, 0));
-  const neck = new THREE.Group(); neck.position.set(0, dims.bh * 0.4, dims.bl * 0.8); body.add(neck);
-  const nm = M(GEO.cyl, col, dims.bw * 0.55, dims.neck, dims.bw * 0.6, 0, dims.neck / 2, 0); neck.add(nm); neck.rotation.x = t === 'wolf' ? -0.9 : -0.55;
-  const head = new THREE.Group(); head.position.y = dims.neck; neck.add(head);
-  head.add(M(GEO.sph, col, dims.head * 0.5, dims.head * 0.55, dims.head * 0.6, 0, 0, dims.head * 0.2));
-  head.add(M(GEO.sph, o.muzzle || col, dims.head * 0.38, dims.head * 0.38, dims.head * 0.6, 0, -dims.head * 0.12, dims.head * 0.75));
-  head.rotation.x = t === 'wolf' ? 0.9 : 1.15;
-  for (const ex of [-1, 1]) { head.add(M(GEO.sphLo, '#151515', 0.045 * dims.head * 3, 0.05 * dims.head * 3, 0.03, ex * dims.head * 0.4, dims.head * 0.15, dims.head * 0.45)); const ear = M(GEO.cone, t === 'rabbit' ? col : col, dims.head * 0.14, t === 'rabbit' ? dims.head * 1.3 : dims.head * 0.45, dims.head * 0.1, ex * dims.head * 0.28, dims.head * (t === 'rabbit' ? 0.9 : 0.55), -dims.head * 0.05); ear.rotation.z = -ex * 0.25; head.add(ear); }
-  if (o.antlers) { for (const ex of [-1, 1]) { const a = M(GEO.cyl, '#e2d3b0', 0.025, 0.4, 0.025, ex * 0.12, 0.35, -0.05); a.rotation.z = -ex * 0.5; head.add(a); const b2 = M(GEO.cyl, '#e2d3b0', 0.02, 0.2, 0.02, ex * 0.24, 0.48, 0.05); b2.rotation.x = 0.6; head.add(b2); } }
-  if (o.mane) { for (let i = 0; i < 6; i++) neck.add(M(GEO.box, o.mane, 0.06, 0.16, 0.12, 0, i * dims.neck / 6 + 0.05, -dims.bw * 0.45)); head.add(M(GEO.box, o.mane, 0.08, 0.14, 0.14, 0, dims.head * 0.55, -dims.head * 0.1)); }
-  if (o.blaze) head.add(M(GEO.box, '#f4f0e6', 0.07, 0.03, dims.head * 0.9, 0, dims.head * 0.15, dims.head * 0.5));
-  const tail = new THREE.Group(); tail.position.set(0, dims.bh * 0.3, -dims.bl * 0.95); body.add(tail);
-  const tlen = t === 'horse' ? 0.75 : t === 'wolf' ? 0.5 : t === 'deer' ? 0.15 : 0.08;
-  tail.add(M(t === 'rabbit' ? GEO.sph : GEO.cyl, o.tail || col, t === 'rabbit' ? 0.07 : (t === 'wolf' ? 0.09 : 0.07), tlen, t === 'rabbit' ? 0.07 : 0.09, 0, -tlen / 2, 0)); tail.rotation.x = t === 'wolf' ? 0.6 : t === 'horse' ? 0.35 : -0.6;
+  const body = new THREE.Group(); body.position.y = dims.leg + bh * 0.6; vis.add(body);
+  // torso: one smooth lofted body, rump to chest, with a pale belly and a ruff on the wolf
+  if (t === 'rabbit') body.add(M(GEO.sph, Q(col), bw, bh, bl));
+  else {
+    body.add(L(quadLoft(t, 'torso', dims), col));
+    if (o.belly) body.add(M(GEO.sph, Q(o.belly), bw * 0.8, bh * 0.5, bl * 0.62, 0, -bh * 0.55, 0.05 * bl));
+    if (t === 'wolf') body.add(M(GEO.sph, Q(o.belly || shade(col, 1.15)), bw * 0.8, bh * 0.85, bl * 0.28, 0, -bh * 0.12, bl * 0.86)); // chest ruff
+  }
+  // neck: deep at the base, slim at the throat
+  const neck = new THREE.Group(); neck.position.set(0, bh * 0.42, bl * 0.74); body.add(neck); const pose = { horse: [0.62, 0.38, 1.45, -0.7], deer: [0.32, 0.62, 1.65, -0.8], wolf: [1.15, -0.95, 0.85, 0.6], rabbit: [-0.55, 1.15, 1.6, 0.2] }[t]; neck.rotation.x = pose[0]; /* the neck rises forward from the chest */
+  if (t !== 'rabbit') neck.add(L(quadLoft(t, 'neck', dims), col));
+  // head: a lofted skull, broad at the jowl and tapering to the muzzle, with nostrils, eyes and ears
+  const head = new THREE.Group(); head.position.y = dims.neck; neck.add(head); head.rotation.x = pose[1];
+  if (t === 'rabbit') { head.add(M(GEO.sph, Q(col), h * 0.5, h * 0.55, h * 0.6, 0, 0, h * 0.2)); }
+  else {
+    head.add(L(quadLoft(t, 'head', dims), col));
+    const tip = QSHAPE[t].head[QSHAPE[t].head.length - 2], tz = tip[0] * h, ty = tip[1] * h;
+    head.add(M(GEO.sph, Q(o.muzzle || shade(col, 0.82)), tip[2] * h * 1.05, tip[3] * h * 1.05, h * 0.14, 0, ty, tz - h * 0.04));
+    if (t === 'wolf') head.add(M(GEO.sph, Q('#151515'), h * 0.09, h * 0.08, h * 0.08, 0, ty + h * 0.03, tz + h * 0.06)); // nose
+    else for (const ex of [-1, 1]) head.add(M(GEO.sphLo, Q('#1a1410'), h * 0.04, h * 0.05, h * 0.04, ex * h * 0.11, ty + h * 0.02, tz + h * 0.06)); // nostrils
+  }
+  for (const ex of [-1, 1]) {
+    const ew = t === 'rabbit' ? 0.34 : t === 'wolf' ? 0.36 : t === 'deer' ? 0.3 : 0.27;
+    head.add(M(GEO.sphLo, Q('#151515'), h * 0.07, h * 0.08, h * 0.07, ex * h * ew, h * 0.1, h * 0.08)); head.add(M(GEO.sphLo, Q('#ffffff'), h * 0.025, h * 0.025, h * 0.02, ex * h * (ew + 0.04), h * 0.13, h * 0.12)); // eye and glint
+    const ear = M(QGEO.ear, Q(col), h * (t === 'rabbit' ? 0.14 : t === 'wolf' ? 0.13 : 0.1), h * (t === 'rabbit' ? 1.3 : t === 'wolf' ? 0.4 : t === 'deer' ? 0.5 : 0.36), h * 0.06, ex * h * (t === 'deer' ? 0.3 : 0.17), h * (t === 'rabbit' ? 0.9 : t === 'deer' ? 0.36 : 0.42), -h * 0.2);
+    ear.rotation.z = -ex * (t === 'deer' ? 0.9 : 0.2); ear.rotation.x = -0.25; head.add(ear);
+  }
+  if (o.antlers) for (const ex of [-1, 1]) { const beam = new THREE.Group(); beam.position.set(ex * h * 0.16, h * 0.36, -h * 0.12); beam.rotation.z = -ex * 0.45; beam.rotation.x = -0.35; head.add(beam);
+    beam.add(M(GEO.cyl, Q('#e2d3b0'), 0.022, 0.42, 0.022, 0, 0.21, 0)); for (const [y, a] of [[0.14, 0.9], [0.27, 0.7], [0.38, 0.5]]) { const tine = M(GEO.cone, Q('#e8dcc0'), 0.016, 0.16, 0.016, 0, y + 0.06, 0.05); tine.rotation.x = a; beam.add(tine); } }
+  if (o.mane) { // a crest of hair locks down the back of the neck, and a forelock
+    for (let i = 0; i < 11; i++) { const f = i / 10, l = M(QGEO.lock, Q(o.mane), 0.06, 0.14 + R() * 0.1, 0.12, (R() - 0.5) * 0.03, f * dims.neck * 1.02 - 0.02, -bw * 0.62 * (0.85 - f * 0.55) * 0.95); l.rotation.set(-0.35 + R() * 0.2, 0, (R() - 0.5) * 0.5); neck.add(l); }
+    const fl = M(QGEO.lock, Q(o.mane), 0.09, 0.16, 0.05, 0, h * 0.34, h * 0.0); fl.rotation.x = 0.5; head.add(fl);
+  }
+  if (o.blaze) { const bz = M(GEO.box, Q('#f4f0e6'), h * 0.1, h * 0.03, h * 0.9, 0, h * 0.2, h * 0.5); bz.rotation.x = 0.12; head.add(bz); }
+  // tail
+  const tail = new THREE.Group(); tail.position.set(0, bh * 0.38, -bl * 0.95); body.add(tail);
+  const tlen = t === 'horse' ? 0.85 : t === 'wolf' ? 0.55 : t === 'deer' ? 0.16 : 0.08;
+  if (t === 'rabbit') tail.add(M(GEO.sph, Q(o.tail || col), 0.07, 0.07, 0.07, 0, -0.04, 0));
+  else if (t === 'horse') { tail.add(M(QGEO.taperUp, Q(o.tail || col), 0.07, 0.2, 0.08, 0, -0.08, 0)); tail.add(M(QGEO.hair, Q(o.tail || col), 0.12, tlen, 0.09, 0, -tlen / 2 - 0.12, -0.02)); }
+  else if (t === 'wolf') { tail.add(M(QGEO.hair, Q(o.tail || col), 0.11, tlen, 0.11, 0, -tlen / 2, 0)); tail.add(M(GEO.sph, Q('#2a2622'), 0.07, 0.1, 0.07, 0, -tlen + 0.02, 0)); }
+  else { tail.add(M(GEO.sph, Q(o.tail || col), 0.07, tlen * 0.6, 0.05, 0, -tlen / 2, 0)); }
+  tail.rotation.x = t === 'wolf' ? 0.55 : t === 'horse' ? 0.3 : -0.6;
+  // legs: muscled upper leg, knee, slim cannon, fetlock, hoof (paws for the wolf)
   const legs = [];
   for (const [lx, lz, front] of [[1, 1, 1], [-1, 1, 1], [1, -1, 0], [-1, -1, 0]]) {
-    const up = new THREE.Group(); up.position.set(lx * dims.bw * 0.6, -dims.bh * 0.35, lz * dims.bl * 0.62); body.add(up);
-    const ul = dims.leg * 0.5 + dims.bh * 0.25; up.add(M(GEO.cyl, col, dims.bw * 0.27, ul, dims.bw * 0.3, 0, -ul / 2, 0));
-    const lo = new THREE.Group(); lo.position.y = -ul; up.add(lo); const ll = dims.leg * 0.5; lo.add(M(GEO.cyl, o.sock || col, dims.bw * 0.17, ll, dims.bw * 0.17, 0, -ll / 2, 0)); lo.add(M(GEO.cyl, dark, dims.bw * 0.2, 0.08 * s, dims.bw * 0.21, 0, -ll, 0.02));
+    const up = new THREE.Group(); up.position.set(lx * bw * 0.56, -bh * 0.35, lz * bl * 0.62); body.add(up);
+    const ul = dims.leg * 0.5 + bh * 0.25, ll = dims.leg * 0.5, lower = o.sock || col;
+    if (t === 'rabbit') { up.add(M(GEO.cyl, Q(col), bw * 0.3, ul, bw * 0.3, 0, -ul / 2, 0)); } else up.add(L(legLoft(t, dims, front, 'up'), col));
+    const lo = new THREE.Group(); lo.position.y = -ul; up.add(lo);
+    if (t === 'rabbit') lo.add(M(GEO.cyl, Q(lower), bw * 0.12, ll, bw * 0.12, 0, -ll / 2, 0)); else lo.add(L(legLoft(t, dims, front, 'lo'), lower));
+    if (t === 'wolf') lo.add(M(GEO.sph, Q(shade(lower, 0.8)), bw * 0.15, bw * 0.09, bw * 0.22, 0, -ll, 0.03)); // paw
+    else if (t !== 'rabbit') lo.add(M(QGEO.hoof, Q(dark), bw * 0.13, 0.09 * (t === 'deer' ? 0.7 : 1), bw * 0.15, 0, -ll - 0.01, 0.02));
     legs.push({ up, lo, front, side: lx });
   }
-  let saddle = null, seat = new THREE.Object3D(); seat.position.set(0, dims.bh + 0.02, 0.05); body.add(seat);
-  if (t === 'horse') { saddle = new THREE.Group(); saddle.add(M(GEO.sph, '#6b3b1f', 0.36, 0.1, 0.42, 0, dims.bh * 0.92, 0)); saddle.add(M(GEO.box, '#b23a2e', 0.9, 0.04, 0.6, 0, dims.bh * 0.82, 0)); for (const ex of [-1, 1]) saddle.add(M(GEO.box, '#5a361c', 0.12, 0.28, 0.3, ex * 0.46, dims.bh * 0.35, -0.35)); body.add(saddle); }
+  let saddle = null, seat = new THREE.Object3D(); seat.position.set(0, bh + 0.02, 0.05); body.add(seat);
+  if (t === 'horse') { saddle = new THREE.Group();
+    saddle.add(M(GEO.box, Q('#b23a2e'), 0.92, 0.04, 0.62, 0, bh * 0.83, 0)); saddle.add(M(GEO.box, Q('#e8d9b0'), 0.94, 0.02, 0.64, 0, bh * 0.81, 0)); // blanket with a pale edge
+    saddle.add(M(GEO.sph, Q('#6b3b1f'), 0.34, 0.1, 0.4, 0, bh * 0.93, 0)); saddle.add(M(GEO.sph, Q('#5a3218'), 0.24, 0.1, 0.08, 0, bh * 1.0, -0.3)); // seat and cantle
+    saddle.add(M(GEO.cyl, Q('#4a2a14'), 0.035, 0.12, 0.035, 0, bh * 1.05, 0.3)); // horn
+    for (const ex of [-1, 1]) { saddle.add(M(GEO.box, Q('#5a361c'), 0.03, 0.42, 0.05, ex * 0.4, bh * 0.55, 0.05)); saddle.add(M(GEO.box, Q('#3a2a1a'), 0.1, 0.03, 0.12, ex * 0.42, bh * 0.33, 0.05)); saddle.add(M(GEO.box, Q('#5a361c'), 0.12, 0.26, 0.28, ex * 0.46, bh * 0.4, -0.36)); } // stirrups and saddlebags
+    body.add(saddle); }
   root.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = false; } });
-  return { root, vis, body, neck, head, tail, legs, seat, saddle, dims, type: t, scale: s, baseNeck: neck.rotation.x, baseHead: head.rotation.x, baseTail: tail.rotation.x };
+  return { root, vis, body, neck, head, tail, legs, seat, saddle, dims, type: t, scale: s, baseNeck: neck.rotation.x, baseHead: head.rotation.x, grazeNeck: pose[2], grazeHead: pose[3], baseTail: tail.rotation.x };
 }
 const GAITS = { // phase offsets LF, RF, LH, RH ; stride (m per cycle); amp; bob
   walk: { off: [0.25, 0.75, 0, 0.5], stride: 1.5, amp: 0.38, bob: 0.025, bend: 0.6 },
@@ -1034,6 +1136,7 @@ const GAITS = { // phase offsets LF, RF, LH, RH ; stride (m per cycle); amp; bob
 class QuadAnimator {
   constructor(rig, owner) { this.rig = rig; this.owner = owner; this.phase = 0; this.t = 0; this.legA = [0, 0, 0, 0]; this.legB = [0, 0, 0, 0]; this.bob = 0; this.pitch = 0; this.neckX = rig.baseNeck; this.headX = rig.baseHead; this.lie = 0; this.rear = 0; this.dead = 0; this.lastBeat = 0; }
   update(dt, st) {
+    if (this.rig.isModel) return quadModelUpdate(this, dt, st);
     // st: {speed, gait, graze(0..1), lie(0..1), rear(0..1), dead(0..1), slope, alert}
     this.t += dt; const R = this.rig, g = GAITS[st.gait || 'walk'], sp = st.speed;
     const moveW = clamp(sp / 0.8, 0, 1); const prev = this.phase; this.phase += sp * dt / (g.stride * R.scale);
@@ -1051,8 +1154,8 @@ class QuadAnimator {
     this.pitch = damp(this.pitch, (st.slope || 0) - this.rear * 0.9 + rock, 8, dt); R.body.rotation.x = this.pitch;
     R.vis.rotation.z = damp(R.vis.rotation.z, this.dead * 1.45 + (st.roll || 0), 5, dt);
     const nodd = Math.sin(this.phase * TAU * (g === GAITS.walk ? 2 : 1)) * 0.08 * moveW;
-    this.neckX = damp(this.neckX, R.baseNeck + (st.graze || 0) * 1.6 - (st.alert ? 0.35 : 0) + nodd + this.rear * -0.5, 6, dt); R.neck.rotation.x = this.neckX;
-    this.headX = damp(this.headX, R.baseHead + (st.graze || 0) * 0.2 + 0.04 * Math.sin(this.t * 1.7), 6, dt); R.head.rotation.x = this.headX;
+    this.neckX = damp(this.neckX, R.baseNeck + (st.graze || 0) * R.grazeNeck - (st.alert ? 0.35 : 0) + nodd + this.rear * -0.5, 6, dt); R.neck.rotation.x = this.neckX;
+    this.headX = damp(this.headX, R.baseHead + (st.graze || 0) * R.grazeHead + 0.04 * Math.sin(this.t * 1.7), 6, dt); R.head.rotation.x = this.headX;
     R.neck.rotation.y = damp(R.neck.rotation.y, st.lookYaw || 0, 4, dt);
     R.tail.rotation.x = R.baseTail + 0.25 * moveW + 0.06 * Math.sin(this.t * 3); R.tail.rotation.z = 0.15 * Math.sin(this.t * 2.3);
   }
@@ -1287,6 +1390,89 @@ class ClipAnimator {
 const _makeHumanoidProc = makeHumanoid, _AnimatorProc = Animator;
 function makeCharacter(o) { return Assets.ready && Settings.v.models !== false ? makeModelHumanoid(o) : _makeHumanoidProc(o); }
 function makeAnimator(rig, owner) { return rig.isModel ? new ClipAnimator(rig, owner) : new _AnimatorProc(rig, owner); }
+
+/* ===== Imported animal models (optional): drop animated .glb files into assets/animals/ named horse.glb, deer.glb,
+   wolf.glb or rabbit.glb and build.py embeds them. Each one replaces that species' code-built body; missing files keep
+   the procedural rig. The model is cloned per animal and driven by the same QuadAnimator interface: clips are picked by
+   name (Idle, Walk, Trot, Gallop/Run, Eating, Death, Attack, Jump...), played at a rate that matches ground speed, and
+   the rider's seat, saddle and saddlebags hang off the same rig fields as before, so gameplay code is unchanged. */
+const ANIMAL_SIZE = { horse: 2.45, deer: 1.75, wolf: 1.45, rabbit: 0.42 }; // nose-to-tail length the model is scaled to (m)
+const ANIMAL_CLIPS = { // first match wins, case-insensitive, on the clip name without any "Armature|" prefix
+  idle: [/^idle$/, /idle(?!.*hit)/], walk: [/^walk$/, /walk/], trot: [/trot/, /canter/, /^walk$/, /walk/], run: [/gallop(?!.*jump)/, /^run$/, /run/, /canter/, /walk/],
+  eat: [/eat/, /graze/, /headlow/, /idle/], death: [/death/, /die/, /dead/], attack: [/attack/, /bite/, /headbutt/], rear: [/rear/, /jump/, /idle_2/, /idle/], lie: [/lie/, /lay/, /sit/, /sleep/, /rest/],
+};
+const ANIMAL_SPEED = { walk: 1.6, trot: 3.6, run: 8.5 }; // ground speed (m/s per metre of body length / 2.45) each clip is authored for
+const AnimalAssets = {
+  models: {},
+  async init() {
+    const src = window.ANIMAL_GLB || {}; if (!THREE.GLTFLoader || !THREE.SkeletonUtils) return;
+    for (const sp in src) {
+      try {
+        const bin = atob(src[sp]), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+        const gltf = await new Promise((res, rej) => new THREE.GLTFLoader().parse(u.buffer, '', res, rej));
+        const clips = {}; for (const c of gltf.animations) clips[c.name.split('|').pop().toLowerCase()] = c;
+        const pick = k => { for (const re of ANIMAL_CLIPS[k]) { const n = Object.keys(clips).find(n => re.test(n)); if (n) return clips[n]; } return null; };
+        const map = {}; for (const k in ANIMAL_CLIPS) map[k] = pick(k);
+        if (!map.idle && gltf.animations[0]) map.idle = gltf.animations[0];
+        // measure the rest pose: length along its long horizontal axis, and the forward direction (glTF faces +z)
+        gltf.scene.updateMatrixWorld(true); const box = new THREE.Box3().setFromObject(gltf.scene), sz = box.getSize(new THREE.Vector3());
+        const alongX = sz.x > sz.z * 1.15, len = alongX ? sz.x : sz.z;
+        // the back: the highest rest-pose point near the middle of the body (the saddle goes there)
+        const c = box.getCenter(new THREE.Vector3()), v = new THREE.Vector3(); let back = -1e9;
+        gltf.scene.traverse(m => { if (!m.isMesh) return; const p = m.geometry.attributes.position; for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld);
+          const along = alongX ? v.x - c.x : v.z - c.z, across = alongX ? v.z - c.z : v.x - c.x; if (Math.abs(along) < len * 0.12 && Math.abs(across) < (alongX ? sz.z : sz.x) * 0.25) back = Math.max(back, v.y); } });
+        const hit = new THREE.Raycaster(new THREE.Vector3(c.x, box.max.y + 1, c.z), new THREE.Vector3(0, -1, 0)).intersectObject(gltf.scene, true)[0]; // straight down through the middle, where coarse models have no vertices
+        if (hit) back = Math.max(back, hit.point.y); if (back < box.min.y) back = box.min.y + sz.y * 0.7;
+        this.models[sp] = { gltf, map, scale: ANIMAL_SIZE[sp] / Math.max(0.01, len), yaw: alongX ? -Math.PI / 2 : 0, box, back: back - box.min.y };
+      } catch (e) { console.warn(`Animal model ${sp}.glb failed to load, using the built-in ${sp}`, e); }
+    }
+  },
+  has(sp) { return !!this.models[sp]; },
+};
+const _animalSkinMats = {};
+function makeModelQuad(o) {
+  const t = o.type, A = AnimalAssets.models[t], s = o.scale || 1, dims = { horse: { bl: 1.0, bw: 0.42, bh: 0.48, leg: 0.95, neck: 0.8, head: 0.52 }, deer: { bl: 0.7, bw: 0.28, bh: 0.32, leg: 0.82, neck: 0.6, head: 0.32 }, wolf: { bl: 0.62, bw: 0.24, bh: 0.28, leg: 0.52, neck: 0.32, head: 0.3 }, rabbit: { bl: 0.2, bw: 0.15, bh: 0.15, leg: 0.12, neck: 0.05, head: 0.14 } }[t];
+  const root = new THREE.Group(), vis = new THREE.Group(); vis.scale.setScalar(s); root.add(vis);
+  const model = THREE.SkeletonUtils.clone(A.gltf.scene); model.scale.setScalar(A.scale); model.rotation.y = A.yaw; vis.add(model);
+  model.position.y = -A.box.min.y * A.scale; // feet on the ground
+  // soft toon shading like the rest of the world; the main coat takes this animal's colour so horses can differ
+  let biggest = null, bigN = -1;
+  model.traverse(m => { if (!m.isMesh) return; m.castShadow = true; m.frustumCulled = false; const n = m.geometry.attributes.position.count; if (n > bigN && !/eye|hoof|hair|mane|tail/i.test(m.material.name || '')) { bigN = n; biggest = m; } });
+  model.traverse(m => { if (!m.isMesh) return; const src = Array.isArray(m.material) ? m.material[0] : m.material, nm = (src.name || '').toLowerCase();
+    let c = '#' + (src.color ? src.color.getHexString() : '888888');
+    if (/main|body|coat|fur|skin/.test(nm) || (m === biggest && !/eye/.test(nm))) c = o.color || c; else if (/mane|hair|tail/.test(nm) && o.mane) c = o.mane;
+    animalMat(c); /* makes sure the shared gradient exists */ const k = c + (m.isSkinnedMesh ? 's' : ''); m.material = _animalSkinMats[k] || (_animalSkinMats[k] = new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8, skinning: !!m.isSkinnedMesh })); });
+  const backY = A.back * A.scale;
+  const body = new THREE.Group(); body.position.y = backY - dims.bh; vis.add(body);
+  const seat = new THREE.Object3D(); seat.position.set(0, dims.bh + 0.02, 0.05); body.add(seat);
+  let saddle = null;
+  if (t === 'horse') { saddle = new THREE.Group(); const Q = c => animalMat(c), bh = dims.bh;
+    saddle.add(M(GEO.box, Q('#b23a2e'), 0.82, 0.04, 0.6, 0, bh * 0.98, 0)); saddle.add(M(GEO.sph, Q('#6b3b1f'), 0.3, 0.1, 0.38, 0, bh * 1.05, 0)); saddle.add(M(GEO.sph, Q('#5a3218'), 0.22, 0.1, 0.08, 0, bh * 1.1, -0.28)); saddle.add(M(GEO.cyl, Q('#4a2a14'), 0.035, 0.12, 0.035, 0, bh * 1.14, 0.28));
+    for (const ex of [-1, 1]) { saddle.add(M(GEO.box, Q('#5a361c'), 0.03, 0.42, 0.05, ex * 0.38, bh * 0.62, 0.05)); saddle.add(M(GEO.box, Q('#3a2a1a'), 0.1, 0.03, 0.12, ex * 0.4, bh * 0.4, 0.05)); }
+    body.add(saddle); }
+  const mixer = new THREE.AnimationMixer(model);
+  return { root, vis, body, seat, saddle, dims, type: t, scale: s, isModel: true, model, mixer, clips: A.map, legs: [], neck: new THREE.Object3D(), head: new THREE.Object3D(), tail: new THREE.Object3D(), baseNeck: 0, baseHead: 0, baseTail: 0, grazeNeck: 0, grazeHead: 0 };
+}
+/* QuadAnimator for an imported model: cross-fades between clips and keeps the same phase/onStep contract */
+function quadModelUpdate(an, dt, st) {
+  const R = an.rig, C = R.clips, sp = st.speed, g = st.gait || 'walk', len = ANIMAL_SIZE[R.type] * R.scale, k = len / 2.45;
+  an.t += dt; const prev = an.phase; an.phase += sp * dt / ((GAITS[g] || GAITS.walk).stride * R.scale);
+  if (Math.floor(prev * 2) !== Math.floor(an.phase * 2) && an.owner.onStep && sp > 0.25) an.owner.onStep();
+  let want = 'idle', rate = 1;
+  if ((st.dead || 0) > 0.5 && C.death) want = 'death';
+  else if ((st.rear || 0) > 0.4) want = 'rear';
+  else if ((st.lie || 0) > 0.5 && C.lie) want = 'lie';
+  else if ((st.attack || (R.type === 'wolf' && st.rear > 0)) && C.attack) want = 'attack'; /* a wolf's lunge */
+  else if (sp > 0.3) { want = g === 'walk' ? 'walk' : g === 'trot' ? 'trot' : 'run'; rate = clamp(sp / (ANIMAL_SPEED[want] * k), 0.45, 2.2); }
+  else if ((st.graze || 0) > 0.5) want = 'eat';
+  const clip = C[want] || C.idle; if (!clip) return;
+  if (an.cur !== clip) { const next = R.mixer.clipAction(clip); next.reset(); next.enabled = true; next.setEffectiveWeight(1);
+    if (want === 'death') { next.setLoop(THREE.LoopOnce); next.clampWhenFinished = true; }
+    next.play(); if (an.curAction) next.crossFadeFrom(an.curAction, want === 'death' ? 0.15 : 0.3, false); an.cur = clip; an.curAction = next; }
+  an.curAction.timeScale = rate; R.mixer.update(dt);
+  R.vis.rotation.z = damp(R.vis.rotation.z, st.dead && !C.death ? 1.45 : st.roll || 0, 5, dt);
+  an.pitch = damp(an.pitch, st.slope || 0, 8, dt); R.vis.rotation.x = an.pitch;
+}
 
 /* ===== Locomotion state machine =====
    One explicit state per movement phase, chosen from what the body is actually doing: grounded or not, vertical
@@ -4636,7 +4822,7 @@ const Post = {
 const Game = {
   running: false, time: 0, lamps: [], fires: [], shakeA: 0, treeCasters: [], quality: 'high',
   async init() {
-    await Assets.init();
+    await Assets.init(); await AnimalAssets.init();
     const canvas = $('view'); this.mobile = matchMedia('(pointer:coarse)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent); this.quality = Settings.v.quality === 'auto' ? (this.mobile ? 'medium' : 'high') : Settings.v.quality;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !this.mobile, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.quality === 'high' ? 1.6 : this.quality === 'medium' ? 1.25 : 0.9)); this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; 

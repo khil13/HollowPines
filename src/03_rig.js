@@ -259,36 +259,136 @@ const ACTIONS = {
 };
 
 /* ---------- Quadrupeds (horse, deer, wolf, rabbit) ---------- */
+// sculpted quadrupeds: overlapping rounded forms on the same joint hierarchy the animator drives (body, neck, head,
+// tail, two-part legs), so gaits, grazing, rearing and lying down all still work
+const QGEO = {
+  taperUp: new THREE.CylinderGeometry(0.6, 1, 1, 14),          // narrow top: necks, tails' docks
+  taperDown: new THREE.CylinderGeometry(1, 0.55, 1, 12),        // wide top: upper legs
+  hair: new THREE.CylinderGeometry(0.3, 1, 1, 10),              // flared tail hair
+  hoof: new THREE.CylinderGeometry(0.78, 1, 1, 10),
+  snout: new THREE.CylinderGeometry(0.62, 1, 1, 14).rotateX(Math.PI / 2), // along +z, narrowing toward the muzzle
+  ear: new THREE.ConeGeometry(1, 1, 8),
+  lock: new THREE.BoxGeometry(1, 1, 1).translate(0, -0.5, 0),     // a lock of mane hair hanging from its top
+};
+let GRAD8 = null; const _animalMats = {};
+function animalMat(c) { if (!GRAD8) { GRAD8 = new THREE.DataTexture(new Uint8Array([105, 140, 170, 195, 215, 232, 246, 255]), 8, 1, THREE.LuminanceFormat); GRAD8.minFilter = GRAD8.magFilter = THREE.LinearFilter; GRAD8.needsUpdate = true; }
+  return _animalMats[c] || (_animalMats[c] = new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8 })); }
+/* a smooth lofted tube: elliptical rings along a centreline in the y-z plane, capped at both ends. Each section is
+   [y, z, rx, ry] with rx the half-width (x) and ry the half-depth across the centreline. One continuous surface reads as
+   an animal's body far better than overlapping balls. */
+function loftGeo(secs, seg = 18) {
+  const pos = [], idx = [], n = secs.length, tan = new THREE.Vector3(), up = new THREE.Vector3(), X = new THREE.Vector3(1, 0, 0);
+  for (let i = 0; i < n; i++) {
+    const a = secs[Math.max(0, i - 1)], b = secs[Math.min(n - 1, i + 1)]; tan.set(0, b[0] - a[0], b[1] - a[1]).normalize(); up.crossVectors(tan, X);
+    const [y, z, rx, ry] = secs[i];
+    for (let k = 0; k < seg; k++) { const th = k / seg * TAU, c = Math.cos(th), sn = Math.sin(th); pos.push(c * rx, y + up.y * sn * ry, z + up.z * sn * ry); }
+  }
+  for (let i = 0; i < n - 1; i++) for (let k = 0; k < seg; k++) { const a = i * seg + k, b = i * seg + (k + 1) % seg, c2 = a + seg, d = b + seg; idx.push(a, c2, b, b, c2, d); }
+  const c0 = pos.length / 3; pos.push(0, secs[0][0], secs[0][1]); const c1 = c0 + 1; pos.push(0, secs[n - 1][0], secs[n - 1][1]);
+  for (let k = 0; k < seg; k++) { const k1 = (k + 1) % seg; idx.push(c0, k1, k); idx.push(c1, (n - 1) * seg + k, (n - 1) * seg + k1); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  // keep the winding outward whichever way the centreline runs
+  const m = Math.floor(n / 2) * seg, nr = g.attributes.normal;
+  if (pos[m * 3] * nr.getX(m) < 0) { const ix = g.index.array; for (let i = 0; i < ix.length; i += 3) { const t = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = t; } g.computeVertexNormals(); }
+  return g;
+}
+/* body plans per species, in units of the rig's dims (z along the body in bl, half-width in bw, half-depth in bh) */
+const QSHAPE = {
+  horse: { torso: [[-1.02, 0.12, 0.1, 0.12], [-0.94, 0.16, 0.62, 0.62], [-0.72, 0.12, 0.98, 0.95], [-0.42, 0.04, 1.0, 0.98], [0, -0.02, 1.0, 1.02], [0.4, 0.04, 0.92, 1.0], [0.74, 0.12, 0.76, 0.92], [0.96, 0.08, 0.5, 0.66], [1.06, 0.02, 0.1, 0.14]],
+    neck: [[-0.18, 0.08, 0.5, 0.95], [0.1, 0, 0.44, 0.78], [0.45, -0.04, 0.34, 0.55], [0.85, -0.04, 0.27, 0.4], [1.02, -0.02, 0.22, 0.3], [1.1, -0.02, 0.05, 0.08]],
+    head: [[-0.3, 0.06, 0.12, 0.14], [-0.2, 0.02, 0.27, 0.3], [-0.02, -0.06, 0.32, 0.4], [0.25, -0.02, 0.26, 0.3], [0.62, -0.06, 0.2, 0.22], [0.95, -0.1, 0.19, 0.21], [1.1, -0.12, 0.14, 0.15], [1.16, -0.12, 0.04, 0.05]] },
+  deer: { torso: [[-1.02, 0.12, 0.1, 0.12], [-0.92, 0.12, 0.7, 0.72], [-0.6, 0.08, 1.0, 0.96], [-0.2, 0, 0.98, 0.92], [0.2, -0.04, 0.96, 1.0], [0.6, 0.04, 0.86, 0.96], [0.92, 0.08, 0.56, 0.7], [1.04, 0.04, 0.1, 0.14]],
+    neck: [[-0.15, 0.06, 0.48, 0.7], [0.2, 0, 0.4, 0.55], [0.6, -0.02, 0.32, 0.42], [0.95, 0, 0.28, 0.34], [1.06, 0, 0.06, 0.08]],
+    head: [[-0.28, 0.06, 0.14, 0.16], [-0.18, 0.04, 0.34, 0.36], [0.05, 0, 0.36, 0.38], [0.4, -0.04, 0.26, 0.26], [0.78, -0.08, 0.17, 0.17], [0.94, -0.08, 0.12, 0.12], [1.0, -0.08, 0.03, 0.03]] },
+  wolf: { torso: [[-1.02, 0.1, 0.1, 0.12], [-0.92, 0.1, 0.66, 0.66], [-0.6, 0.06, 0.88, 0.8], [-0.2, 0.04, 0.84, 0.78], [0.2, 0, 0.94, 0.98], [0.56, -0.04, 1.02, 1.12], [0.86, 0.02, 0.88, 1.0], [1.04, 0.06, 0.5, 0.6], [1.12, 0.06, 0.1, 0.12]],
+    neck: [[-0.3, 0.04, 0.9, 1.1], [0.2, 0, 0.82, 0.95], [0.7, 0, 0.66, 0.74], [1.05, 0, 0.5, 0.56], [1.15, 0, 0.1, 0.12]],
+    head: [[-0.3, 0.04, 0.16, 0.18], [-0.2, 0.06, 0.42, 0.38], [0.05, 0.04, 0.46, 0.4], [0.32, -0.02, 0.3, 0.26], [0.65, -0.06, 0.18, 0.16], [0.92, -0.06, 0.13, 0.12], [1.0, -0.06, 0.04, 0.04]] },
+};
+const _loftCache = {};
+function quadLoft(t, part, dims) { const k = t + part; if (_loftCache[k]) return _loftCache[k];
+  const sh = QSHAPE[t][part], { bl, bw, bh } = dims, h = dims.head;
+  const secs = part === 'torso' ? sh.map(([z, y, rx, ry]) => [y * bh, z * bl, rx * bw, ry * bh])
+    : part === 'neck' ? sh.map(([y, z, rx, ry]) => { const f = bw * (t === 'horse' ? 0.95 : t === 'deer' ? 0.75 : 0.62); return [y * dims.neck, z * dims.neck, rx * f * 0.8, ry * f]; })
+    : sh.map(([z, y, rx, ry]) => [y * h, z * h, rx * h, ry * h]);
+  return _loftCache[k] = loftGeo(secs, part === 'neck' ? 18 : 20); }
+function legLoft(t, dims, front, part) { const k = t + 'leg' + front + part; if (_loftCache[k]) return _loftCache[k];
+  const { bw, bh } = dims, ul = dims.leg * 0.5 + bh * 0.25, ll = dims.leg * 0.5, w = t === 'wolf' ? 1.15 : 1;
+  const secs = part === 'up' ? (front ? [[0.2 * bw, 0, 0.3 * bw, 0.5 * bw], [0, 0.02, 0.32 * bw, 0.5 * bw], [-ul * 0.45, 0.02, 0.24 * bw, 0.34 * bw], [-ul * 0.85, 0, 0.15 * bw * w, 0.19 * bw * w], [-ul * 1.02, 0, 0.12 * bw * w, 0.14 * bw * w]]
+                                      : [[0.25 * bw, 0, 0.36 * bw, 0.62 * bw], [0, -0.02, 0.38 * bw, 0.62 * bw], [-ul * 0.45, -0.04, 0.27 * bw, 0.42 * bw], [-ul * 0.85, -0.02, 0.14 * bw * w, 0.22 * bw * w], [-ul * 1.02, -0.03, 0.11 * bw * w, 0.16 * bw * w]])
+    : [[0.04, 0, 0.12 * bw * w, 0.15 * bw * w], [-ll * 0.12, 0, 0.1 * bw * w, 0.13 * bw * w], [-ll * 0.5, 0, 0.08 * bw * w, 0.1 * bw * w], [-ll * 0.82, 0.01, 0.1 * bw * w, 0.12 * bw * w], [-ll * 0.92, 0.015, 0.085 * bw * w, 0.1 * bw * w], [-ll * 0.98, 0.02, 0.06 * bw, 0.07 * bw]];
+  return _loftCache[k] = loftGeo(secs, 14); }
 function makeQuad(o) {
+  if (AnimalAssets.has(o.type)) return makeModelQuad(o); // an uploaded model replaces the code-built body (03c_animals.js)
   const t = o.type, s = o.scale || 1; const col = o.color, dark = o.dark || '#3a2a20';
-  const dims = { horse: { bl: 1.0, bw: 0.42, bh: 0.48, leg: 0.95, neck: 0.75, head: 0.5 }, deer: { bl: 0.7, bw: 0.28, bh: 0.32, leg: 0.8, neck: 0.55, head: 0.32 }, wolf: { bl: 0.62, bw: 0.24, bh: 0.28, leg: 0.5, neck: 0.3, head: 0.3 }, rabbit: { bl: 0.2, bw: 0.15, bh: 0.15, leg: 0.12, neck: 0.05, head: 0.14 } }[t];
+  const dims = { horse: { bl: 1.0, bw: 0.42, bh: 0.48, leg: 0.95, neck: 0.8, head: 0.52 }, deer: { bl: 0.7, bw: 0.28, bh: 0.32, leg: 0.82, neck: 0.6, head: 0.32 }, wolf: { bl: 0.62, bw: 0.24, bh: 0.28, leg: 0.52, neck: 0.32, head: 0.3 }, rabbit: { bl: 0.2, bw: 0.15, bh: 0.15, leg: 0.12, neck: 0.05, head: 0.14 } }[t];
+  const { bl, bw, bh } = dims, h = dims.head, R = mulberry((col.charCodeAt(1) || 7) * 31 + bl * 100);
+  const shade = (c, k) => '#' + new THREE.Color(c).multiplyScalar(k).getHexString();
+  const Q = c => animalMat(c); // soft shading so the smooth bodies read as rounded, not faceted
+  const L = (geo, c) => new THREE.Mesh(geo, Q(c));
   const root = new THREE.Group(); const vis = new THREE.Group(); vis.scale.setScalar(s); root.add(vis);
-  const body = new THREE.Group(); body.position.y = dims.leg + dims.bh * 0.6; vis.add(body);
-  body.add(M(GEO.sph, col, dims.bw, dims.bh, dims.bl)); if (o.belly) body.add(M(GEO.sph, o.belly, dims.bw * 0.9, dims.bh * 0.7, dims.bl * 0.8, 0, -dims.bh * 0.3, 0));
-  const neck = new THREE.Group(); neck.position.set(0, dims.bh * 0.4, dims.bl * 0.8); body.add(neck);
-  const nm = M(GEO.cyl, col, dims.bw * 0.55, dims.neck, dims.bw * 0.6, 0, dims.neck / 2, 0); neck.add(nm); neck.rotation.x = t === 'wolf' ? -0.9 : -0.55;
-  const head = new THREE.Group(); head.position.y = dims.neck; neck.add(head);
-  head.add(M(GEO.sph, col, dims.head * 0.5, dims.head * 0.55, dims.head * 0.6, 0, 0, dims.head * 0.2));
-  head.add(M(GEO.sph, o.muzzle || col, dims.head * 0.38, dims.head * 0.38, dims.head * 0.6, 0, -dims.head * 0.12, dims.head * 0.75));
-  head.rotation.x = t === 'wolf' ? 0.9 : 1.15;
-  for (const ex of [-1, 1]) { head.add(M(GEO.sphLo, '#151515', 0.045 * dims.head * 3, 0.05 * dims.head * 3, 0.03, ex * dims.head * 0.4, dims.head * 0.15, dims.head * 0.45)); const ear = M(GEO.cone, t === 'rabbit' ? col : col, dims.head * 0.14, t === 'rabbit' ? dims.head * 1.3 : dims.head * 0.45, dims.head * 0.1, ex * dims.head * 0.28, dims.head * (t === 'rabbit' ? 0.9 : 0.55), -dims.head * 0.05); ear.rotation.z = -ex * 0.25; head.add(ear); }
-  if (o.antlers) { for (const ex of [-1, 1]) { const a = M(GEO.cyl, '#e2d3b0', 0.025, 0.4, 0.025, ex * 0.12, 0.35, -0.05); a.rotation.z = -ex * 0.5; head.add(a); const b2 = M(GEO.cyl, '#e2d3b0', 0.02, 0.2, 0.02, ex * 0.24, 0.48, 0.05); b2.rotation.x = 0.6; head.add(b2); } }
-  if (o.mane) { for (let i = 0; i < 6; i++) neck.add(M(GEO.box, o.mane, 0.06, 0.16, 0.12, 0, i * dims.neck / 6 + 0.05, -dims.bw * 0.45)); head.add(M(GEO.box, o.mane, 0.08, 0.14, 0.14, 0, dims.head * 0.55, -dims.head * 0.1)); }
-  if (o.blaze) head.add(M(GEO.box, '#f4f0e6', 0.07, 0.03, dims.head * 0.9, 0, dims.head * 0.15, dims.head * 0.5));
-  const tail = new THREE.Group(); tail.position.set(0, dims.bh * 0.3, -dims.bl * 0.95); body.add(tail);
-  const tlen = t === 'horse' ? 0.75 : t === 'wolf' ? 0.5 : t === 'deer' ? 0.15 : 0.08;
-  tail.add(M(t === 'rabbit' ? GEO.sph : GEO.cyl, o.tail || col, t === 'rabbit' ? 0.07 : (t === 'wolf' ? 0.09 : 0.07), tlen, t === 'rabbit' ? 0.07 : 0.09, 0, -tlen / 2, 0)); tail.rotation.x = t === 'wolf' ? 0.6 : t === 'horse' ? 0.35 : -0.6;
+  const body = new THREE.Group(); body.position.y = dims.leg + bh * 0.6; vis.add(body);
+  // torso: one smooth lofted body, rump to chest, with a pale belly and a ruff on the wolf
+  if (t === 'rabbit') body.add(M(GEO.sph, Q(col), bw, bh, bl));
+  else {
+    body.add(L(quadLoft(t, 'torso', dims), col));
+    if (o.belly) body.add(M(GEO.sph, Q(o.belly), bw * 0.8, bh * 0.5, bl * 0.62, 0, -bh * 0.55, 0.05 * bl));
+    if (t === 'wolf') body.add(M(GEO.sph, Q(o.belly || shade(col, 1.15)), bw * 0.8, bh * 0.85, bl * 0.28, 0, -bh * 0.12, bl * 0.86)); // chest ruff
+  }
+  // neck: deep at the base, slim at the throat
+  const neck = new THREE.Group(); neck.position.set(0, bh * 0.42, bl * 0.74); body.add(neck); const pose = { horse: [0.62, 0.38, 1.45, -0.7], deer: [0.32, 0.62, 1.65, -0.8], wolf: [1.15, -0.95, 0.85, 0.6], rabbit: [-0.55, 1.15, 1.6, 0.2] }[t]; neck.rotation.x = pose[0]; /* the neck rises forward from the chest */
+  if (t !== 'rabbit') neck.add(L(quadLoft(t, 'neck', dims), col));
+  // head: a lofted skull, broad at the jowl and tapering to the muzzle, with nostrils, eyes and ears
+  const head = new THREE.Group(); head.position.y = dims.neck; neck.add(head); head.rotation.x = pose[1];
+  if (t === 'rabbit') { head.add(M(GEO.sph, Q(col), h * 0.5, h * 0.55, h * 0.6, 0, 0, h * 0.2)); }
+  else {
+    head.add(L(quadLoft(t, 'head', dims), col));
+    const tip = QSHAPE[t].head[QSHAPE[t].head.length - 2], tz = tip[0] * h, ty = tip[1] * h;
+    head.add(M(GEO.sph, Q(o.muzzle || shade(col, 0.82)), tip[2] * h * 1.05, tip[3] * h * 1.05, h * 0.14, 0, ty, tz - h * 0.04));
+    if (t === 'wolf') head.add(M(GEO.sph, Q('#151515'), h * 0.09, h * 0.08, h * 0.08, 0, ty + h * 0.03, tz + h * 0.06)); // nose
+    else for (const ex of [-1, 1]) head.add(M(GEO.sphLo, Q('#1a1410'), h * 0.04, h * 0.05, h * 0.04, ex * h * 0.11, ty + h * 0.02, tz + h * 0.06)); // nostrils
+  }
+  for (const ex of [-1, 1]) {
+    const ew = t === 'rabbit' ? 0.34 : t === 'wolf' ? 0.36 : t === 'deer' ? 0.3 : 0.27;
+    head.add(M(GEO.sphLo, Q('#151515'), h * 0.07, h * 0.08, h * 0.07, ex * h * ew, h * 0.1, h * 0.08)); head.add(M(GEO.sphLo, Q('#ffffff'), h * 0.025, h * 0.025, h * 0.02, ex * h * (ew + 0.04), h * 0.13, h * 0.12)); // eye and glint
+    const ear = M(QGEO.ear, Q(col), h * (t === 'rabbit' ? 0.14 : t === 'wolf' ? 0.13 : 0.1), h * (t === 'rabbit' ? 1.3 : t === 'wolf' ? 0.4 : t === 'deer' ? 0.5 : 0.36), h * 0.06, ex * h * (t === 'deer' ? 0.3 : 0.17), h * (t === 'rabbit' ? 0.9 : t === 'deer' ? 0.36 : 0.42), -h * 0.2);
+    ear.rotation.z = -ex * (t === 'deer' ? 0.9 : 0.2); ear.rotation.x = -0.25; head.add(ear);
+  }
+  if (o.antlers) for (const ex of [-1, 1]) { const beam = new THREE.Group(); beam.position.set(ex * h * 0.16, h * 0.36, -h * 0.12); beam.rotation.z = -ex * 0.45; beam.rotation.x = -0.35; head.add(beam);
+    beam.add(M(GEO.cyl, Q('#e2d3b0'), 0.022, 0.42, 0.022, 0, 0.21, 0)); for (const [y, a] of [[0.14, 0.9], [0.27, 0.7], [0.38, 0.5]]) { const tine = M(GEO.cone, Q('#e8dcc0'), 0.016, 0.16, 0.016, 0, y + 0.06, 0.05); tine.rotation.x = a; beam.add(tine); } }
+  if (o.mane) { // a crest of hair locks down the back of the neck, and a forelock
+    for (let i = 0; i < 11; i++) { const f = i / 10, l = M(QGEO.lock, Q(o.mane), 0.06, 0.14 + R() * 0.1, 0.12, (R() - 0.5) * 0.03, f * dims.neck * 1.02 - 0.02, -bw * 0.62 * (0.85 - f * 0.55) * 0.95); l.rotation.set(-0.35 + R() * 0.2, 0, (R() - 0.5) * 0.5); neck.add(l); }
+    const fl = M(QGEO.lock, Q(o.mane), 0.09, 0.16, 0.05, 0, h * 0.34, h * 0.0); fl.rotation.x = 0.5; head.add(fl);
+  }
+  if (o.blaze) { const bz = M(GEO.box, Q('#f4f0e6'), h * 0.1, h * 0.03, h * 0.9, 0, h * 0.2, h * 0.5); bz.rotation.x = 0.12; head.add(bz); }
+  // tail
+  const tail = new THREE.Group(); tail.position.set(0, bh * 0.38, -bl * 0.95); body.add(tail);
+  const tlen = t === 'horse' ? 0.85 : t === 'wolf' ? 0.55 : t === 'deer' ? 0.16 : 0.08;
+  if (t === 'rabbit') tail.add(M(GEO.sph, Q(o.tail || col), 0.07, 0.07, 0.07, 0, -0.04, 0));
+  else if (t === 'horse') { tail.add(M(QGEO.taperUp, Q(o.tail || col), 0.07, 0.2, 0.08, 0, -0.08, 0)); tail.add(M(QGEO.hair, Q(o.tail || col), 0.12, tlen, 0.09, 0, -tlen / 2 - 0.12, -0.02)); }
+  else if (t === 'wolf') { tail.add(M(QGEO.hair, Q(o.tail || col), 0.11, tlen, 0.11, 0, -tlen / 2, 0)); tail.add(M(GEO.sph, Q('#2a2622'), 0.07, 0.1, 0.07, 0, -tlen + 0.02, 0)); }
+  else { tail.add(M(GEO.sph, Q(o.tail || col), 0.07, tlen * 0.6, 0.05, 0, -tlen / 2, 0)); }
+  tail.rotation.x = t === 'wolf' ? 0.55 : t === 'horse' ? 0.3 : -0.6;
+  // legs: muscled upper leg, knee, slim cannon, fetlock, hoof (paws for the wolf)
   const legs = [];
   for (const [lx, lz, front] of [[1, 1, 1], [-1, 1, 1], [1, -1, 0], [-1, -1, 0]]) {
-    const up = new THREE.Group(); up.position.set(lx * dims.bw * 0.6, -dims.bh * 0.35, lz * dims.bl * 0.62); body.add(up);
-    const ul = dims.leg * 0.5 + dims.bh * 0.25; up.add(M(GEO.cyl, col, dims.bw * 0.27, ul, dims.bw * 0.3, 0, -ul / 2, 0));
-    const lo = new THREE.Group(); lo.position.y = -ul; up.add(lo); const ll = dims.leg * 0.5; lo.add(M(GEO.cyl, o.sock || col, dims.bw * 0.17, ll, dims.bw * 0.17, 0, -ll / 2, 0)); lo.add(M(GEO.cyl, dark, dims.bw * 0.2, 0.08 * s, dims.bw * 0.21, 0, -ll, 0.02));
+    const up = new THREE.Group(); up.position.set(lx * bw * 0.56, -bh * 0.35, lz * bl * 0.62); body.add(up);
+    const ul = dims.leg * 0.5 + bh * 0.25, ll = dims.leg * 0.5, lower = o.sock || col;
+    if (t === 'rabbit') { up.add(M(GEO.cyl, Q(col), bw * 0.3, ul, bw * 0.3, 0, -ul / 2, 0)); } else up.add(L(legLoft(t, dims, front, 'up'), col));
+    const lo = new THREE.Group(); lo.position.y = -ul; up.add(lo);
+    if (t === 'rabbit') lo.add(M(GEO.cyl, Q(lower), bw * 0.12, ll, bw * 0.12, 0, -ll / 2, 0)); else lo.add(L(legLoft(t, dims, front, 'lo'), lower));
+    if (t === 'wolf') lo.add(M(GEO.sph, Q(shade(lower, 0.8)), bw * 0.15, bw * 0.09, bw * 0.22, 0, -ll, 0.03)); // paw
+    else if (t !== 'rabbit') lo.add(M(QGEO.hoof, Q(dark), bw * 0.13, 0.09 * (t === 'deer' ? 0.7 : 1), bw * 0.15, 0, -ll - 0.01, 0.02));
     legs.push({ up, lo, front, side: lx });
   }
-  let saddle = null, seat = new THREE.Object3D(); seat.position.set(0, dims.bh + 0.02, 0.05); body.add(seat);
-  if (t === 'horse') { saddle = new THREE.Group(); saddle.add(M(GEO.sph, '#6b3b1f', 0.36, 0.1, 0.42, 0, dims.bh * 0.92, 0)); saddle.add(M(GEO.box, '#b23a2e', 0.9, 0.04, 0.6, 0, dims.bh * 0.82, 0)); for (const ex of [-1, 1]) saddle.add(M(GEO.box, '#5a361c', 0.12, 0.28, 0.3, ex * 0.46, dims.bh * 0.35, -0.35)); body.add(saddle); }
+  let saddle = null, seat = new THREE.Object3D(); seat.position.set(0, bh + 0.02, 0.05); body.add(seat);
+  if (t === 'horse') { saddle = new THREE.Group();
+    saddle.add(M(GEO.box, Q('#b23a2e'), 0.92, 0.04, 0.62, 0, bh * 0.83, 0)); saddle.add(M(GEO.box, Q('#e8d9b0'), 0.94, 0.02, 0.64, 0, bh * 0.81, 0)); // blanket with a pale edge
+    saddle.add(M(GEO.sph, Q('#6b3b1f'), 0.34, 0.1, 0.4, 0, bh * 0.93, 0)); saddle.add(M(GEO.sph, Q('#5a3218'), 0.24, 0.1, 0.08, 0, bh * 1.0, -0.3)); // seat and cantle
+    saddle.add(M(GEO.cyl, Q('#4a2a14'), 0.035, 0.12, 0.035, 0, bh * 1.05, 0.3)); // horn
+    for (const ex of [-1, 1]) { saddle.add(M(GEO.box, Q('#5a361c'), 0.03, 0.42, 0.05, ex * 0.4, bh * 0.55, 0.05)); saddle.add(M(GEO.box, Q('#3a2a1a'), 0.1, 0.03, 0.12, ex * 0.42, bh * 0.33, 0.05)); saddle.add(M(GEO.box, Q('#5a361c'), 0.12, 0.26, 0.28, ex * 0.46, bh * 0.4, -0.36)); } // stirrups and saddlebags
+    body.add(saddle); }
   root.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = false; } });
-  return { root, vis, body, neck, head, tail, legs, seat, saddle, dims, type: t, scale: s, baseNeck: neck.rotation.x, baseHead: head.rotation.x, baseTail: tail.rotation.x };
+  return { root, vis, body, neck, head, tail, legs, seat, saddle, dims, type: t, scale: s, baseNeck: neck.rotation.x, baseHead: head.rotation.x, grazeNeck: pose[2], grazeHead: pose[3], baseTail: tail.rotation.x };
 }
 const GAITS = { // phase offsets LF, RF, LH, RH ; stride (m per cycle); amp; bob
   walk: { off: [0.25, 0.75, 0, 0.5], stride: 1.5, amp: 0.38, bob: 0.025, bend: 0.6 },
@@ -300,6 +400,7 @@ const GAITS = { // phase offsets LF, RF, LH, RH ; stride (m per cycle); amp; bob
 class QuadAnimator {
   constructor(rig, owner) { this.rig = rig; this.owner = owner; this.phase = 0; this.t = 0; this.legA = [0, 0, 0, 0]; this.legB = [0, 0, 0, 0]; this.bob = 0; this.pitch = 0; this.neckX = rig.baseNeck; this.headX = rig.baseHead; this.lie = 0; this.rear = 0; this.dead = 0; this.lastBeat = 0; }
   update(dt, st) {
+    if (this.rig.isModel) return quadModelUpdate(this, dt, st);
     // st: {speed, gait, graze(0..1), lie(0..1), rear(0..1), dead(0..1), slope, alert}
     this.t += dt; const R = this.rig, g = GAITS[st.gait || 'walk'], sp = st.speed;
     const moveW = clamp(sp / 0.8, 0, 1); const prev = this.phase; this.phase += sp * dt / (g.stride * R.scale);
@@ -317,8 +418,8 @@ class QuadAnimator {
     this.pitch = damp(this.pitch, (st.slope || 0) - this.rear * 0.9 + rock, 8, dt); R.body.rotation.x = this.pitch;
     R.vis.rotation.z = damp(R.vis.rotation.z, this.dead * 1.45 + (st.roll || 0), 5, dt);
     const nodd = Math.sin(this.phase * TAU * (g === GAITS.walk ? 2 : 1)) * 0.08 * moveW;
-    this.neckX = damp(this.neckX, R.baseNeck + (st.graze || 0) * 1.6 - (st.alert ? 0.35 : 0) + nodd + this.rear * -0.5, 6, dt); R.neck.rotation.x = this.neckX;
-    this.headX = damp(this.headX, R.baseHead + (st.graze || 0) * 0.2 + 0.04 * Math.sin(this.t * 1.7), 6, dt); R.head.rotation.x = this.headX;
+    this.neckX = damp(this.neckX, R.baseNeck + (st.graze || 0) * R.grazeNeck - (st.alert ? 0.35 : 0) + nodd + this.rear * -0.5, 6, dt); R.neck.rotation.x = this.neckX;
+    this.headX = damp(this.headX, R.baseHead + (st.graze || 0) * R.grazeHead + 0.04 * Math.sin(this.t * 1.7), 6, dt); R.head.rotation.x = this.headX;
     R.neck.rotation.y = damp(R.neck.rotation.y, st.lookYaw || 0, 4, dt);
     R.tail.rotation.x = R.baseTail + 0.25 * moveW + 0.06 * Math.sin(this.t * 3); R.tail.rotation.z = 0.15 * Math.sin(this.t * 2.3);
   }
