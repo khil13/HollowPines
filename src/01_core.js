@@ -27,14 +27,18 @@ const NOISE = (() => {
 })();
 function fbm(x, y, oct = 4) { let s = 0, a = 1, f = 1, n = 0; for (let i = 0; i < oct; i++) { s += NOISE(x * f, y * f) * a; n += a; a *= 0.5; f *= 2.03; } return s / n; }
 
+/* setTimeout for game logic: the callback is dropped if the game was loaded or a mission retried in the meantime */
+function later(fn, ms) { const g = Game.gen; return setTimeout(() => { if (g === Game.gen) fn(); }, ms); }
+
 /* ---------- Input ---------- */
 const Input = {
   keys: new Set(), pressed: new Set(), mouse: { dx: 0, dy: 0, l: false, r: false, lp: false }, wheel: 0,
   touch: false, move: { x: 0, y: 0, mag: 0 }, autoSprint: false, rimT: 0, look: { dx: 0, dy: 0 }, pinch: 0, btn: {}, btnP: new Set(), sprintToggle: false, aimToggle: false,
   locked: false, uiOpen: false,
   init(canvas) {
-    addEventListener('keydown', e => { if (e.repeat) return; const k = e.key.toLowerCase(); this.keys.add(k); this.pressed.add(k); if (['tab', ' ', 'alt'].includes(k)) e.preventDefault(); });
-    addEventListener('keyup', e => this.keys.delete(e.key.toLowerCase()));
+    const keyOf = e => /^Digit\d$/.test(e.code) ? e.code.slice(5) : e.key.toLowerCase(); // digits by position, so Shift+2 still draws the revolver
+    addEventListener('keydown', e => { if (e.repeat) return; const k = keyOf(e); this.keys.add(k); this.pressed.add(k); if (['tab', ' ', 'alt'].includes(k)) e.preventDefault(); });
+    addEventListener('keyup', e => { this.keys.delete(keyOf(e)); this.keys.delete(e.key.toLowerCase()); });
     canvas.addEventListener('mousedown', e => {
       if (this.touch) return;
       if (!this.locked && !this.uiOpen && Settings.v.mouseLock !== false && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
@@ -88,7 +92,7 @@ const Sfx = {
   ctx: null, master: null, beds: {}, musicT: 0,
   init() {
     if (this.ctx) return; try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
-    const c = this.ctx; this.master = c.createGain(); this.master.gain.value = 0.6; this.master.connect(c.destination);
+    const c = this.ctx; this.master = c.createGain(); this.master.gain.value = Settings.v.sound ?? 0.6; this.master.connect(c.destination);
     const len = c.sampleRate * 2, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1; this.noise = buf;
     const bed = (type, f, q) => { const s = c.createBufferSource(); s.buffer = buf; s.loop = true; const fl = c.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const g = c.createGain(); g.gain.value = 0; s.connect(fl); fl.connect(g); g.connect(this.master); s.start(); return g; };

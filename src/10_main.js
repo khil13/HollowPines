@@ -30,19 +30,20 @@ const Game = {
   },
   restoreFromState(silent) {
     // rebuild dynamic world from S (used for new game, load, mission retry)
-    Brawl.clear(); Town.clear(); for (const n of NPC.all.slice()) NPC.despawn(n); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
+    this.gen = (this.gen || 0) + 1; if (Dialog.open) Dialog.close(); if (Fishing.on) Fishing.stop(); Camp.pending = false; // timers from before this point stand down
+    Brawl.clear(); Town.clear(); for (const n of NPC.all.slice()) NPC.despawn(n); Riders.clear(); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
     STORY._cab = STORY._cave = false; if (STORY._trail) { for (const m of STORY._trail) this.scene.remove(m); STORY._trail = null; }
     const P = this.player; P.state = 'ground'; P.carry = null; P.alive = true; P.weapon = 'fists'; P.teleport(S.p.x, S.p.z, S.p.yaw); P.buildRig();
     const H = this.horse; H.pos.set(S.h.x, Col.ground(S.h.x, S.h.z, 99), S.h.z); H.yaw = S.h.yaw; H.rider = null; H.speed = 0; H.state = 'idle'; H.box.visible = !!S.horseCarry; H.cargoMesh = null;
     if (S.horseCarry && S.horseCarry.id.startsWith('npc:')) S.horseCarry = null;
-    Camp.fire && Camp.pack(); if (S.camp) Camp.spawn(S.camp.x, S.camp.z);
+    const camp = S.camp; Camp.fire && Camp.pack(); if (camp) { S.camp = camp; Camp.spawn(camp.x, camp.z); } // pack() clears S.camp, so keep the saved one
     World.apply(); this.populateWildlife();
     Missions.active = null; Missions.ctx = null; Missions._silent = true; Missions.refresh(); Missions._silent = false; Missions.resume();
     if (S.carry) { const c = Carry.make(S.carry, P.pos.x, P.pos.z); P.carry = c; c.carried = true; S.carry = null; }
     Sky.weather = S.weather.kind; this.cam.snap = true; this.cam.yaw = P.state === 'ride' ? H.yaw : P.yaw; this.cam.pitch = 0.3; Law.searchC = S.wanted ? { x: S.p.x, z: S.p.z } : null;
   },
   syncState() { const P = this.player; S.p.x = P.pos.x; S.p.z = P.pos.z; S.p.yaw = P.yaw; S.h.x = this.horse.pos.x; S.h.z = this.horse.pos.z; S.carry = P.carry && !P.carry.npc ? P.carry.id : null; },
-  newDay() { S.h.fed = Math.max(0, S.h.fed - 25); for (const n of NPC.all.slice()) if (!n.alive && n.tags.includes('generic')) NPC.despawn(n); if (this.running) { World.apply(); journal(`Day ${S.time.day}.`); } },
+  newDay() { S.h.fed = Math.max(0, S.h.fed - 25); for (const n of NPC.all.slice()) if (!n.alive && n.tags.includes('generic') && !n.tags.includes('bgen')) NPC.despawn(n); /* a bounty's body keeps its proof */ if (this.running) { World.apply(); journal(`Day ${S.time.day}.`); } },
   populateWildlife() {
     const herds = [[-95, -30], [40, 75], [-170, 40], [90, 150], [-110, 150], [170, -20]]; for (const [x, z] of herds) for (let i = 0; i < 3; i++) Animal.spawn('deer', x + rand(-6, 6), z + rand(-6, 6));
     const bunnies = [[-80, 60], [-20, 60], [20, -40], [-130, -40], [100, 30], [-60, -100], [130, 100], [-180, 120]]; for (const [x, z] of bunnies) Animal.spawn('rabbit', x, z);
@@ -68,7 +69,7 @@ const Game = {
     const P = this.player, H = this.horse; Input.tick(dt);
     if (!Dialog.open && !UI.panelOpen) { if (Input.hit('tab') || Input.hit('i') || Input.tb('menu')) UI.open('items'); else if (Input.hit('m')) UI.open('map'); else if (Input.hit('j')) UI.open('journal'); }
     else if (UI.panelOpen && (Input.hit('escape') || Input.hit('tab') || Input.tb('menu'))) UI.close();
-    if (UI.panelOpen && !Missions.failing) { UI.update(0); return; } // menus pause the world
+    if (UI.panelOpen || Missions.failing) { UI.update(0); return; } // menus and the fail screen pause the world
     Sky.update(dt); P.update(dt); H.update(dt); Fishing.update(dt);
     for (const n of NPC.all) { const d = Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.update(dt, d > 110 && !n.tags.includes('story')); }
     for (const a of Animal.all) a.update(dt, a.distP > 150);
@@ -100,7 +101,7 @@ class CamRig {
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
     dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { dx *= 0.55; dy *= 0.55; } // finer thumb aim // zoomed in: same feel per degree
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
-    if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') return this.convo(dt);
+    if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') { if (P.rig && P.rig.root) P.rig.root.visible = true; return this.convo(dt); }
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
     // auto-recenter behind the direction of travel when the player isn't steering the camera
     const moveSp = riding ? H.speed : Math.hypot(P.vel.x, P.vel.z);
@@ -112,25 +113,30 @@ class CamRig {
     if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
-    const want = aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
+    // close-quarters framing (grab, counter, duel, a fistfight at arm's length): tighter, over the shoulder, both fighters in view
+    const lc = Brawl.lastCounter, close = aim || riding ? null : P.grab || (lc && Game.time - lc.t < 1.4 && lc.n.alive ? lc.n : null) || (Duel.on ? Duel.n : null) || (foe && fd < 2.6 && P.weapon === 'fists' && foe instanceof Person && (foe.fists || !foe.gun) ? foe : null);
+    this.cine = damp(this.cine || 0, close ? 1 : 0, 4, dt); this.closeFoe = close;
+    if (close && this.idleT > 0.35) { const a = Math.atan2(close.pos.x - P.pos.x, close.pos.z - P.pos.z) + 0.38; this.yaw = dampAngle(this.yaw, a, 5 * this.cine, dt); this.pitch = damp(this.pitch, 0.14, 3 * this.cine, dt); }
+    const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
     if (P.state === 'air') ty = Math.min(ty, this.groundY + 0.35); else this.groundY = ty;
     const tgt = V[0].set(P.pos.x, ty, P.pos.z);
     if (this.snap) this.tgt.copy(tgt); else { this.tgt.x = damp(this.tgt.x, tgt.x, 12, dt); this.tgt.z = damp(this.tgt.z, tgt.z, 12, dt); this.tgt.y = damp(this.tgt.y, tgt.y, P.state === 'air' ? 5 : 8, dt); }
-    const lo = V[1].set(0, 0, 0); if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
-    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35;
+    const lo = V[1].set(0, 0, 0); if (close) lo.set((close.pos.x - P.pos.x) * 0.5, 0, (close.pos.z - P.pos.z) * 0.5).clampLength(0, 2); else if (foe && !aim) lo.set((foe.pos.x - P.pos.x) * 0.25, 0, (foe.pos.z - P.pos.z) * 0.25).clampLength(0, 4); this.lookOff.lerp(lo, 1 - Math.exp(-3 * dt));
+    const f = fwd(this.yaw), rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw); const sh = aim ? 0.7 : 0.35 + (this.cine || 0) * 0.3;
     const base = V[2].set(this.tgt.x + rx * sh, this.tgt.y, this.tgt.z + rz * sh);
     const cp = Math.cos(this.pitch), toC = V[3].set(-f.x * cp, Math.sin(this.pitch), -f.z * cp); const len = this.dist; // unit vector from the target out to the camera
     // spring arm: walls (raycast), solid colliders and terrain (sampled along the arm); pull in fast, ease back out slowly
     this.ray.set(base, toC); this.ray.far = len;
     const hit = this.ray.intersectObjects(this.blockers(base), false)[0]; let d = hit ? Math.max(0.5, hit.distance - 0.3) : len;
-    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && this.solidAt(x, y, z))) { d = Math.max(0.5, t - d / 8); break; } }
+    for (let i = 1; i <= 8; i++) { const t = d * i / 8, x = base.x + toC.x * t, z = base.z + toC.z * t, y = base.y + toC.y * t; if (Terrain.height(x, z) + 0.35 > y || (t > 0.6 && (this.solidAt(x, y, z) || World.inCanopy(x, y, z)))) { d = Math.max(0.5, t - d / 8); break; } }
     this.collD = d < this.collD ? d : damp(this.collD, d, 3, dt); const p = V[4].copy(base).addScaledVector(toC, Math.min(this.collD, len));
     const gh = Terrain.height(p.x, p.z) + 0.35; if (p.y < gh) p.y = gh;
     if (this.snap) { this.pos.copy(p); this.collD = d; this.snap = false; } else this.pos.lerp(p, 1 - Math.exp(-(aim ? 60 : 18) * dt)); // no trailing while aiming: the reticle stays glued to the mouse
     this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
+    if (P.rig && P.rig.root) P.rig.root.visible = this.pos.distanceTo(base) > 0.85 || P.state === 'ride'; // pressed into a corner: don't look out from inside Wren's head
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
     const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }

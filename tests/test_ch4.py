@@ -21,7 +21,8 @@ H = r"""window.K = {
     S.p.hp = S.p.maxHp; S.time.hour = o.hour ?? 21; HP.Missions._silent = true; HP.Missions.refresh(); HP.Missions._silent = false; World.apply(); HP.tp(-36, 10); HP.sim(0.5);
   },
   near(key, d = 1.6) { const n = HP.NPC.byKey(key); if (!n) return false; const a = n.yaw; HP.tp(n.pos.x + Math.sin(a) * d, n.pos.z + Math.cos(a) * d); HP.Game.player.yaw = Math.atan2(n.pos.x - HP.Game.player.pos.x, n.pos.z - HP.Game.player.pos.z); HP.sim(0.1); return true; },
-  talk(key) { if (HP.Dialog.open) HP.Dialog.close(); if (!this.near(key)) return 'no npc ' + key; return HP.press('Talk to') ? HP.choices() : 'no talk: ' + JSON.stringify(HP.opts()); },
+  pressAt(key, label) { for (let i = 0; i < 30; i++) { const n = HP.NPC.byKey(key); if (!n) return false; HP.tp(n.pos.x + 1.2, n.pos.z); HP.Game.player.yaw = -Math.PI / 2; HP.sim(0.05); if (HP.press(label)) return true; } return false; }, // approach and press in one go: real frames between steps can move them
+  talk(key) { if (HP.Dialog.open) HP.Dialog.close(); if (!this.near(key)) return 'no npc ' + key; for (let i = 0; i < 20; i++) { if (HP.press('Talk to')) return HP.choices(); HP.sim(0.05); this.near(key); } return 'no talk: ' + JSON.stringify(HP.opts()); },
   cora() { const c = HP.NPC.byKey('cora'); c.pos.set(-40, c.pos.y, 3.2); c.yaw = 0; c.state = 'routine'; c.path = null; return this.talk('cora'); },
   stage() { const m = HP.Missions.st('ch4'); return HP.Missions.active === 'ch4' ? HP.Missions.defs.ch4.stages[m.stage].id : HP.Missions.st('ch4').status; },
   c() { return HP.Missions.st('ch4').c; },
@@ -107,12 +108,11 @@ async def main():
         await ev(pg, "K.setup({ journal: 'kept', dutchy: 'ally', m3: 'railroad', farm: 'abandoned' })"); await start_and_wait(pg, 'bought')
         r = await ev(pg, "K.follow(20)"); check('[bought] tail completes with Dutchy keeping watch on the west bank', r['stage'] == 'listen' and await ev(pg, "!!HP.NPC.byKey('dutchy')"), r)
         await ev(pg, "K.hide(); HP.sim(10)")
-        await ev(pg, "(()=>{ const d = HP.NPC.byKey('dutchy'); HP.tp(d.pos.x + 1.2, d.pos.z); HP.Game.player.yaw = -Math.PI / 2; HP.sim(0.1); })()")
-        o1 = await ev(pg, "HP.opts()"); ok = await ev(pg, "HP.press('Have Dutchy spook their horses')"); await ev(pg, "HP.sim(14)")  # the distraction starts 4 s of game time after the order
+        ok = await ev(pg, "K.pressAt('dutchy', 'Have Dutchy spook their horses')"); o1 = await ev(pg, "HP.opts()"); await ev(pg, "HP.sim(14)")  # the distraction starts 4 s of game time after the order
         r = await ev(pg, "HP.NPC.all.filter(n => n.group === 'rail4').map(n => +Math.hypot(n.pos.x - MEET.x, n.pos.z - MEET.z).toFixed(1))")
         check('[bought] Dutchy spooks their horses and both guns run off east', ok and len(r) == 2 and all(d > 18 for d in r), f'{r} ok={ok} opts={o1} toasts={await ev(pg, "K.toasts()")} st={await ev(pg, "HP.NPC.all.filter(n => n.group === \'rail4\').map(n => n.state)")}')
-        await ev(pg, "(()=>{ HP.sim(30); const P = HP.Game.player; P.crouch = true; HP.tp(MEET.x + 1.5, MEET.z + 3.5); P.crouch = true; P.yaw = Math.PI; HP.sim(0.2); })()")
-        ok = await ev(pg, "HP.press('Steal Vane')")
+        await ev(pg, "HP.sim(30)")
+        ok = await ev(pg, "(()=>{ const P = HP.Game.player; for (let i = 0; i < 20; i++) { P.crouch = true; HP.tp(MEET.x + 1.5, MEET.z + 3.5); P.crouch = true; P.yaw = Math.PI; HP.sim(0.1); if (HP.press('Steal Vane')) return true; } return false; })()")
         # the pickup animation runs on game time, so step the game rather than waiting on the wall clock
         await ev(pg, "(()=>{ for (let i = 0; i < 40 && !HP.S.evidence.ledger; i++) { HP.Game.player.crouch = true; HP.sim(0.1, 1/60); } })()")
         r = await ev(pg, "({ ledger: !!HP.S.evidence.ledger, item: HP.Inv.count('vane_ledger'), stage: K.stage(), spotted: !!K.c().spotted })")

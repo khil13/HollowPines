@@ -115,8 +115,8 @@ const Missions = {
   },
   available(giver) { return this.order.filter(id => this.defs[id].giver === giver && this.st(id).status === 'available'); },
   start(id) {
-    const d = this.defs[id], m = this.st(id); if (this.active && this.active !== id) this.abandon(true);
-    this.retryState = JSON.stringify(S); m.status = 'active'; m.stage = 0; m.c = {}; m.opt = {}; this.active = id; S.activeMission = id;
+    const d = this.defs[id], m = this.st(id); if (this.active && this.active !== id) this.abandon(false); // say so when another job pauses the current one
+    if (Game.syncState) Game.syncState(); this.retryState = JSON.stringify(S); m.status = 'active'; m.stage = 0; m.c = {}; m.opt = {}; this.active = id; S.activeMission = id;
     this.ctx = { d, m, t: 0, st: 0 }; UI.banner(d.chapter ? `Chapter ${d.chapter}` : d.type.toUpperCase(), d.title); journal(`Started: ${d.title}`, 'mission');
     this.enterStage();
   },
@@ -136,9 +136,11 @@ const Missions = {
   },
   advance() { const ctx = this.ctx, { d, m } = ctx, s = d.stages[m.stage]; if (s.exit) s.exit(ctx); const nx = s.next ? s.next(ctx) : m.stage + 1; if (nx === 'complete' || nx >= d.stages.length) return this.complete(); m.stage = typeof nx === 'string' ? d.stages.findIndex(x => x.id === nx) : nx; this.enterStage(); },
   complete() { const { d, m } = this.ctx; m.status = 'done'; if (d.complete) d.complete(this.ctx); this.active = null; S.activeMission = null; this.ctx = null; UI.banner('Mission complete', d.title, m.outcome || ''); journal(`Completed: ${d.title}${m.outcome ? ' — ' + m.outcome : ''}`, 'mission'); this._silent = false; this.refresh(); World.apply(); Save.save(true); },
-  fail(why) { const { d, m } = this.ctx; this.failing = { id: d.id, why }; UI.failScreen(d.title, why); },
-  retry() { const id = this.failing.id; this.failing = null; Save.apply(JSON.parse(this.retryState)); this.start(id); },
-  acceptFail() { const id = this.failing.id, d = this.defs[id], m = this.st(id); this.failing = null; m.status = 'failed'; m.outcome = d.failOutcome ? d.failOutcome(this.ctx) : 'Failed'; if (d.onFail) d.onFail(this.ctx); this.active = null; S.activeMission = null; this.ctx = null; journal(`Failed: ${d.title} — ${m.outcome}`, 'mission'); this.refresh(); World.apply(); Save.save(true); },
+  fail(why) { if (!this.ctx || this.failing) return; const { d, m } = this.ctx; this.failing = { id: d.id, why }; UI.failScreen(d.title, why); },
+  retry() { // back to the start of the mission: clean up this run, and never re-enter a mid-mission stage from a loaded save
+    if (UI.panelOpen) UI.close(true); const id = this.failing.id, d = this.defs[id]; if (this.ctx && d.cleanup) d.cleanup(this.ctx); this.failing = null; this.active = null; this.ctx = null;
+    const st = JSON.parse(this.retryState); st.activeMission = null; if (st.missions && st.missions[id]) Object.assign(st.missions[id], { status: 'available', stage: 0 }); Save.apply(st); this.start(id); },
+  acceptFail() { if (UI.panelOpen) UI.close(true); const id = this.failing.id, d = this.defs[id], m = this.st(id); this.failing = null; m.status = 'failed'; m.outcome = d.failOutcome ? d.failOutcome(this.ctx) : 'Failed'; if (d.onFail) d.onFail(this.ctx); if (d.cleanup) d.cleanup(this.ctx); m.status = 'failed'; this.active = null; S.activeMission = null; this.ctx = null; journal(`Failed: ${d.title} — ${m.outcome}`, 'mission'); this.refresh(); World.apply(); Save.save(true); },
   abandon(silent) { if (!this.active) return; const m = this.st(this.active); m.status = 'available'; m.stage = 0; if (this.ctx.d.cleanup) this.ctx.d.cleanup(this.ctx); if (!silent) UI.toast(`Mission paused: ${this.ctx.d.title}. Restart it from the giver.`, ''); this.active = null; S.activeMission = null; this.ctx = null; World.apply(); },
   markers() { const out = []; if (this.active) { for (const o of this.objectives()) { if (o.optional && this.ctx.m.opt[o.id]) continue; if (!o.optional && o.check(this.ctx)) continue; const mk = o.marker && o.marker(); if (mk) out.push(mk); } } else { for (const id of this.order) { const d = this.defs[id]; if (this.st(id).status === 'available' && d.start) { const p = d.start(); if (p) out.push(Object.assign({ giver: true }, p)); } } } return out; },
 };

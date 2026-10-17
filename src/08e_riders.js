@@ -57,20 +57,21 @@ const Riders = {
       const side = n.flankSide || (n.flankSide = Math.random() < 0.5 ? -1 : 1), r = fwd(Math.atan2(P.pos.x - h.pos.x, P.pos.z - h.pos.z) + Math.PI / 2);
       if (d > 22) { tx = P.pos.x; tz = P.pos.z; want = 11.5; } else { tx = P.pos.x + r.x * side * 10; tz = P.pos.z + r.z * side * 10; want = P.state === 'ride' ? Math.max(4, Game.horse.speed) : 4; }
     } else if (n.rideMode === 'flee') { const a = Math.atan2(h.pos.x - P.pos.x, h.pos.z - P.pos.z); tx = h.pos.x + Math.sin(a) * 20; tz = h.pos.z + Math.cos(a) * 20; want = d < 120 ? 12 : 6; if (d > 160 && n.onEscape) { n.onEscape(n); n.onEscape = null; }
-    } else if (n.rideMode === 'leave') { tx = -40; tz = 20; want = 7; if (d > 150) { this.despawnRider(n); return; }
+    } else if (n.rideMode === 'leave') { tx = -40; tz = 20; want = 7; if (d > 150 || Math.hypot(h.pos.x + 40, h.pos.z - 20) < 8) { this.despawnRider(n); return; } // home, or out of sight
     } else if (n.rideMode === 'travel' && n.dest) { tx = n.dest.x; tz = n.dest.z; want = n.destSpeed || 5; if (Math.hypot(tx - h.pos.x, tz - h.pos.z) < 4) want = 0; }
     h.steer(tx, tz, want, dt);
     const seat = h.seat(); n.pos.set(seat.x, seat.y - (n.rig.isModel ? 0.24 : 0.62), seat.z); n.yaw = h.yaw; n.sp = 0;
     // shooting from the saddle
     n.allyAim = false;
-    if ((n.hostileToPlayer || (n.lawman && S.wanted)) && n.rideMode === 'chase' && P.alive && d < 40) {
+    if ((n.hostileToPlayer || (n.lawman && S.wanted)) && n.rideMode === 'chase' && P.alive && d < 40 && n.gun && !n.fists) { // a disarmed rider can't shoot
       n.allyAim = true; n.anim.layers.aim = 1; n.face(P.pos); n.shootT -= dt;
       if (n.shootT <= 0 && n.seesPlayer) { n.shootT = rand(1.6, 2.8); const m = new THREE.Vector3(); n.rig.R.hand.getWorldPosition(m);
         const acc = n.accuracy * 0.65 * (d < 12 ? 1.2 : d > 25 ? 0.55 : 1) * (P.state === 'ride' ? 0.75 : 1) * Sky.visMul(); const hit = Math.random() < acc;
         const tgt = new THREE.Vector3(P.pos.x + (hit ? 0 : rand(-2, 2)), P.pos.y + (hit ? 1.2 : rand(-0.2, 1.8)), P.pos.z + (hit ? 0 : rand(-2, 2))); if (!hit && tgt.y < P.pos.y + 0.6) tgt.y = Terrain.height(tgt.x, tgt.z);
-        FX.tracer(m, tgt, hit ? 'none' : 'auto'); Sfx.shot(n.gun === 'rifle'); n.anim.play('recoil'); if (hit) P.hurt(n.dmg, n, 'gun'); }
+        FX.tracer(m, tgt, hit ? 'none' : 'auto'); Sfx.shot(n.gun === 'rifle'); n.anim.play('recoil'); if (hit) P.hurt(n.dmg, n, 'gun'); Town.shot(h.pos.x, h.pos.z, n); }
     }
   },
+  clear() { for (const h of this.horses.slice()) { h.rider = null; h.remove(); } this.posseCD = 0; }, // loading or retrying: no riderless horses frozen in place
   despawnRider(n) { const h = n.mount; if (h) { h.rider = null; h.remove(); } NPC.despawn(n); },
   /* ---------- the law rides out ---------- */
   posse(dt) {

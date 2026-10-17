@@ -31,7 +31,7 @@ async def main():
             return { panicked, alarm, hid, back: n.state === 'routine' && !n.panicked, law }; })()""")
         check('town: a gunshot in Juniper Gap sends townsfolk running for the nearest door, they cower inside, then come back out', r['panicked'] and r['alarm'] and r['hid'] and r['back'], r)
         check('town: the law hears it and comes to see who\'s shooting', r['law']['lawT'] and r['law']['caller'], r['law'])
-        r = await ev(pg, """(()=>{ const c = Town.lawCaller || HP.NPC.all.find(n => n.lawman && n.alive); const P = HP.Game.player; Town.lawCaller = c; c.state = 'routine'; HP.tp(c.pos.x, c.pos.z - 3); P.yaw = 0; HP.sim(0.1, X.F); c.seesPlayer = true; c.perceiveT = 99; Town.update(0);
+        r = await ev(pg, """(()=>{ const c = Town.lawCaller || HP.NPC.all.find(n => n.lawman && n.alive); const P = HP.Game.player; Town.lawCaller = c; Town.lawT = 10; c.state = 'routine'; HP.tp(c.pos.x, c.pos.z - 3); P.yaw = 0; HP.sim(0.1, X.F); c.seesPlayer = true; c.perceiveT = 99; Town.update(0);
             const warned = Game.time - Town.warnedAt < 1, c0 = HP.S.stats.crimes; P.cool = 0; X.click(); HP.sim(0.2, X.F); return { warned, crime: HP.S.stats.crimes - c0 }; })()""")
         check('town: the lawman warns you once; shoot again in town and it\'s disturbing the peace', r['warned'] and r['crime'] == 1, r)
         r = await ev(pg, """(()=>{ X.reset(-40, 24); HP.S.bounty = 0; HP.S.wanted = false; for (const n of HP.NPC.all) if (n.lawman) n.calm(); const n = HP.NPC.spawn({ key: 'twB', name: 'Townswoman', x: -50, z: 25, lawful: true, brave: 0.1, tags: ['generic'] }); n.state = 'routine'; HP.sim(0.2, X.F);
@@ -44,7 +44,7 @@ async def main():
         r = await ev(pg, """(()=>{ const P = HP.Game.player, c0 = HP.S.stats.crimes; for (const h of Town.hunters()) h.takeHit({ dmg: 999, from: P, gun: 'revolver', zone: 'head' }); HP.sim(0.6, X.F); return { done: Town.huntDone, crimes: HP.S.stats.crimes - c0 }; })()""")
         check('hunters: they\'re fair game; gunning them down is no crime', r['done'] and r['crimes'] == 0, r)
         r = await ev(pg, """(()=>{ X.reset(-150, -60); HP.S.bounty = 20; HP.S.money = 50; Town.huntCD = 0; HP.sim(0.2, X.F); const P = HP.Game.player; for (const h of Town.hunters()) { h.mount && (h.mount.pos.set(P.pos.x + 6, h.mount.pos.y, P.pos.z)); h.pos.set(P.pos.x + 6, h.pos.y, P.pos.z); }
-            P.inv = 0; P.knockout(null); HP.sim(4.2, X.F); return { bounty: HP.S.bounty, money: HP.S.money, d: Math.round(Math.hypot(P.pos.x + 22, P.pos.z - 14.5)), hunters: Town.hunters().length }; })()""")
+            P.inv = 0; P.knockout(Town.hunters()[0]); HP.sim(4.2, X.F); return { bounty: HP.S.bounty, money: HP.S.money, d: Math.round(Math.hypot(P.pos.x + 22, P.pos.z - 14.5)), hunters: Town.hunters().length }; })()""")
         check('hunters: knocked out by them, you wake at the sheriff\'s and the bounty is paid from your money (after the usual 10% lost while out cold)', r['bounty'] == 0 and r['money'] == 25 and r['d'] < 3 and r['hunters'] == 0, r)
         r = await ev(pg, """(()=>{ const t = (b, h) => { X.reset(-150, -60); HP.S.bounty = b; HP.S.honor = h; Town.huntCD = 0; HP.sim(0.2, X.F); const n = Town.hunters().length; for (const x of Town.hunters()) Riders.despawnRider(x); return n; };
             return { lowHonor: t(10, -50), fair: t(10, 0), inTown: (X.reset(-40, 20), HP.S.bounty = 30, Town.huntCD = 0, HP.sim(0.2, X.F), Town.hunters().length) }; })()""")

@@ -20,7 +20,6 @@ const Skills = {
   },
   onEvent(ev, d) { // experience from what Wren does out in the world
     if (ev === 'skin') this.gain('survive', 4); else if (ev === 'fish') this.gain('survive', 3); else if (ev === 'horsecare') this.gain('ride', 2);
-    else if (ev === 'item' && d && (d.id === 'berries' || d.id === 'sage')) this.gain('survive', 1);
   },
   rideM: 0,
   update(dt) { const P = Game.player; if (P.state === 'ride' && Game.horse.speed > 3) { this.rideM += Game.horse.speed * dt; if (this.rideM > 100) { this.rideM = 0; this.gain('ride', 1); } } },

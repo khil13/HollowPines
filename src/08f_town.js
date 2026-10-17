@@ -24,6 +24,7 @@ const Town = {
       else { me.sp = 0; me.crouchC = true; me.hideT -= dt; if (me.hideT <= 0 && Town.alarmT <= 0) Town.calm(me); } };
     return true;
   },
+  leave(dt, me) { const P = Game.player, a = Math.atan2(me.pos.x - P.pos.x, me.pos.z - P.pos.z); me.moveTo(me.pos.x + Math.sin(a) * 5, me.pos.z + Math.cos(a) * 5, 1.8, dt); }, // walk off, away from Wren
   calm(n) { n.panicked = false; n.hid = false; n.crouchC = false; n.script = null; n.state = 'routine'; n.goal = null; n.path = null; n.anim.expr = 'calm'; },
   lawCheck(n, pos) { // the sheriff or a deputy comes to see who's shooting
     if (S.wanted || n.state === 'combat' || n.state === 'pursue' || this.lawT > 0) return; this.lawT = 20; this.lawCaller = n; n.investigate(pos); n.invT = 14; n.say('Who\'s shooting?!', 2);
@@ -37,10 +38,12 @@ const Town = {
       if (hs.every(n => !n.alive || n.downed)) { if (!this.huntDone) { this.huntDone = true; UI.toast('The bounty hunters won\'t be collecting today.', 'good'); journal('Bounty hunters came for the paper on me. They didn\'t get it.'); } }
       return; }
     const thr = S.honor <= -40 ? 8 : 15;
-    if (S.bounty < thr || S.wanted || Missions.active || this.huntCD > 0 || Math.hypot(P.pos.x - TOWN_C.x, P.pos.z - TOWN_C.z) < 75 || P.state === 'down' || inBuilding(P.pos.x, P.pos.z, P.pos.y)) return;
+    if (S.bounty < thr || S.wanted || Missions.active || Duel.on || Dialog.open || this.huntCD > 0 || Math.hypot(P.pos.x - TOWN_C.x, P.pos.z - TOWN_C.z) < 75 || P.state === 'down' || inBuilding(P.pos.x, P.pos.z, P.pos.y)) return;
     this.huntCD = S.honor <= -40 ? 200 : 320; this.huntDone = false;
     const back = Math.atan2(-Math.sin(P.yaw), -Math.cos(P.yaw)), names = ['Abel Kincaid', 'Bounty hunter', 'Bounty hunter'];
-    for (let i = 0; i < 3; i++) { const a = back + (i - 1) * 0.35, x = clamp(P.pos.x + Math.sin(a) * 55, -WORLD.half + 10, WORLD.half - 10), z = clamp(P.pos.z + Math.cos(a) * 55, -WORLD.half + 10, WORLD.half - 10);
+    const spots = []; for (let k = 0; k < 24 && spots.length < 3; k++) { const a = back + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.3, x = P.pos.x + Math.sin(a) * 55, z = P.pos.z + Math.cos(a) * 55; if (Math.abs(x) < WORLD.half - 12 && Math.abs(z) < WORLD.half - 12 && Terrain.height(x, z) > WORLD.waterY + 0.6 && !spots.some(q => Math.hypot(q.x - x, q.z - z) < 6)) spots.push({ x, z, a }); } // dry ground, in the map, spread out
+    if (spots.length < 3) return;
+    for (let i = 0; i < 3; i++) { const { x, z, a } = spots[i];
       const n = Riders.spawnRider({ key: 'hunter' + i + '_' + Math.floor(Math.random() * 1e5), name: names[i], lawful: false, gun: i === 1 ? 'rifle' : 'revolver', hp: 120, maxHp: 120, accuracy: 0.42, brave: 0.9, tags: ['generic', 'hunter'], look: { skin: i === 2 ? '#8d5a3b' : '#e2a57c', shirt: ['#4a3b2a', '#3f4a3a', '#5a4030'][i], coat: '#2e2a26', hair: '#2b2018', hatColor: '#1e1a16', beard: i === 0 ? '#2b2018' : null } }, 'chase', x, z, a + Math.PI);
       n.hostileToPlayer = true; }
     UI.toast(`Bounty hunters are riding after the $${S.bounty.toFixed(2)} on your head!`, 'bad'); this.hunters()[0].say('That paper\'s ours, Wren. Come quiet or come dead.', 4); Haptic.buzz([40, 60, 40]);
@@ -53,11 +56,11 @@ const Town = {
   // ---------- your own wanted poster outside the sheriff's office ----------
   posterInit() {
     const c = document.createElement('canvas'); c.width = 128; c.height = 176; this.posterC = c; this.posterTex = new THREE.CanvasTexture(c);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.85), new THREE.MeshLambertMaterial({ map: this.posterTex })); const y = Col.ground(-19.6, 4.3, 99); m.position.set(-19.6, y + 1.75, 4.42); m.rotation.y = Math.PI; Game.scene.add(m); this.poster = m; this.drawn = -1;
-    Interact.add({ pos: () => ({ x: -19.6, y, z: 3.9 }), r: 1.8, pri: 0.3, opts: () => S.bounty >= 5 ? [{ label: 'Read poster: Wren', fn: () => Dialog.start(null, { start: { who: 'Wanted poster', text: `WANTED: "WREN", a drifter. ${S.bounty >= 30 ? 'Armed and dangerous. ' : ''}$${S.bounty.toFixed(2)} REWARD. Bring to Sheriff Pike, Juniper Gap. ${S.honor <= -40 ? 'Dead or alive.' : 'Alive preferred.'}`, choices: [{ text: 'Tear it down', do: () => { UI.toast('Torn down. Pike will put up another.', ''); this.torn = S.time.day; }, next: null }, { text: 'Leave it', next: null }] } }) }] : [] });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.85), new THREE.MeshLambertMaterial({ map: this.posterTex })); const y = Col.ground(-19.4, 12.4, 99); m.position.set(-19.4, y + 1.75, 11.66); m.rotation.y = 0; /* beside the door, facing the street */ Game.scene.add(m); this.poster = m; this.drawn = -1;
+    Interact.add({ pos: () => ({ x: -19.4, y, z: 12.3 }), r: 1.8, pri: 0.3, opts: () => S.bounty >= 5 && S.flags.posterTorn !== S.time.day ? [{ label: 'Read poster: Wren', fn: () => Dialog.start(null, { start: { who: 'Wanted poster', text: `WANTED: "WREN", a drifter. ${S.bounty >= 30 ? 'Armed and dangerous. ' : ''}$${S.bounty.toFixed(2)} REWARD. Bring to Sheriff Pike, Juniper Gap. ${S.honor <= -40 ? 'Dead or alive.' : 'Alive preferred.'}`, choices: [{ text: 'Tear it down', do: () => { UI.toast('Torn down. Pike will put up another tomorrow.', ''); S.flags.posterTorn = S.time.day; }, next: null }, { text: 'Leave it', next: null }] } }) }] : [] });
   },
   posterDraw() {
-    const show = S.bounty >= 5 && this.torn !== S.time.day; this.poster.visible = show; if (!show) return; const key = Math.round(S.bounty) + S.outfit; if (key === this.drawn) return; this.drawn = key;
+    const show = S.bounty >= 5 && S.flags.posterTorn !== S.time.day; this.poster.visible = show; if (!show) return; const key = Math.round(S.bounty) + S.outfit; if (key === this.drawn) return; this.drawn = key;
     const g = this.posterC.getContext('2d'), o = OUTFITS[S.outfit] || OUTFITS.duster; g.fillStyle = '#efe2c2'; g.fillRect(0, 0, 128, 176); g.strokeStyle = '#6b5a3e'; g.lineWidth = 3; g.strokeRect(4, 4, 120, 168);
     g.fillStyle = '#3b2a1e'; g.font = 'bold 22px Georgia, serif'; g.textAlign = 'center'; g.fillText('WANTED', 64, 30);
     g.fillStyle = '#e2b48c'; g.beginPath(); g.arc(64, 78, 22, 0, TAU); g.fill(); g.fillStyle = '#7a4a2a'; g.fillRect(42, 70, 8, 26); g.fillRect(78, 70, 8, 26); // face and hair
@@ -71,7 +74,8 @@ const Town = {
     if (r < 0.5 && S.flags.duelDay !== d && day && S.chapter >= 2) return this.duelist(), true;
     return false; },
   wagon() {
-    S.flags.wagonDay = S.time.day; const s = Encounters.spot(26), y = Terrain.height(s.x, s.z), P = Game.player, yaw = P.yaw + Math.PI / 2;
+    const s = SIDE.roadSpot(26); if (!s || Terrain.height(s.x, s.z) < WORLD.waterY + 0.6 || this.inTown(s.x, s.z) || Col.near(s.x, s.z, 2, []).some(c => c.block)) return; // a dry stretch of open trail
+    S.flags.wagonDay = S.time.day; const y = Terrain.height(s.x, s.z), P = Game.player, yaw = P.yaw + Math.PI / 2;
     const g = new THREE.Group(); g.position.set(s.x, y, s.z); g.rotation.y = yaw; Game.scene.add(g);
     const bed = M(GEO.box, '#7a5a3c', 2.8, 0.5, 1.4, 0, 0.85, 0); bed.rotation.z = 0.14; g.add(bed); g.add(M(GEO.box, '#e8dfc8', 2.6, 1.0, 1.3, 0.1, 1.55, 0)); // canvas cover
     for (const [wx, wz] of [[-1.1, 0.75], [-1.1, -0.75], [1.1, 0.75]]) { const w = M(GEO.cyl, '#4a3a2a', 0.5, 0.1, 0.5, wx, 0.5, wz); w.rotation.x = Math.PI / 2; g.add(w); }
@@ -80,8 +84,8 @@ const Town = {
     const n = NPC.spawn({ key: 'wagon_otis', name: 'Otis Pruitt', x: s.x + Math.cos(yaw) * 2.4, z: s.z - Math.sin(yaw) * 2.4, lawful: true, wild: true, brave: 0.3, state: 'scripted', tags: ['generic', 'wayfarer'], look: { skin: '#e2a57c', shirt: '#6a7a4a', hair: '#9a8a7a', beard: '#9a8a7a', hatColor: '#7a6a4a' } });
     n.script = (dt, me) => { me.sp = 0; if (me.distP < 9) me.face(Game.player.pos); if (me.distP < 12 && !ev.called) { ev.called = true; me.say('Wheel came clean off! Could you lend a hand?', 4); } };
     const ev = { kind: 'wagon', g, c, n, fixed: false, robbed: false };
-    ev.it = Interact.add({ pos: () => ({ x: s.x, y, z: s.z }), r: 3, pri: 0.6, opts: p => ev.fixed || ev.robbed || !n.alive ? [] : [
-      { label: 'Help fix the wheel', fn: () => { p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); ev.fixed = true; broke.position.set(1.1, 0.5, -0.75); broke.rotation.x = Math.PI / 2; bed.rotation.z = 0; Rep.honor(3, 'helped a stranded settler'); Inv.money(Math.round(rand(2, 4) * 100) / 100, 'from Otis'); Inv.add('coffee', 1); n.say('Bless you! There\'s coffee in it for you.', 4); Skills.gain('survive', 2); }, 2600); } },
+    ev.it = Interact.add({ pos: () => ({ x: s.x, y, z: s.z }), r: 3, pri: 0.6, opts: p => ev.fixed || ev.fixing || ev.robbed || !n.alive ? [] : [
+      { label: 'Help fix the wheel', fn: () => { if (ev.fixing) return; ev.fixing = true; p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); if (!Town.events.includes(ev) || !n.alive || ev.robbed) return; ev.fixed = true; broke.position.set(1.1, 0.5, -0.75); broke.rotation.x = Math.PI / 2; bed.rotation.z = 0; Rep.honor(3, 'helped a stranded settler'); Inv.money(Math.round(rand(2, 4) * 100) / 100, 'from Otis'); Inv.add('coffee', 1); n.say('Bless you! There\'s coffee in it for you.', 4); Skills.gain('survive', 2); }, 2600); } },
       { label: 'Rob him', crime: true, fn: () => { ev.robbed = true; n.state = 'handsup'; n.handsT = -6; n.say('Take it, take it! Just don\'t shoot!', 3); Inv.money(Math.round(rand(3, 6) * 100) / 100, 'robbed from Otis'); Law.crime('robbery', p.pos, { victim: n }); } }] });
     this.events.push(ev); UI.toast('A wagon is stuck on the trail ahead', '');
   },
@@ -92,7 +96,7 @@ const Town = {
     n.script = (dt, me) => { me.sp = 0; me.face(Game.player.pos); if (me.distP < 14 && !ev.called) { ev.called = true; me.say('They say you\'re quick, Wren. I\'d like to find out.', 4); } };
     n.talk = () => ev.done ? null : { start: { who: nm, text: 'Main street rules. We stand ten paces apart and draw on the word. Unless you\'re yellow.', choices: [
       { text: 'Let\'s settle it. (Duel)', cond: () => S.weapons.revolver, do: () => Duel.start(n), next: null },
-      { text: 'Not today.', do: () => { ev.done = true; n.say('Figured. Yellow as mustard.', 3); n.script = (dt, me) => me.moveTo(me.pos.x + 30, me.pos.z, 1.6, dt); }, next: null }] } };
+      { text: 'Not today.', do: () => { ev.done = true; n.say('Figured. Yellow as mustard.', 3); n.script = Town.leave; }, next: null }] } };
     const ev = { kind: 'duel', n }; this.events.push(ev); UI.toast(`${nm} blocks the trail`, '');
   },
   eventsTick() {
@@ -101,7 +105,7 @@ const Town = {
       if (far) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) ev.c.on = false; if (ev.it) Interact.remove(ev.it); if (ev.n && NPC.all.includes(ev.n) && !Duel.on) NPC.despawn(ev.n); this.events = this.events.filter(e => e !== ev); } }
   },
   update(dt) {
-    this.alarmT -= dt; this.lawT -= dt; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
+    this.alarmT -= dt; this.lawT -= dt; if (this.lawT < -10) this.lawCaller = null; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
     const c = this.lawCaller, P = Game.player; // the lawman who came to check gives one warning when he finds you
     if (c && c.alive && c.state !== 'pursue' && c.state !== 'combat' && c.distP < 8 && c.seesPlayer && Game.time - this.warnedAt > 90) { this.warnedAt = Game.time; this.lawCaller = null; c.face(P.pos); c.say('Keep that iron holstered in my town. Next shot costs you.', 4); UI.toast('Warned by the law: no more shooting in town', 'bad'); }
   },
@@ -130,11 +134,11 @@ const Duel = {
     const P = Game.player, n = this.n, muzzle = new THREE.Vector3(); this.phase = 'done'; P.anim.play('recoil'); P.rig.R.hand.getWorldPosition(muzzle);
     const chest = new THREE.Vector3(n.pos.x, n.pos.y + 1.2, n.pos.z), me = new THREE.Vector3(P.pos.x, P.pos.y + 1.2, P.pos.z);
     if (how === 'win' || how === 'spare') { Sfx.shot(false); FX.tracer(muzzle, chest, 'none'); S.stats.duels = (S.stats.duels || 0) + 1; Skills.gain('gun', 6);
-      if (how === 'spare') { Brawl.disarm(n); n.hostileToPlayer = false; n.state = 'scripted'; n.say('You could\'ve killed me. I won\'t forget it.', 4); Rep.honor(3, 'spared a duelist'); n.script = (dt, me2) => me2.moveTo(me2.pos.x + 30, me2.pos.z, 2.4, dt); this.show('You shot the gun from their hand', 'won'); }
+      if (how === 'spare') { Brawl.disarm(n); n.hostileToPlayer = false; n.state = 'scripted'; n.say('You could\'ve killed me. I won\'t forget it.', 4); Rep.honor(3, 'spared a duelist'); n.script = Town.leave; this.show('You shot the gun from their hand', 'won'); }
       else { n.takeHit({ dmg: 999, from: P, gun: 'revolver', zone: 'body' }); Inv.money(Math.round(rand(6, 14) * 100) / 100, 'from the duelist\'s purse'); this.show('You were faster', 'won'); journal(`Outdrew ${n.name} on the trail.`); } }
     else { Sfx.shot(false); FX.tracer(new THREE.Vector3(n.pos.x, n.pos.y + 1.3, n.pos.z), me, 'none'); P.hurt(how === 'early' ? 45 : 55, n, 'gun'); n.say(how === 'early' ? 'Cheat! You drew early!' : 'Too slow, Wren.', 3); if (how === 'early') Rep.honor(-3, 'drew early in a duel');
-      this.show(how === 'early' ? 'You drew too early' : 'Too slow', 'lost'); n.script = (dt, me2) => me2.moveTo(me2.pos.x + 30, me2.pos.z, 1.8, dt); }
-    const ev = Town.events.find(e => e.n === n); if (ev) ev.done = true; setTimeout(() => this.show(null), 2200); this.on = false; this.last = how;
+      this.show(how === 'early' ? 'You drew too early' : 'Too slow', 'lost'); n.script = Town.leave; }
+    const ev = Town.events.find(e => e.n === n); if (ev) ev.done = true; later(() => this.show(null), 2200); this.on = false; this.last = how;
   },
   stop() { this.on = false; this.show(null); },
 };

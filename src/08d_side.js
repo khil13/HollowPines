@@ -71,19 +71,19 @@ const SIDE = {
     for (const tr of TRAILS) for (let i = 0; i < tr.length - 1; i++) { const [ax, az] = tr[i], [bx, bz] = tr[i + 1], L = Math.hypot(bx - ax, bz - az); for (let s = 0; s <= L; s += 4) { const x = ax + (bx - ax) * s / L, z = az + (bz - az) * s / L, d = Math.hypot(x - P.pos.x, z - P.pos.z); if (d < dist * 0.7 || d > dist * 1.5) continue; const ahead = ((x - P.pos.x) * f.x + (z - P.pos.z) * f.z) / d; const sc = Math.abs(d - dist) - ahead * 20; if (sc < bd && Math.hypot(x + 40, z - 20) > 50) { bd = sc; best = { x, z }; } } }
     return best;
   },
-  tempNPC(o) { const n = NPC.spawn(Object.assign({ wild: true, tags: ['generic', 'encounter'] }, o)); setTimeout(() => { if (NPC.all.includes(n) && n.distP > 60) NPC.despawn(n); }, 240000); return n; },
+  tempNPC(o) { const n = NPC.spawn(Object.assign({ wild: true, tags: ['generic', 'encounter'] }, o)); const sweep = setInterval(() => { if (!NPC.all.includes(n)) return clearInterval(sweep); if (n.distP > 60) { NPC.despawn(n); clearInterval(sweep); } }, 60000); return n; }, // once you're well away, they go on their way
   holdup() { // two bandits robbing a traveler: step in, cut yourself in, or ride on
-    const s = this.roadSpot(40); if (!s) return; S.flags.holdupDay = S.time.day; let resolved = false;
+    const s = this.roadSpot(40); if (!s) return; S.flags.holdupDay = S.time.day; let resolved = false, cut = false;
     const v = this.tempNPC({ key: 'enc_victim', name: 'Traveler', x: s.x, z: s.z, brave: 0.2, state: 'scripted', look: { skin: '#f0c4a0', shirt: '#4f7ca8', hair: '#8b5a2b', hatColor: '#d9c58f' } });
     v.state = 'handsup'; v.handsT = -1e9; v.anim.expr = 'alarm'; // hands up until someone settles it
     const robbers = [0, 1].map(i => this.tempNPC({ key: 'enc_bandit' + i, name: 'Road agent', x: s.x + (i ? 3 : -3), z: s.z + 2.5, lawful: false, group: 'enc_bandits', state: 'scripted', gun: 'revolver', hp: 80, maxHp: 80, fleeHp: 20, accuracy: 0.38, look: { skin: '#e8b48c', shirt: '#5a3a2a', hair: '#3b2a1e', hatColor: '#1b1b1b', scarf: '#8a3b3b' } }));
     for (const r of robbers) { r.script = (dt, me) => { me.sp = 0; me.face(v.pos); me.anim.layers.aim = 1; if (me.gunM) me.gunM.visible = true; if (me.distP < 14 && !me._warned) { me._warned = 1; me.face(Game.player.pos); me.say('Keep riding, friend. This ain\'t your business.', 4); } };
       r.talk = () => resolved ? null : { start: { text: 'Keep riding. Or are you looking for a cut?', choices: [
-        { text: '"Cut me in."', do: () => { resolved = true; Inv.money(6, 'your cut'); Rep.honor(-8, 'joined a robbery'); v.say('Thieves! All of you!', 3); v.state = 'flee'; v.fleeFrom = Game.player.pos.clone(); v.fleeT = 10; v.script = null; for (const x of robbers) { x.script = (dt, me) => me.moveTo(s.x + 60, s.z + 60, 3, dt); } }, next: null },
+        { text: '"Cut me in."', do: () => { resolved = true; cut = true; Inv.money(6, 'your cut'); Rep.honor(-8, 'joined a robbery'); v.say('Thieves! All of you!', 3); v.state = 'flee'; v.fleeFrom = Game.player.pos.clone(); v.fleeT = 10; v.script = null; for (const x of robbers) { x.script = (dt, me) => me.moveTo(s.x + 60, s.z + 60, 3, dt); } }, next: null },
         { text: '"Let him go." (Draw)', do: () => { resolved = true; for (const x of robbers) x.fightPlayer(); }, next: null }, { text: 'Ride on', next: null }] } }; }
     const watch = setInterval(() => { // the robbery plays out whether or not you stay
       if (!NPC.all.includes(v)) return clearInterval(watch);
-      if (robbers.every(r => !r.alive || r.downed || r.fled)) { clearInterval(watch); if (!resolved || robbers.some(r => r.hostileToPlayer)) { resolved = true; v.state = 'scripted'; v.say('Bless you! Here, it\'s not much.', 4); Inv.money(5, 'from the traveler'); Rep.honor(5, 'stopped a robbery'); journal('Stopped two road agents robbing a traveler.'); v.script = (dt, me) => me.moveTo(-40, 20, 1.6, dt); } return; }
+      if (robbers.every(r => !r.alive || r.downed || r.fled)) { clearInterval(watch); if (v.alive && !v.downed && !cut && (!resolved || robbers.some(r => r.hostileToPlayer))) { resolved = true; v.state = 'scripted'; v.say('Bless you! Here, it\'s not much.', 4); Inv.money(5, 'from the traveler'); Rep.honor(5, 'stopped a robbery'); journal('Stopped two road agents robbing a traveler.'); v.script = (dt, me) => me.moveTo(-34, 24, 1.6, dt, 2); } else resolved = true; /* no reward from the dead or after taking a cut */ return; }
       if (!resolved && Game.player.pos.distanceTo(v.pos) > 90) { clearInterval(watch); resolved = true; for (const x of [v, ...robbers]) NPC.despawn(x); }
     }, 1000);
     UI.toast('Shouting on the road ahead', '');
@@ -92,7 +92,7 @@ const SIDE = {
     const s = this.roadSpot(32); if (!s) return; S.flags.snakeDay = S.time.day; let done = false;
     const m = this.tempNPC({ key: 'enc_snake', name: 'Bitten traveler', x: s.x + 2, z: s.z, brave: 0.3, state: 'tied', look: { skin: '#e8b48c', shirt: '#9a7b4f', hair: '#6b4a2f', hatColor: '#8b6a47', beard: '#6b4a2f' } });
     m.say('Snake got me! Please, somebody!', 5); m.talk = null;
-    m.opts = p => done ? [] : [{ label: 'Suck out the venom', fn: () => { done = true; p.anim.play('kneel', { loop: true }); setTimeout(() => { p.anim.stop('kneel'); this.saved(m, 4); }, 1800); } }].concat(Inv.count('tonic') ? [{ label: 'Give him a sage tonic', fn: () => { done = true; Inv.take('tonic'); this.saved(m, 7); } }] : []);
+    m.opts = p => done ? [] : [{ label: 'Suck out the venom', fn: () => { done = true; p.anim.play('kneel', { loop: true }); later(() => { p.anim.stop('kneel'); this.saved(m, 4); }, 1800); } }].concat(Inv.count('tonic') ? [{ label: 'Give him a sage tonic', fn: () => { done = true; Inv.take('tonic'); this.saved(m, 7); } }] : []);
     UI.toast('Someone is crying out by the trail', '');
   },
   saved(m, cash) { m.state = 'scripted'; m.say('I thought I was done for. Thank you, ma\'am.', 4); Inv.money(cash, 'from the traveler'); Rep.honor(4, 'helped a snakebit stranger'); journal('Sucked the venom from a snakebit stranger\'s leg on the trail.'); m.script = (dt, me) => me.moveTo(-40, 20, 1.4, dt); },
@@ -163,10 +163,12 @@ Missions.def({ id: 'bounty_board', type: 'bounty', title: 'Bounty', giver: 'boar
   stages: [
     { id: 'find', text: 'Track down the outlaw from the poster.', enter: ctx => { if (ctx.resumed && !ctx.rew) { ctx.rew = 1; } SIDE.spawnBounty(); },
       objectives: [O.check('find', () => { const q = SIDE.bs().active; return q ? `Find ${SIDE.outlaw(q.o).name} near ${SIDE.hideout(q.h).name}` : 'Find the outlaw'; }, () => { const q = SIDE.bs().active; if (!q) return false; const h = SIDE.hideout(q.h); return CH5.dist(Game.player.pos, h) < 28; }, () => { const q = SIDE.bs().active; if (!q) return null; const h = SIDE.hideout(q.h); return { x: h.x, z: h.z, y: Terrain.height(h.x, h.z) + 4 }; })] },
-    { id: 'take', text: 'Bring them in. Knock them out and hogtie them for the full reward.', enter: () => { const q = SIDE.bs().active; if (q && SIDE.outlaw(q.o).kind === 'brawler') STORY.hint('Ox only fights with his fists. Beat him down with yours, then hogtie him.'); },
+    { id: 'take', text: 'Bring them in. Knock them out and hogtie them for the full reward.', enter: ctx => { if (ctx.resumed && SIDE.bs().active && !NPC.byKey('bgen_' + SIDE.bs().active.o)) SIDE.spawnBounty(); // loaded mid-hunt: put the outlaw back
+ const q = SIDE.bs().active; if (q && SIDE.outlaw(q.o).kind === 'brawler') STORY.hint('Ox only fights with his fists. Beat him down with yours, then hogtie him.'); },
       objectives: [O.check('sub', () => `Subdue ${SIDE.outlaw(SIDE.bs().active.o).name}`, () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return !t || !t.alive || t.hogtied; }, () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return t && t.alive ? { x: t.pos.x, z: t.pos.z, y: t.pos.y + 2.4, enemy: true } : null; })],
       fail: [{ check: () => SIDE.bs().active && SIDE.bs().active.fled, why: 'The outlaw got away.' }] },
-    { id: 'deliver', text: 'Bring them (or proof) to the sheriff\'s office.', objectives: [O.check('turn', () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return t && t.alive ? 'Carry them to the sheriff\'s office (stow them on your horse)' : 'Search the body for proof, then go to the sheriff\'s office'; }, () => !!SIDE.bs().active.turnedIn, () => ({ x: -25.5, z: 8.6, y: 5 }))] },
+    { id: 'deliver', text: 'Bring them (or proof) to the sheriff\'s office.', enter: ctx => { const q = SIDE.bs().active; if (ctx.resumed && q && !NPC.byKey('bgen_' + q.o)) q.proof = true; }, // loaded after the body was gone: the deed counts
+      objectives: [O.check('turn', () => { const t = NPC.byKey('bgen_' + SIDE.bs().active.o); return t && t.alive ? 'Carry them into the sheriff\'s office (your horse can haul them most of the way)' : 'Search the body for proof, then go to the sheriff\'s office'; }, () => !!SIDE.bs().active.turnedIn, () => ({ x: -25.5, z: 8.6, y: 5 }))] },
   ],
   complete: ctx => SIDE.bountyComplete(ctx),
   cleanup: () => { const b = SIDE.bs(); if (b.active) { b.posted.push({ o: b.active.o, h: b.active.h }); b.active = null; } for (const n of NPC.all.slice()) if (n.tags.includes('bgen')) NPC.despawn(n); Missions.st('bounty_board').status = 'locked'; },
@@ -251,10 +253,10 @@ Object.assign(SIDE, {
     c.t += dt; if (c.t >= 8) { c.t = 0; c.plates = (c.plates || 0) + 1; Sfx.tone(1800, 0.05, 0.08, 'square'); UI.toast(`Plate ${c.plates} of 3 exposed`, 'good'); }
   },
   percival() { // a traveling photographer camps at Pine Hollow until his job is done
-    if (Missions.st('stranger_photo').status === 'done' && Missions.active !== 'stranger_photo') { const n = NPC.byKey('percival'); if (n && n.distP > 80) NPC.despawn(n); return; }
+    if (Missions.st('stranger_photo').status === 'done' && Missions.active !== 'stranger_photo') { const n = NPC.byKey('percival'); if (n && n.distP > 80) { NPC.despawn(n); if (this._cam) { Game.scene.remove(this._cam); this._cam = null; } } return; }
     if (NPC.byKey('percival') || Missions.st('m1').status !== 'done') return;
     const n = NPC.spawn({ key: 'percival', name: 'Percival Lumley', x: PINE_HOLLOW.x, z: PINE_HOLLOW.z, wild: true, brave: 0.3, state: 'scripted', tags: ['generic'], look: { skin: '#f0c4a0', shirt: '#e6dcc5', vest: '#5a3a5a', hair: '#c9a227', mustache: '#c9a227', hatColor: '#3b3b3b' } });
     n.script = (dt, me) => { me.sp = 0; }; n.talk = () => Missions.st('stranger_photo').status === 'available' ? { start: { text: 'Percival Lumley, photographic artist! I\'m assembling a portfolio of the American wilderness, but the deer simply will not sit still for me. Would you keep watch, and keep quiet?', choices: [{ text: 'I\'ll keep watch.', do: () => Missions.start('stranger_photo'), next: null }, { text: 'Not now.', next: null }] } } : { start: { text: Missions.st('stranger_photo').status === 'done' ? 'My finest plates yet. I owe you a great deal.' : 'Shh!', choices: [{ text: 'Goodbye', next: null }] } };
-    const cam = new THREE.Group(); cam.position.set(PINE_HOLLOW.x + 1.2, Terrain.height(PINE_HOLLOW.x + 1.2, PINE_HOLLOW.z + 0.8), PINE_HOLLOW.z + 0.8); for (const a of [0, 2.1, 4.2]) { const l = M(GEO.box, '#5a3a22', 0.05, 1.3, 0.05, Math.cos(a) * 0.25, 0.6, Math.sin(a) * 0.25); l.rotation.set(Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3); cam.add(l); } cam.add(M(GEO.box, '#2b2b2b', 0.35, 0.3, 0.45, 0, 1.35, 0)); cam.add(M(GEO.cyl, '#1b1b1b', 0.08, 0.15, 0.08, 0, 1.35, 0.28)); Game.scene.add(cam); n._cam = cam;
+    const cam = new THREE.Group(); cam.position.set(PINE_HOLLOW.x + 1.2, Terrain.height(PINE_HOLLOW.x + 1.2, PINE_HOLLOW.z + 0.8), PINE_HOLLOW.z + 0.8); for (const a of [0, 2.1, 4.2]) { const l = M(GEO.box, '#5a3a22', 0.05, 1.3, 0.05, Math.cos(a) * 0.25, 0.6, Math.sin(a) * 0.25); l.rotation.set(Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3); cam.add(l); } cam.add(M(GEO.box, '#2b2b2b', 0.35, 0.3, 0.45, 0, 1.35, 0)); cam.add(M(GEO.cyl, '#1b1b1b', 0.08, 0.15, 0.08, 0, 1.35, 0.28)); if (this._cam) Game.scene.remove(this._cam); this._cam = cam; Game.scene.add(cam); // one tripod, however often he's respawned n._cam = cam;
   },
 });
