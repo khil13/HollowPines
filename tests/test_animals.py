@@ -88,6 +88,13 @@ async def main():
             check('shipped horse: loads with Idle, Walk, Run (trot and gallop), Death and Jump (rearing); grazing is not mistaken for Death', real['model'] and c['idle'] == 'Idle' and c['walk'] == 'Walk' and c['run'] == 'Run' and c['trot'] == 'Run' and c['death'] == 'Death' and c['rear'] == 'Jump' and c['eat'] != 'Death', real)
             check('shipped horse: coat in the horse\'s colour, mane and tail in its mane colour', sorted(set(real['cols'])) == ['#3b2618', '#a0673a'], real['cols'])
             check('shipped horse: stride-matched clip speeds are sane and rise with the gait, saddle height is a horse\'s back', 0.2 < real['speed']['walk'] < real['speed']['run'] < 15 and 1.2 < real['back'] < 1.7, real)
+            wolf = await ev(pg, """(() => { const A = AnimalAssets.models.wolf; if (!A) return null; const r = makeQuad({ type: 'wolf', color: '#7d7b78' }); HP.Game.scene.add(r.root); const an = new QuadAnimator(r, {});
+              const go = st => { for (let i = 0; i < 40; i++) an.update(1 / 30, st); return { clip: an.cur ? an.cur.name : null, rate: +an.curAction.timeScale.toFixed(2), bob: +r.vis.position.y.toFixed(3) }; };
+              let col = null; r.model.traverse(m => { if (m.isMesh) col = '#' + [].concat(m.material)[0].color.getHexString(); });
+              const out = { walk: go({ speed: 1.6, gait: 'walk' }), chase: go({ speed: 8.5, gait: 'gallop' }), col }; let roll = 0; for (let i = 0; i < 60; i++) { an.update(1 / 30, { speed: 0, dead: 1 }); roll = r.vis.rotation.z; } out.roll = +roll.toFixed(2); HP.Game.scene.remove(r.root); return out; })()""")
+            if wolf:
+                check('shipped wolf: walks on its Walking clip and, with no run clip, lopes on it faster with a bounding body', wolf['walk']['clip'] == 'Walking' and wolf['chase']['clip'] == 'Walking' and wolf['chase']['rate'] > 2.2 > wolf['walk']['rate'], wolf)
+                check('shipped wolf: grey coat, and with no death clip a killed wolf rolls onto its side', wolf['col'] == '#7d7b78' and wolf['roll'] > 1.2, wolf)
             await ev(pg, "HP.sim(2)"); check('shipped horse: no page errors', not [e for e in errs if 'favicon' not in e], errs[:3]); await b.close()
     n = sum(1 for r in RESULTS if r[1]); print(f'\n{n}/{len(RESULTS)} animal model checks passed')
     if n != len(RESULTS): raise SystemExit(1)

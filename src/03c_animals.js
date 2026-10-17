@@ -89,12 +89,15 @@ function quadModelUpdate(an, dt, st) {
   const R = an.rig, C = R.clips, sp = st.speed, g = st.gait || 'walk';
   an.t += dt; const prev = an.phase; an.phase += sp * dt / ((GAITS[g] || GAITS.walk).stride * R.scale);
   if (Math.floor(prev * 2) !== Math.floor(an.phase * 2) && an.owner.onStep && sp > 0.25) an.owner.onStep();
-  let want = 'idle', rate = 1;
+  let want = 'idle', rate = 1, bound = 0;
   if ((st.dead || 0) > 0.5 && C.death) want = 'death';
   else if ((st.rear || 0) > 0.4) want = 'rear';
   else if ((st.lie || 0) > 0.5 && C.lie) want = 'lie';
   else if ((st.attack || (R.type === 'wolf' && st.rear > 0)) && C.attack) want = 'attack'; /* a wolf's lunge */
-  else if (sp > 0.3) { want = g === 'walk' ? 'walk' : g === 'trot' ? 'trot' : 'run'; rate = clamp(sp / (AnimalAssets.models[R.type].speed[want] * R.scale), 0.45, 2.2); }
+  else if (sp > 0.3) { want = g === 'walk' ? 'walk' : g === 'trot' ? 'trot' : 'run';
+    /* a model with only a walk lopes on it: the cycle speeds up further and the body bounds, rather than gliding */
+    const loping = want !== 'walk' && C[want] === C.walk, nat = AnimalAssets.models[R.type].speed[loping ? 'walk' : want] * R.scale;
+    rate = clamp(sp / nat, 0.45, loping ? 3.4 : 2.2); if (loping) bound = clamp((sp - nat * 2) / (nat * 4), 0, 1); }
   else if ((st.graze || 0) > 0.5) want = 'eat';
   const clip = C[want] || C.idle; if (!clip) return;
   if (an.cur !== clip) { const next = R.mixer.clipAction(clip); next.reset(); next.enabled = true; next.setEffectiveWeight(1);
@@ -102,5 +105,7 @@ function quadModelUpdate(an, dt, st) {
     next.play(); if (an.curAction) next.crossFadeFrom(an.curAction, want === 'death' ? 0.15 : 0.3, false); an.cur = clip; an.curAction = next; }
   an.curAction.timeScale = rate; R.mixer.update(dt);
   R.vis.rotation.z = damp(R.vis.rotation.z, st.dead && !C.death ? 1.45 : st.roll || 0, 5, dt);
-  an.pitch = damp(an.pitch, st.slope || 0, 8, dt); R.vis.rotation.x = an.pitch;
+  const lunge = R.type === 'wolf' && st.rear > 0 && !C.attack ? -0.35 : 0; /* no attack clip: rear up into the spring */
+  an.bound = damp(an.bound || 0, bound, 4, dt); const ph = an.phase * TAU * 2;
+  an.pitch = damp(an.pitch, (st.slope || 0) + lunge, 8, dt); R.vis.rotation.x = an.pitch + an.bound * 0.09 * Math.sin(ph); R.vis.position.y = an.bound * 0.07 * R.scale * Math.abs(Math.sin(ph));
 }
