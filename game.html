@@ -228,6 +228,7 @@ const Input = {
     canvas.addEventListener('mousedown', e => {
       if (this.touch) return;
       if (!this.locked && !this.uiOpen && Settings.v.mouseLock !== false && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) {} }
+      if (this.swallowClick) { this.swallowClick = false; if (e.button === 0) return; } // the first click back in the game only re-grabs the mouse
       if (e.button === 0) { this.mouse.l = true; this.mouse.lp = true; } if (e.button === 2) this.mouse.r = true;
     });
     addEventListener('mouseup', e => { if (e.button === 0) this.mouse.l = false; if (e.button === 2) this.mouse.r = false; });
@@ -260,7 +261,7 @@ const Input = {
     });
     addEventListener('touchstart', () => this.setTouch(true), { passive: true });
     // anything held when the page loses focus, is hidden, or a menu opens is released, so nothing stays stuck on
-    this.reset = () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; this.mouse.dx = this.mouse.dy = 0; stickId = null; knob.style.transform = ''; this.move.x = this.move.y = this.move.mag = 0; lookIds.clear(); this.look.dx = this.look.dy = 0; for (const k in this.btn) this.btn[k] = false; };
+    this.reset = () => { this.keys.clear(); this.mouse.l = this.mouse.r = false; this.mouse.dx = this.mouse.dy = 0; stickId = null; knob.style.transform = ''; stick.classList.remove('float'); stick.classList.add('idle'); stick.style.left = stick.style.top = stick.style.bottom = stick.style.right = ''; this.autoSprint = false; this.rimT = 0; this.move.x = this.move.y = this.move.mag = 0; lookIds.clear(); this.look.dx = this.look.dy = 0; for (const k in this.btn) this.btn[k] = false; };
     addEventListener('blur', this.reset); document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
   },
   setTouch(v) { this.touch = v; document.body.classList.toggle('touch', v); document.getElementById('touch').hidden = !v || !Game.running; },
@@ -1472,7 +1473,7 @@ const Law = {
   },
   canSurrender() { return S.wanted && NPC.all.some(n => n.lawman && n.alive && !n.downed && n.seesPlayer && n.distP < 16); },
   surrender() {
-    const pay = Math.min(S.money, S.bounty); Inv.money(-pay, 'fine paid'); UI.toast(S.money < 0.01 && pay < S.bounty ? 'You could not cover it all. A night in the cell squared it.' : 'Fine paid. Charges cleared.', '');
+    const pay = Math.min(S.money, S.bounty); if (pay > 0) Inv.money(-pay, 'fine paid'); UI.toast(S.money < 0.01 && pay < S.bounty ? 'You could not cover it all. A night in the cell squared it.' : 'Fine paid. Charges cleared.', '');
     S.bounty = 0; S.wanted = false; this.searchC = null; Rep.honor(-2, 'arrested');
     Sky.advance(6); Game.player.teleport(-22, 14.5, 0); for (const n of NPC.all) if (n.lawman) n.calm(); journal('Arrested in Juniper Gap. Paid what I owed and lost a night to it.');
   },
@@ -1653,11 +1654,11 @@ const GUN = { revolver: { dmg: 40, range: 45, cool: 0.38, spread: 0.004, bloom: 
 function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground to 1.75 m): distance and which part was hit
   const by = h.pos.y - (h.state === 'ride' ? 0.6 : 0); // a seated rider's capsule starts below the saddle so head/body zones line up
   const px = o.x - h.pos.x, pz = o.z - h.pos.z, a = d.x * d.x + d.z * d.z; if (a < 1e-8) return null; const b = px * d.x + pz * d.z, c = px * px + pz * pz - 0.36 * 0.36, disc = b * b - a * c; if (disc < 0) return null;
-  const sq = Math.sqrt(disc); for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - by; if (y < 0 || y > (h.downed ? 0.5 : 1.75)) continue; return { t, zone: y > 1.42 ? 'head' : y < 0.85 ? 'legs' : 'body' }; } return null;
+  const sq = Math.sqrt(disc), k = h.crouchC || h.stunKnee ? 0.68 : 1; for (const t of [(-b - sq) / a, (-b + sq) / a]) { if (t <= 0) continue; const y = o.y + d.y * t - by; if (y < 0 || y > (h.downed ? 0.5 : 1.75 * k)) continue; return { t, zone: h.downed ? 'body' : y > 1.42 * k ? 'head' : y < 0.85 * k ? 'legs' : 'body' }; } return null; /* crouched in cover the capsule shrinks; a body on the ground is just body */
 }
 function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
   let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
-    if (h instanceof Person) { r = rayPerson(o, d, h); const th = Brawl.handRay(o, d, h); if (th > 0 && (!r || (r.zone !== 'head' && th < r.t + 0.3))) r = { t: th, zone: 'hand' }; } else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
+    if (h instanceof Person) { r = rayPerson(o, d, h); const th = Brawl.handRay(o, d, h); if (th > 0 && (!r || (r.zone !== 'head' && th < r.t + 0.05))) r = { t: th, zone: 'hand' }; } else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
     if (r && r.t < range && (!best || r.t < best.t)) best = Object.assign(r, { h }); }
   if (best) { const x = o.x + d.x * best.t, y = o.y + d.y * best.t, z = o.z + d.z * best.t; if (!Col.los(o.x, o.y, o.z, x - d.x * 0.3, y - d.y * 0.3, z - d.z * 0.3)) return null; }
   return best;
@@ -1785,10 +1786,10 @@ class Player {
     if (this.carry) return; // hands full
     if (this.weapon !== 'fists' && (aiming || this.state === 'swim' ? false : true) && !aiming) { return this.shoot(false); }
     if (this.weapon !== 'fists' && aiming) return this.shoot(true);
-    if (this.carry || this.grab) return; if (this.blocking && Brawl.tryGrab(this)) return; if (S.p.st < 6) { UI.toast('Too tired to swing', 'bad'); return; }
+    if (this.carry || this.grab || this.state === 'swim') return; if (this.blocking && Brawl.tryGrab(this)) return; if (S.p.st < 6) { UI.toast('Too tired to swing', 'bad'); return; }
     const names = ['punch', 'hook', 'uppercut']; if (this.comboT <= 0) this.combo = 0; const nm = names[this.combo % 3]; this.combo++; this.comboT = 0.9; this.cool = 0.32; S.p.st -= Skills.has('brawl', 4) ? 4.5 : 7; this.stDelay = 0.7;
     // auto-face nearest target in front
-    let tgt = null, td = 2.6; for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const d = Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z); if (d < td) { td = d; tgt = h; } } if (tgt) this.yaw = Math.atan2(tgt.pos.x - this.pos.x, tgt.pos.z - this.pos.z);
+    let tgt = null, td = 2.6; for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse || h.downed || h.carried) continue; const d = Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z); if (d < td) { td = d; tgt = h; } } if (tgt) this.yaw = Math.atan2(tgt.pos.x - this.pos.x, tgt.pos.z - this.pos.z);
     this.anim.play(nm, { on: { hit: () => { const f = fwd(this.yaw); let any = false; for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - this.pos.x, dz = h.pos.z - this.pos.z, d = Math.hypot(dx, dz); if (d < 1.75 && (dx * f.x + dz * f.z) / (d || 1) > 0.4 && Math.abs(h.pos.y - this.pos.y) < 1.2) { h.takeHit({ dmg: (nm === 'uppercut' ? 28 : 17) * (Skills.has('brawl', 2) ? 1.15 : 1), from: this, melee: true, dir: f }); any = true; } } if (any) { Sfx.punch(); Game.shake(0.15); Skills.gain('brawl', 1); } else Sfx.burst(700, 0.08, 0.04); } } });
     this.vel.x += Math.sin(this.yaw) * 1.5; this.vel.z += Math.cos(this.yaw) * 1.5;
   }
@@ -2332,7 +2333,7 @@ const Sky = {
   update(dt) {
     this.advance(dt * this.RATE);
     // weather
-    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(), h0 = S.time.hour; const k = r < 0.45 ? 'clear' : r < 0.67 ? 'cloudy' : r < 0.81 ? 'rain' : r < 0.9 ? 'storm' : (h0 > 3 && h0 < 11 ? 'fog' : 'cloudy'); S.weather.kind = k; S.weather.next = rand(3, 8); }
+    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(), h0 = S.time.hour; const k = r < 0.45 ? 'clear' : r < 0.67 ? 'cloudy' : r < 0.81 ? 'rain' : r < 0.9 ? 'storm' : (h0 > 3 && h0 < 9 ? 'fog' : 'cloudy'); S.weather.kind = k; S.weather.next = k === 'fog' ? rand(1.5, 3) : rand(3, 8); } /* morning fog lifts after a couple of hours */
     this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : this.weather === 'fog' ? 0.7 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
     const raining = this.raining(), storm = this.weather === 'storm', fog = this.weather === 'fog'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
     /* wet ground darkens in the terrain shader (Terrain.groundU.uWet), no buffer re-uploads */
@@ -2397,7 +2398,7 @@ function gatherable(kind, x, z) {
   let fruit; if (kind === 'berries') { g.add(M(GEO.ico, '#4f8a3c', 0.7, 0.55, 0.7, 0, 0.45, 0)); fruit = new THREE.Group(); for (let i = 0; i < 9; i++) { const a = i * 2.4; fruit.add(M(GEO.sphLo, '#5b4a9c', 0.07, 0.07, 0.07, Math.cos(a) * 0.55, 0.45 + Math.sin(i) * 0.3, Math.sin(a) * 0.55)); } g.add(fruit); Col.circle(x, z, 0.5, y, y + 1, { block: false }); }
   else { fruit = new THREE.Group(); for (let i = 0; i < 6; i++) { const l = M(GEO.cone, '#7fa7a0', 0.06, 0.5, 0.06, Math.cos(i) * 0.12, 0.25, Math.sin(i) * 0.12); l.rotation.z = Math.cos(i) * 0.3; fruit.add(l); } fruit.add(M(GEO.sphLo, '#6a7fd0', 0.05, 0.05, 0.05, 0, 0.5, 0)); g.add(fruit); }
   const o = { id, kind, x, z, y, fruit }; Gather.push(o);
-  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Skills.gain('survive', 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
+  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; fruit.visible = false; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Skills.gain('survive', 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
   return o;
 }
 const DoorSys = {
@@ -2633,6 +2634,7 @@ const World = {
   },
   /* Apply persistent story state to the world: who is where, what changed */
   apply() {
+    for (const g of Gather) g.fruit.visible = !(S.gathered[g.id] && S.time.day < S.gathered[g.id] + 2); // picked bushes stay bare until they grow back
     const farmOcc = S.locations.farm === 'occupied'; if (this.farmBoards) this.farmBoards.visible = !farmOcc;
     for (const n of NPC.all.slice()) if (n.cond && !n.cond()) NPC.despawn(n);
     STORY.spawnWorldNPCs(); Camps.apply(); SIDE.percival();
@@ -3040,11 +3042,13 @@ const STORY = {
           { text: 'Hand over the pelts', hide: () => !(sp.status === 'active' && Inv.count('pelt_deer') >= 2 && Inv.count('pelt_rabbit') >= 1), do: () => { Inv.take('pelt_deer', 2); Inv.take('pelt_rabbit', 1); S.flags.pelts_given = true; }, next: 'thanks' },
           { text: 'Tell him to sign the land over to the railroad', hide: () => !(S.decisions.m3 === 'railroad' && !S.flags.m3_told && m3.status === 'active'), do: () => { S.flags.m3_told = true; }, next: 'spit' },
           { text: 'Rest here tonight', hide: () => !(m3.status === 'done' && S.decisions.m3 !== 'railroad'), do: () => Camp.rest(true), next: null },
+          { text: 'About that forty dollars…', hide: () => !(S.flags.greer_owes && S.time.day >= (S.flags.greer_owes_day || 0)), do: () => { Inv.money(S.flags.greer_owes, 'repaid by Ezra'); S.flags.greer_owes = 0; Rep.rel('ezra', 5); journal('Ezra paid back the forty dollars, every cent.'); }, next: 'repaid' },
           { text: 'Goodbye', next: null },
         ] },
       m3go: { text: () => S.flags.pelts_done ? 'Thank you. Listen: the one guarding the barn is Gil. He drinks. If he\'s at it, he\'ll be half asleep. And our deed\'s in the hope chest inside, if paper counts for anything.' : 'Thank you. Harlan\'s got two men with him. Be careful.' },
       pelts: { text: 'Winter\'s coming and we\'re short. Two deer hides and a rabbit pelt would see us through. Deer graze the meadows west of here at dawn and dusk.' },
       spit: { text: 'You... Eli\'s own sister. Get off my land. We\'ll be gone by morning, and I hope you choke on Vane\'s fifty dollars.' },
+      repaid: { text: 'Every cent, like I said I would. The corn came in good. And Wren: the hay barn\'s yours if the law ever comes sniffing. Nobody searches a Greer barn.' },
       thanks: { text: 'You\'re a good shot. Here\'s for your trouble. And Wren, if you ever need anything, you come here first.' },
     };
   },
@@ -3298,7 +3302,7 @@ Object.assign(STORY, {
     else {
       Rep.rel('ezra', S.flags.nell_hurt ? 10 : 30, 'grateful'); Rep.faction('greer', 40); Rep.honor(S.flags.nell_hurt ? 3 : 10); S.flags.greer_safehouse = true;
       if (!S.weapons.rifle && !S.flags.nell_hurt) { S.weapons.rifle = 1; Inv.add('ammo_rifle', 10); UI.toast('Ezra gave you his bolt rifle', 'good'); } else Inv.money(S.flags.nell_hurt ? 5 : 20, 'from the Greers');
-      if (d === 'paid') S.flags.greer_owes = 40;
+      if (d === 'paid') { S.flags.greer_owes = 40; S.flags.greer_owes_day = S.time.day + 2; } // Ezra pays it back once the harvest is in
       m.outcome = { evidence: 'Faced Harlan down with Eli\'s journal. Vane knows your name now.', deed: 'Proved the Greers own their land.', paid: 'Paid off Harlan. The Greers owe you $40.', fight: S.flags.nell_hurt ? 'Drove the railroad men off, but Nell was hurt.' : 'Drove the railroad men off. Nell is safe.' }[d] || 'The Greers kept their land.';
       if (ctx.m.opt.deed) m.outcome += ' · found the deed';
     }
@@ -4233,7 +4237,7 @@ const Town = {
     const bed = M(GEO.box, '#7a5a3c', 2.8, 0.5, 1.4, 0, 0.85, 0); bed.rotation.z = 0.14; g.add(bed); g.add(M(GEO.box, '#e8dfc8', 2.6, 1.0, 1.3, 0.1, 1.55, 0)); // canvas cover
     for (const [wx, wz] of [[-1.1, 0.75], [-1.1, -0.75], [1.1, 0.75]]) { const w = M(GEO.cyl, '#4a3a2a', 0.5, 0.1, 0.5, wx, 0.5, wz); w.rotation.x = Math.PI / 2; g.add(w); }
     const broke = M(GEO.cyl, '#4a3a2a', 0.5, 0.1, 0.5, 1.8, 0.06, -1.3); g.add(broke); // the broken wheel lies in the dirt
-    const c = Col.circle(s.x, s.z, 1.5, y - 1, y + 2, { block: true, cover: true });
+    const fx = Math.cos(yaw), fz = -Math.sin(yaw), c = [-1, 0, 1].map(k => Col.circle(s.x + fx * k * 1.05, s.z + fz * k * 1.05, 0.85, y - 1, y + 2, { block: true, cover: true })); // three circles along the bed: the whole wagon is solid
     const n = NPC.spawn({ key: 'wagon_otis', name: 'Otis Pruitt', x: s.x + Math.cos(yaw) * 2.4, z: s.z - Math.sin(yaw) * 2.4, lawful: true, wild: true, brave: 0.3, state: 'scripted', tags: ['generic', 'wayfarer'], look: { skin: '#e2a57c', shirt: '#6a7a4a', hair: '#9a8a7a', beard: '#9a8a7a', hatColor: '#7a6a4a' } });
     n.script = (dt, me) => { me.sp = 0; if (me.distP < 9) me.face(Game.player.pos); if (me.distP < 12 && !ev.called) { ev.called = true; me.say('Wheel came clean off! Could you lend a hand?', 4); } };
     const ev = { kind: 'wagon', g, c, n, fixed: false, robbed: false };
@@ -4255,14 +4259,18 @@ const Town = {
   eventsTick() {
     const P = Game.player;
     for (const ev of this.events.slice()) { const far = !ev.n || !NPC.all.includes(ev.n) || ev.n.distP > 130;
-      if (far) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) ev.c.on = false; if (ev.it) Interact.remove(ev.it); if (ev.n && NPC.all.includes(ev.n) && !Duel.on) NPC.despawn(ev.n); this.events = this.events.filter(e => e !== ev); } }
+      if (far) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) [].concat(ev.c).forEach(cc => cc.on = false); if (ev.it) Interact.remove(ev.it); if (ev.n && NPC.all.includes(ev.n) && !Duel.on) NPC.despawn(ev.n); this.events = this.events.filter(e => e !== ev); } }
+  },
+  safehouse(dt) { // the Greers' barn hides you from the law once you've stood by them (and no lawman has eyes on you)
+    if (!S.wanted || !S.flags.greer_safehouse || S.locations.farm !== 'occupied') { this.hideT = 0; return; } const P = Game.player, near = Math.hypot(P.pos.x + 106, P.pos.z - 82) < 7;
+    if (near && Law.seenT > 2) { this.hideT = (this.hideT || 0) + dt; if (this.hideT > 8) { this.hideT = 0; S.wanted = false; Law.searchC = null; for (const n of NPC.all) if (n.lawman) n.calm(); UI.toast(`The Greers hid you in the hay barn. The law rode on. Bounty of $${S.bounty.toFixed(2)} stands.`, 'good'); Missions.emit('escaped', {}); } } else this.hideT = 0;
   },
   update(dt) {
-    this.alarmT -= dt; this.lawT -= dt; if (this.lawT < -10) this.lawCaller = null; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
+    this.safehouse(dt); this.alarmT -= dt; this.lawT -= dt; if (this.lawT < -10) this.lawCaller = null; Skills.update(dt); this.huntTick(dt); this.eventsTick(); Duel.update(dt); if (this.poster) this.posterDraw();
     const c = this.lawCaller, P = Game.player; // the lawman who came to check gives one warning when he finds you
     if (c && c.alive && c.state !== 'pursue' && c.state !== 'combat' && c.distP < 8 && c.seesPlayer && Game.time - this.warnedAt > 90) { this.warnedAt = Game.time; this.lawCaller = null; c.face(P.pos); c.say('Keep that iron holstered in my town. Next shot costs you.', 4); UI.toast('Warned by the law: no more shooting in town', 'bad'); }
   },
-  clear() { for (const ev of this.events) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) ev.c.on = false; if (ev.it) Interact.remove(ev.it); } this.events = []; Duel.stop(); this.alarmT = 0; this.lawCaller = null; },
+  clear() { for (const ev of this.events) { if (ev.g) Game.scene.remove(ev.g); if (ev.c) [].concat(ev.c).forEach(cc => cc.on = false); if (ev.it) Interact.remove(ev.it); } this.events = []; Duel.stop(); this.alarmT = 0; this.lawCaller = null; },
 };
 
 /* A frontier duel: ten paces, a long wait, then DRAW! Shoot first (attack) to win; hold aim as you draw to shoot the gun
@@ -4325,7 +4333,7 @@ const UI = {
     $('dlgCh').querySelectorAll('button').forEach(b => b.onclick = () => this.pickChoice(+b.dataset.i));
   },
   pickChoice(i) { const c = this.choices[i]; if (c && !c.disabled) { Sfx.tone(520, 0.05, 0.05, 'triangle'); c.fn(); } },
-  banner(k, t, sub = '') { const now = performance.now(); this._bq = Math.max(this._bq || 0, now); const delay = this._bq - now; this._bq += 3200; setTimeout(() => this._banner(k, t, sub), delay); },
+  banner(k, t, sub = '') { const now = performance.now(); this._bq = Math.max(this._bq || 0, now); const delay = this._bq - now; this._bq += 3200; const gen = Game.gen; setTimeout(() => { if (gen === Game.gen || k === 'Mission complete' || k.startsWith('Chapter')) this._banner(k, t, sub); }, delay); },
   _banner(k, t, sub = '') { const b = document.createElement('div'); b.className = 'hud'; b.style.cssText = 'left:50%;top:26%;transform:translateX(-50%);text-align:center;width:min(560px,90vw);z-index:15;animation:tin .4s ease-out'; b.innerHTML = `<div style="font:400 13px var(--display);letter-spacing:.12em;color:var(--ember);text-transform:uppercase">${esc(k)}</div><div style="font:400 clamp(26px,6vw,42px)/1.05 var(--display);color:var(--paper);text-shadow:0 3px 0 #0006,0 6px 20px #0008;text-wrap:balance">${esc(t)}</div>${sub ? `<div style="font-weight:800;margin-top:6px;text-shadow:0 1px 4px #000;font-size:14px">${esc(sub)}</div>` : ''}`; document.body.appendChild(b); setTimeout(() => { b.style.transition = 'opacity .5s'; b.style.opacity = 0; }, 2700); setTimeout(() => b.remove(), 3200); },
   failScreen(title, why) { Input.uiOpen = true; this.panelOpen = true; if (document.pointerLockElement) document.exitPointerLock(); $('panel').hidden = false; $('pTitle').textContent = 'Mission failed'; $('pTabs').innerHTML = ''; $('pClose').hidden = true;
     $('pBody').innerHTML = `<div class="sec">${esc(title)}</div><p style="font-weight:800;font-size:16px">${esc(why)}</p><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn alt" id="fRetry">Retry from mission start</button><button class="btn" id="fAccept">Accept the outcome</button></div><p style="font-size:12.5px;color:#5b5a48;font-weight:700;margin-top:12px">Accepting keeps the failure in your story. Other missions and characters will react to it.</p>`;
@@ -4334,7 +4342,7 @@ const UI = {
   flash() { $('vignette').style.boxShadow = 'inset 0 0 140px 50px rgba(200,40,40,.55)'; setTimeout(() => $('vignette').style.boxShadow = '', 250); },
   /* ---------- panels ---------- */
   open(kind) { if (Missions.failing) return; this.panelOpen = true; Input.uiOpen = true; if (document.pointerLockElement) document.exitPointerLock(); $('panel').hidden = false; $('pClose').hidden = false; if (['items', 'wren', 'journal', 'story', 'map', 'horse', 'system'].includes(kind)) this.tab = kind; this.kind = kind; this.render(); },
-  close(force) { if (Missions.failing && !force) return; this.panelOpen = false; Input.uiOpen = Dialog.open; $('panel').hidden = true; },
+  close(force) { if (Missions.failing && !force) return; this.panelOpen = false; Input.uiOpen = Dialog.open; $('panel').hidden = true; Input.swallowClick = true; }, // the click that closes a menu isn't also a punch
   render() {
     const k = this.kind; const tabs = { system: 'Game', items: 'Satchel', wren: 'Wren', journal: 'Journal', story: 'Story', map: 'Map', horse: 'Horse' };
     if (k === 'shop' || k === 'camp') { $('pTabs').innerHTML = ''; } else { $('pTabs').innerHTML = Object.entries(tabs).map(([t, n]) => `<button class="${this.tab === t ? 'on' : ''}" data-t="${t}">${n}</button>`).join(''); $('pTabs').querySelectorAll('button').forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.kind = this.tab; this.render(); }); }
@@ -4523,7 +4531,7 @@ const Fishing = {
   on: false, hold: false, phase: '', t: 0, prog: 0, tension: 0,
   nearWater() { const P = Game.player, f = fwd(P.yaw); for (const d of [1.5, 2.5, 3.5, 4.5, 5.5]) { const x = P.pos.x + f.x * d, z = P.pos.z + f.z * d; if (WORLD.waterY - Terrain.height(x, z) > 0.7) return true; } return false; },
   init() { Interact.add({ pos: () => Game.player.pos, r: 1, pri: -1, opts: p => Inv.count('rod') && p.state === 'ground' && !p.carry && this.nearWater() && !this.on ? [{ label: 'Fish', fn: () => this.start() }] : [] }); },
-  start() { const P = Game.player; this.on = true; this.phase = 'cast'; this.t = rand(3, 7); this.prog = 0; this.tension = 0; P.anim.play('cast'); P.state = 'fish'; $('fish').hidden = false; $('fishTxt').textContent = 'Waiting for a bite… (E / tap to stop)'; $('fishBar').style.width = '0%'; this.bob = M(GEO.sph, '#c8443a', 0.08, 0.08, 0.08); const f = fwd(P.yaw); this.bob.position.set(P.pos.x + f.x * 6, WORLD.waterY + 0.05, P.pos.z + f.z * 6); Game.scene.add(this.bob); },
+  start() { const P = Game.player; this.on = true; this.phase = 'cast'; this.t = rand(3, 7); this.prog = 0; this.tension = 0; P.anim.play('cast'); P.state = 'fish'; $('fish').hidden = false; $('fishTxt').textContent = Input.touch ? 'Waiting for a bite… (tap here to stop)' : 'Waiting for a bite… (E to stop)'; $('fish').onpointerdown = e => { e.stopPropagation(); if (this.on && this.phase === 'cast') this.stop('Reeled in empty.'); }; $('fishBar').style.width = '0%'; this.bob = M(GEO.sph, '#c8443a', 0.08, 0.08, 0.08); const f = fwd(P.yaw); this.bob.position.set(P.pos.x + f.x * 6, WORLD.waterY + 0.05, P.pos.z + f.z * 6); Game.scene.add(this.bob); },
   stop(msg) { this.on = false; $('fish').hidden = true; Game.player.state = 'ground'; Game.player.anim.stop(); if (this.bob) Game.scene.remove(this.bob); if (msg) UI.toast(msg); },
   update(dt) {
     if (!this.on) return; const P = Game.player; const reel = this.hold || Input.down('e') || Input.mouse.l || Input.btn.attack; this.t -= dt;
@@ -4723,7 +4731,7 @@ class CamRig {
   update(dt) {
     const P = Game.player, sens = Settings.v.sens, V = this.v; const ts = Settings.v.tsens || 1; let dx = (Input.mouse.dx * 0.0025 + Input.look.dx * 0.0065 * ts) * sens, dy = (Input.mouse.dy * 0.0025 + Input.look.dy * 0.0055 * ts) * sens * (Settings.v.invertY ? -1 : 1);
     if (Input.uiOpen) dx = dy = 0;
-    if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) Settings.v.zoom = this.zoom; }
+    if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) { Settings.v.zoom = this.zoom; clearTimeout(this._zs); this._zs = setTimeout(() => Settings.save(), 600); } } /* remember the zoom once you stop scrolling */
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
     dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { dx *= 0.55; dy *= 0.55; } // finer thumb aim // zoomed in: same feel per degree
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;

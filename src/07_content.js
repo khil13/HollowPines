@@ -37,7 +37,7 @@ const Sky = {
   update(dt) {
     this.advance(dt * this.RATE);
     // weather
-    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(), h0 = S.time.hour; const k = r < 0.45 ? 'clear' : r < 0.67 ? 'cloudy' : r < 0.81 ? 'rain' : r < 0.9 ? 'storm' : (h0 > 3 && h0 < 11 ? 'fog' : 'cloudy'); S.weather.kind = k; S.weather.next = rand(3, 8); }
+    S.weather.next -= dt * this.RATE; if (S.weather.next <= 0) { const r = Math.random(), h0 = S.time.hour; const k = r < 0.45 ? 'clear' : r < 0.67 ? 'cloudy' : r < 0.81 ? 'rain' : r < 0.9 ? 'storm' : (h0 > 3 && h0 < 9 ? 'fog' : 'cloudy'); S.weather.kind = k; S.weather.next = k === 'fog' ? rand(1.5, 3) : rand(3, 8); } /* morning fog lifts after a couple of hours */
     this.weather = S.weather.kind; const tc = this.weather === 'clear' ? 0 : this.weather === 'cloudy' ? 0.6 : this.weather === 'fog' ? 0.7 : 1; this.cloud = damp(this.cloud, tc, 0.4, dt);
     const raining = this.raining(), storm = this.weather === 'storm', fog = this.weather === 'fog'; this.wet = clamp(this.wet + (raining ? dt * 0.03 : -dt * 0.008), 0, 1);
     /* wet ground darkens in the terrain shader (Terrain.groundU.uWet), no buffer re-uploads */
@@ -102,7 +102,7 @@ function gatherable(kind, x, z) {
   let fruit; if (kind === 'berries') { g.add(M(GEO.ico, '#4f8a3c', 0.7, 0.55, 0.7, 0, 0.45, 0)); fruit = new THREE.Group(); for (let i = 0; i < 9; i++) { const a = i * 2.4; fruit.add(M(GEO.sphLo, '#5b4a9c', 0.07, 0.07, 0.07, Math.cos(a) * 0.55, 0.45 + Math.sin(i) * 0.3, Math.sin(a) * 0.55)); } g.add(fruit); Col.circle(x, z, 0.5, y, y + 1, { block: false }); }
   else { fruit = new THREE.Group(); for (let i = 0; i < 6; i++) { const l = M(GEO.cone, '#7fa7a0', 0.06, 0.5, 0.06, Math.cos(i) * 0.12, 0.25, Math.sin(i) * 0.12); l.rotation.z = Math.cos(i) * 0.3; fruit.add(l); } fruit.add(M(GEO.sphLo, '#6a7fd0', 0.05, 0.05, 0.05, 0, 0.5, 0)); g.add(fruit); }
   const o = { id, kind, x, z, y, fruit }; Gather.push(o);
-  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Skills.gain('survive', 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
+  Interact.add({ pos: () => ({ x, y, z }), r: 1.6, pri: 0.2, opts: p => (S.gathered[id] && S.time.day < S.gathered[id] + 2) ? [] : [{ label: kind === 'berries' ? 'Pick huckleberries' : 'Pick blue sage', fn: () => { p.yaw = Math.atan2(x - p.pos.x, z - p.pos.z); p.anim.play('pickup', { on: { end: () => { S.gathered[id] = S.time.day; fruit.visible = false; Inv.add(kind, (kind === 'berries' ? 2 : 1) + (Skills.has('survive', 3) ? 1 : 0)); Skills.gain('survive', 1); Sfx.pickup(); Missions.emit('gather', { kind }); } } }); } }] });
   return o;
 }
 const DoorSys = {
@@ -338,6 +338,7 @@ const World = {
   },
   /* Apply persistent story state to the world: who is where, what changed */
   apply() {
+    for (const g of Gather) g.fruit.visible = !(S.gathered[g.id] && S.time.day < S.gathered[g.id] + 2); // picked bushes stay bare until they grow back
     const farmOcc = S.locations.farm === 'occupied'; if (this.farmBoards) this.farmBoards.visible = !farmOcc;
     for (const n of NPC.all.slice()) if (n.cond && !n.cond()) NPC.despawn(n);
     STORY.spawnWorldNPCs(); Camps.apply(); SIDE.percival();

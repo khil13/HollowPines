@@ -157,11 +157,13 @@ const STORY = {
           { text: 'Hand over the pelts', hide: () => !(sp.status === 'active' && Inv.count('pelt_deer') >= 2 && Inv.count('pelt_rabbit') >= 1), do: () => { Inv.take('pelt_deer', 2); Inv.take('pelt_rabbit', 1); S.flags.pelts_given = true; }, next: 'thanks' },
           { text: 'Tell him to sign the land over to the railroad', hide: () => !(S.decisions.m3 === 'railroad' && !S.flags.m3_told && m3.status === 'active'), do: () => { S.flags.m3_told = true; }, next: 'spit' },
           { text: 'Rest here tonight', hide: () => !(m3.status === 'done' && S.decisions.m3 !== 'railroad'), do: () => Camp.rest(true), next: null },
+          { text: 'About that forty dollars…', hide: () => !(S.flags.greer_owes && S.time.day >= (S.flags.greer_owes_day || 0)), do: () => { Inv.money(S.flags.greer_owes, 'repaid by Ezra'); S.flags.greer_owes = 0; Rep.rel('ezra', 5); journal('Ezra paid back the forty dollars, every cent.'); }, next: 'repaid' },
           { text: 'Goodbye', next: null },
         ] },
       m3go: { text: () => S.flags.pelts_done ? 'Thank you. Listen: the one guarding the barn is Gil. He drinks. If he\'s at it, he\'ll be half asleep. And our deed\'s in the hope chest inside, if paper counts for anything.' : 'Thank you. Harlan\'s got two men with him. Be careful.' },
       pelts: { text: 'Winter\'s coming and we\'re short. Two deer hides and a rabbit pelt would see us through. Deer graze the meadows west of here at dawn and dusk.' },
       spit: { text: 'You... Eli\'s own sister. Get off my land. We\'ll be gone by morning, and I hope you choke on Vane\'s fifty dollars.' },
+      repaid: { text: 'Every cent, like I said I would. The corn came in good. And Wren: the hay barn\'s yours if the law ever comes sniffing. Nobody searches a Greer barn.' },
       thanks: { text: 'You\'re a good shot. Here\'s for your trouble. And Wren, if you ever need anything, you come here first.' },
     };
   },
@@ -415,7 +417,7 @@ Object.assign(STORY, {
     else {
       Rep.rel('ezra', S.flags.nell_hurt ? 10 : 30, 'grateful'); Rep.faction('greer', 40); Rep.honor(S.flags.nell_hurt ? 3 : 10); S.flags.greer_safehouse = true;
       if (!S.weapons.rifle && !S.flags.nell_hurt) { S.weapons.rifle = 1; Inv.add('ammo_rifle', 10); UI.toast('Ezra gave you his bolt rifle', 'good'); } else Inv.money(S.flags.nell_hurt ? 5 : 20, 'from the Greers');
-      if (d === 'paid') S.flags.greer_owes = 40;
+      if (d === 'paid') { S.flags.greer_owes = 40; S.flags.greer_owes_day = S.time.day + 2; } // Ezra pays it back once the harvest is in
       m.outcome = { evidence: 'Faced Harlan down with Eli\'s journal. Vane knows your name now.', deed: 'Proved the Greers own their land.', paid: 'Paid off Harlan. The Greers owe you $40.', fight: S.flags.nell_hurt ? 'Drove the railroad men off, but Nell was hurt.' : 'Drove the railroad men off. Nell is safe.' }[d] || 'The Greers kept their land.';
       if (ctx.m.opt.deed) m.outcome += ' · found the deed';
     }
