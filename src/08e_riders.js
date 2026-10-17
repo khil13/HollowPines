@@ -6,7 +6,7 @@ class NPCHorse {
   constructor(x, z, yaw, color = pick(['#4b3a2a', '#7a5232', '#2b2018', '#a0673a', '#d9c7a3'])) {
     this.rig = makeQuad({ type: 'horse', color, dark: '#2b1d14', mane: '#2b1d14', tail: '#2b1d14', muzzle: '#5a4030', scale: 0.98 }); this.rig.saddle.visible = true; Game.scene.add(this.rig.root);
     this.anim = new QuadAnimator(this.rig, this); this.pos = new THREE.Vector3(x, Col.ground(x, z, 99), z); this.yaw = yaw || 0; this.speed = 0; this.gait = 'walk'; this.turnRate = 0;
-    this.alive = true; this.hp = 150; this.hitR = 0.7; this.hitH = 1.05; // body sphere stops at the saddle, so shots at the rider hit the rider
+    this.alive = true; this.hp = 150; this.hitR = 0.7; this.hitH = 1.05; modelBodyHit(this); // body sphere stops at the saddle, so shots at the rider hit the rider
     this.isMount = true; this.rider = null; this.t = 0; this.fleeT = 0; HURTABLE.push(this); Riders.horses.push(this);
   }
   seat() { const p = new THREE.Vector3(); this.rig.seat.getWorldPosition(p); return p; }

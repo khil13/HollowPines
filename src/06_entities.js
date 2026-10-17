@@ -59,7 +59,8 @@ function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground
 }
 function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
   let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
-    if (h instanceof Person) { r = rayPerson(o, d, h); const th = Brawl.handRay(o, d, h); if (th > 0 && (!r || (r.zone !== 'head' && th < r.t + 0.05))) r = { t: th, zone: 'hand' }; } else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
+    if (h instanceof Person) { r = rayPerson(o, d, h); const th = Brawl.handRay(o, d, h); if (th > 0 && (!r || (r.zone !== 'head' && th < r.t + 0.05))) r = { t: th, zone: 'hand' }; } else { let t = -1; if (h.hitLen) { /* an imported horse: three spheres along its body, rump to chest, below the saddle */ const fx = Math.sin(h.yaw), fz = Math.cos(h.yaw); for (const k of [-1, 0, 1]) { const tk = raySphere(o, d, { x: h.pos.x + fx * h.hitLen * k, y: h.pos.y + h.hitH, z: h.pos.z + fz * h.hitLen * k }, h.hitR + 0.08); if (tk > 0 && (t < 0 || tk < t)) t = tk; } }
+      else t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
     if (r && r.t < range && (!best || r.t < best.t)) best = Object.assign(r, { h }); }
   if (best) { const x = o.x + d.x * best.t, y = o.y + d.y * best.t, z = o.z + d.z * best.t; if (!Col.los(o.x, o.y, o.z, x - d.x * 0.3, y - d.y * 0.3, z - d.z * 0.3)) return null; }
   return best;
@@ -269,7 +270,7 @@ class Player {
 
 /* ---------- Horse ---------- */
 class Horse {
-  constructor() { this.rig = makeQuad({ type: 'horse', color: '#a0673a', dark: '#2b1d14', mane: '#3b2618', tail: '#3b2618', muzzle: '#8a5530', blaze: true, sock: '#a0673a', scale: 1.0 }); Game.scene.add(this.rig.root); this.anim = new QuadAnimator(this.rig, this); this.pos = new THREE.Vector3(S.h.x, 0, S.h.z); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); this.yaw = S.h.yaw; this.speed = 0; this.vy = 0; this.gait = 'walk'; this.gl = 0; this.state = 'idle'; this.rider = null; this.fear = 0; this.rear = 0; this.turnRate = 0; this.gallopT = 0; this.wander = 0; this.alive = true; this.isHorse = true; this.hitR = 0.7; this.hitH = 1.3; HURTABLE.push(this); this.patT = 0;
+  constructor() { this.rig = makeQuad({ type: 'horse', color: '#a0673a', dark: '#2b1d14', mane: '#3b2618', tail: '#3b2618', muzzle: '#8a5530', blaze: true, sock: '#a0673a', scale: 1.0 }); Game.scene.add(this.rig.root); this.anim = new QuadAnimator(this.rig, this); this.pos = new THREE.Vector3(S.h.x, 0, S.h.z); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); this.yaw = S.h.yaw; this.speed = 0; this.vy = 0; this.gait = 'walk'; this.gl = 0; this.state = 'idle'; this.rider = null; this.fear = 0; this.rear = 0; this.turnRate = 0; this.gallopT = 0; this.wander = 0; this.alive = true; this.isHorse = true; this.hitR = 0.7; this.hitH = 1.3; modelBodyHit(this); HURTABLE.push(this); this.patT = 0;
     this.bags = M(GEO.box, '#5a361c', 0.9, 0.3, 0.3, 0, 0.35, -0.4); this.rig.body.add(this.bags);
     this.box = M(GEO.box, '#5a4a3a', 0.5, 0.35, 0.4, 0, 0.75, -0.55); this.box.visible = false; this.rig.body.add(this.box);
     Interact.add({ pos: () => this.pos, r: 2.6, pri: 0.2, opts: p => this.opts(p) });

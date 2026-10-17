@@ -5,8 +5,8 @@
    the rider's seat, saddle and saddlebags hang off the same rig fields as before, so gameplay code is unchanged. */
 const ANIMAL_SIZE = { horse: 2.45, deer: 1.75, wolf: 1.45, rabbit: 0.42 }; // nose-to-tail length the model is scaled to (m)
 const ANIMAL_CLIPS = { // first match wins, case-insensitive, on the clip name without any "Armature|" prefix
-  idle: [/^idle$/, /idle(?!.*hit)/], walk: [/^walk$/, /walk/], trot: [/trot/, /canter/, /^walk$/, /walk/], run: [/gallop(?!.*jump)/, /^run$/, /run/, /canter/, /walk/],
-  eat: [/eat/, /graze/, /headlow/, /idle/], death: [/death/, /die/, /dead/], attack: [/attack/, /bite/, /headbutt/], rear: [/rear/, /jump/, /idle_2/, /idle/], lie: [/lie/, /lay/, /sit/, /sleep/, /rest/],
+  idle: [/^idle$/, /idle(?!.*hit)/], walk: [/^walk$/, /walk/], trot: [/trot/, /canter/, /^run$/, /gallop(?!.*jump)/, /^walk$/, /walk/], run: [/gallop(?!.*jump)/, /^run$/, /run/, /canter/, /walk/],
+  eat: [/^eat/, /eating/, /graze/, /headlow/, /idle/], death: [/death/, /die/, /dead/], attack: [/attack/, /bite/, /headbutt/], rear: [/rear/, /jump/, /idle_2/, /idle/], lie: [/lie/, /lay/, /sit/, /sleep/, /rest/],
 };
 const ANIMAL_SPEED = { walk: 1.6, trot: 3.6, run: 8.5 }; // ground speed (m/s per metre of body length / 2.45) each clip is authored for
 const AnimalAssets = {
@@ -30,9 +30,26 @@ const AnimalAssets = {
           const along = alongX ? v.x - c.x : v.z - c.z, across = alongX ? v.z - c.z : v.x - c.x; if (Math.abs(along) < len * 0.12 && Math.abs(across) < (alongX ? sz.z : sz.x) * 0.25) back = Math.max(back, v.y); } });
         const hit = new THREE.Raycaster(new THREE.Vector3(c.x, box.max.y + 1, c.z), new THREE.Vector3(0, -1, 0)).intersectObject(gltf.scene, true)[0]; // straight down through the middle, where coarse models have no vertices
         if (hit) back = Math.max(back, hit.point.y); if (back < box.min.y) back = box.min.y + sz.y * 0.7;
-        this.models[sp] = { gltf, map, scale: ANIMAL_SIZE[sp] / Math.max(0.01, len), yaw: alongX ? -Math.PI / 2 : 0, box, back: back - box.min.y };
+        const scale = ANIMAL_SIZE[sp] / Math.max(0.01, len);
+        this.models[sp] = { gltf, map, scale, yaw: alongX ? -Math.PI / 2 : 0, box, back: back - box.min.y, speed: this.gaitSpeeds(gltf, map, alongX, scale, ANIMAL_SIZE[sp] / 2.45) };
       } catch (e) { console.warn(`Animal model ${sp}.glb failed to load, using the built-in ${sp}`, e); }
     }
+  },
+  /* the ground speed each locomotion clip is authored for: how far a foot sweeps back while planted, over the time it is
+     planted (a typical share of the cycle per gait), so playback can match the animal's real speed with no foot sliding */
+  gaitSpeeds(gltf, map, alongX, scale, k) {
+    const out = {}, tmp = THREE.SkeletonUtils.clone(gltf.scene), mixer = new THREE.AnimationMixer(tmp), feet = [], p = new THREE.Vector3();
+    tmp.traverse(o => { if (o.isBone && /foot|hoof|paw/i.test(o.name) && !/_end$/i.test(o.name)) feet.push(o); });
+    for (const [g, duty] of [['walk', 0.6], ['trot', 0.45], ['run', 0.35]]) {
+      const clip = map[g]; out[g] = ANIMAL_SPEED[g] * k; if (!clip || !feet.length) continue;
+      const act = mixer.clipAction(clip); act.play(); const N = 48, zs = feet.map(() => []);
+      for (let i = 0; i < N; i++) { act.time = clip.duration * i / N; mixer.update(0); tmp.updateMatrixWorld(true); feet.forEach((f, j) => { f.getWorldPosition(p); zs[j].push(alongX ? p.x : p.z); }); }
+      act.stop(); let range = 0, cycles = 1;
+      zs.forEach(z => { const lo = Math.min(...z), hi = Math.max(...z), mid = (lo + hi) / 2; if (hi - lo <= range) return; range = hi - lo; /* a clip can hold more than one stride: count forward swings through the middle */
+        let n = 0; for (let i = 0; i < N; i++) if (z[i] < mid && z[(i + 1) % N] >= mid) n++; cycles = Math.max(1, n); });
+      const v = range * scale * cycles / (duty * clip.duration); if (v > 0.2 && v < 30) out[g] = v;
+    }
+    return out;
   },
   has(sp) { return !!this.models[sp]; },
 };
@@ -43,26 +60,33 @@ function makeModelQuad(o) {
   const model = THREE.SkeletonUtils.clone(A.gltf.scene); model.scale.setScalar(A.scale); model.rotation.y = A.yaw; vis.add(model);
   model.position.y = -A.box.min.y * A.scale; // feet on the ground
   // soft toon shading like the rest of the world; the main coat takes this animal's colour so horses can differ
-  let biggest = null, bigN = -1;
-  model.traverse(m => { if (!m.isMesh) return; m.castShadow = true; m.frustumCulled = false; const n = m.geometry.attributes.position.count; if (n > bigN && !/eye|hoof|hair|mane|tail/i.test(m.material.name || '')) { bigN = n; biggest = m; } });
-  model.traverse(m => { if (!m.isMesh) return; const src = Array.isArray(m.material) ? m.material[0] : m.material, nm = (src.name || '').toLowerCase();
-    let c = '#' + (src.color ? src.color.getHexString() : '888888');
-    if (/main|body|coat|fur|skin/.test(nm) || (m === biggest && !/eye/.test(nm))) c = o.color || c; else if (/mane|hair|tail/.test(nm) && o.mane) c = o.mane;
-    animalMat(c); /* makes sure the shared gradient exists */ const k = c + (m.isSkinnedMesh ? 's' : ''); m.material = _animalSkinMats[k] || (_animalSkinMats[k] = new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8, skinning: !!m.isSkinnedMesh })); });
+  // the coat is whichever material covers the most triangles; very dark materials (mane, tail, hooves) take the mane colour
+  const mats = m => Array.isArray(m.material) ? m.material : [m.material]; let coat = null, coatN = -1;
+  model.traverse(m => { if (!m.isMesh) return; m.castShadow = true; m.frustumCulled = false; const g = m.geometry, total = g.index ? g.index.count : g.attributes.position.count;
+    const groups = g.groups.length ? g.groups : [{ count: total, materialIndex: 0 }];
+    for (const gr of groups) { const mt = mats(m)[gr.materialIndex || 0]; if (mt && gr.count > coatN && !/eye/i.test(mt.name || '')) { coatN = gr.count; coat = mt; } } });
+  const toonFor = (src, skin) => { const nm = (src.name || '').toLowerCase(); let c = '#' + (src.color ? src.color.getHexString() : '888888'); const lum = src.color ? src.color.r * 0.3 + src.color.g * 0.59 + src.color.b * 0.11 : 1;
+    if (src === coat || /main|body|coat|fur/.test(nm)) c = o.color || c; else if ((/mane|hair|tail/.test(nm) || (lum < 0.06 && !/eye/.test(nm))) && o.mane) c = o.mane;
+    animalMat(c); /* makes sure the shared gradient exists */ const k = c + (skin ? 's' : ''); return _animalSkinMats[k] || (_animalSkinMats[k] = new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8, skinning: skin })); };
+  model.traverse(m => { if (!m.isMesh) return; const list = mats(m).map(mt => toonFor(mt, !!m.isSkinnedMesh)); m.material = Array.isArray(m.material) ? list : list[0]; });
   const backY = A.back * A.scale;
   const body = new THREE.Group(); body.position.y = backY - dims.bh; vis.add(body);
   const seat = new THREE.Object3D(); seat.position.set(0, dims.bh + 0.02, 0.05); body.add(seat);
   let saddle = null;
-  if (t === 'horse') { saddle = new THREE.Group(); const Q = c => animalMat(c), bh = dims.bh;
+  if (t === 'horse') { saddle = new THREE.Group(); saddle.position.z = -0.14; /* under the rider's hips, which sit a little behind the seat point */ const Q = c => animalMat(c), bh = dims.bh;
     saddle.add(M(GEO.box, Q('#b23a2e'), 0.82, 0.04, 0.6, 0, bh * 0.98, 0)); saddle.add(M(GEO.sph, Q('#6b3b1f'), 0.3, 0.1, 0.38, 0, bh * 1.05, 0)); saddle.add(M(GEO.sph, Q('#5a3218'), 0.22, 0.1, 0.08, 0, bh * 1.1, -0.28)); saddle.add(M(GEO.cyl, Q('#4a2a14'), 0.035, 0.12, 0.035, 0, bh * 1.14, 0.28));
     for (const ex of [-1, 1]) { saddle.add(M(GEO.box, Q('#5a361c'), 0.03, 0.42, 0.05, ex * 0.38, bh * 0.62, 0.05)); saddle.add(M(GEO.box, Q('#3a2a1a'), 0.1, 0.03, 0.12, ex * 0.4, bh * 0.4, 0.05)); }
     body.add(saddle); }
   const mixer = new THREE.AnimationMixer(model);
   return { root, vis, body, seat, saddle, dims, type: t, scale: s, isModel: true, model, mixer, clips: A.map, legs: [], neck: new THREE.Object3D(), head: new THREE.Object3D(), tail: new THREE.Object3D(), baseNeck: 0, baseHead: 0, baseTail: 0, grazeNeck: 0, grazeHead: 0 };
 }
+/* an imported horse is hit as three spheres along its body (rump, barrel, chest) sized to the model, topping out just
+   under the saddle so shots at the rider still find the rider */
+function modelBodyHit(h) { const R = h.rig; if (!R.isModel) return; const back = (R.body.position.y + R.dims.bh) * R.scale, len = ANIMAL_SIZE[R.type] * R.scale;
+  h.hitR = 0.42 * R.scale; h.hitH = back - h.hitR - 0.12; h.hitLen = len * 0.22; }
 /* QuadAnimator for an imported model: cross-fades between clips and keeps the same phase/onStep contract */
 function quadModelUpdate(an, dt, st) {
-  const R = an.rig, C = R.clips, sp = st.speed, g = st.gait || 'walk', len = ANIMAL_SIZE[R.type] * R.scale, k = len / 2.45;
+  const R = an.rig, C = R.clips, sp = st.speed, g = st.gait || 'walk';
   an.t += dt; const prev = an.phase; an.phase += sp * dt / ((GAITS[g] || GAITS.walk).stride * R.scale);
   if (Math.floor(prev * 2) !== Math.floor(an.phase * 2) && an.owner.onStep && sp > 0.25) an.owner.onStep();
   let want = 'idle', rate = 1;
@@ -70,7 +94,7 @@ function quadModelUpdate(an, dt, st) {
   else if ((st.rear || 0) > 0.4) want = 'rear';
   else if ((st.lie || 0) > 0.5 && C.lie) want = 'lie';
   else if ((st.attack || (R.type === 'wolf' && st.rear > 0)) && C.attack) want = 'attack'; /* a wolf's lunge */
-  else if (sp > 0.3) { want = g === 'walk' ? 'walk' : g === 'trot' ? 'trot' : 'run'; rate = clamp(sp / (ANIMAL_SPEED[want] * k), 0.45, 2.2); }
+  else if (sp > 0.3) { want = g === 'walk' ? 'walk' : g === 'trot' ? 'trot' : 'run'; rate = clamp(sp / (AnimalAssets.models[R.type].speed[want] * R.scale), 0.45, 2.2); }
   else if ((st.graze || 0) > 0.5) want = 'eat';
   const clip = C[want] || C.idle; if (!clip) return;
   if (an.cur !== clip) { const next = R.mixer.clipAction(clip); next.reset(); next.enabled = true; next.setEffectiveWeight(1);

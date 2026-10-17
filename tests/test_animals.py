@@ -1,7 +1,8 @@
 """Imported animal models: an animated .glb dropped into assets/animals/ replaces that species' code-built body. The
 test makes a small skinned, animated horse with the glTF exporter, hands it to the game the way build.py embeds it,
 and checks it is scaled, grounded, coloured, saddled and animated by speed (walk, gallop, grazing, death), that
-riding it works, and that species without a model keep the procedural rig."""
+riding it works, and that species without a model keep the procedural rig. Then it checks the horse that ships in
+assets/animals/horse.glb (Quaternius, CC0)."""
 import asyncio, json
 from run import boot, URL
 from playwright.async_api import async_playwright
@@ -44,7 +45,7 @@ async def main():
           clips: Object.fromEntries(Object.entries(A.map).map(([k, c]) => [k, c ? c.name.split('|').pop() : null])), saddle: !!R.saddle, bags: R.body.children.length }; })()""")
         check('loader: the horse model is parsed and replaces the code-built horse; deer without a model stay procedural', info['has'] and info['model'] and not info['deer'], info)
         c = info['clips']
-        check('loader: clips are matched by name (Idle, Walk, Gallop for trot-less run, Eating, Death)', c['idle'] == 'Idle' and c['walk'] == 'Walk' and c['run'] == 'Gallop' and c['eat'] == 'Eating' and c['death'] == 'Death' and c['trot'] == 'Walk', c)
+        check('loader: clips are matched by name (Idle, Walk, Gallop also for a trot, Eating, Death)', c['idle'] == 'Idle' and c['walk'] == 'Walk' and c['run'] == 'Gallop' and c['eat'] == 'Eating' and c['death'] == 'Death' and c['trot'] == 'Gallop', c)
         geo = await ev(pg, """(() => { const H = HP.Game.horse, R = H.rig; H.rider = null; HP.sim(0.2); R.vis.rotation.x = 0; /* level, whatever the slope */ R.root.updateMatrixWorld(true); const box = new THREE.Box3().setFromObject(R.model), s = box.getSize(new THREE.Vector3()), seat = new THREE.Vector3(); R.seat.getWorldPosition(seat);
           let main = null, eye = null; R.model.traverse(m => { if (m.isMesh) { if (m.isSkinnedMesh) main = m.material; else eye = m.material; } });
           let skMin = 1e9, skMax = -1e9; const v = new THREE.Vector3(); R.model.traverse(m => { if (m.isSkinnedMesh) { m.skeleton.update(); for (let i = 0; i < m.geometry.attributes.position.count; i++) { m.boneTransform(i, v); v.applyMatrix4(m.matrixWorld); skMin = Math.min(skMin, v.y); skMax = Math.max(skMax, v.y); } } });
@@ -76,6 +77,18 @@ async def main():
         await ev(pg, "HP.sim(2)")
         check('no page errors', not [e for e in errs if 'favicon' not in e], errs[:3])
         await b.close()
+
+        # --- the horse that ships with the game ---
+        import os
+        if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'animals', 'horse.glb')):
+            b, pg, errs = await boot(p); await pg.click('#bNew'); await pg.wait_for_timeout(600)
+            real = await ev(pg, """(() => { const A = AnimalAssets.models.horse, R = HP.Game.horse.rig; const cols = []; R.model.traverse(m => { if (m.isMesh) for (const x of [].concat(m.material)) cols.push('#' + x.color.getHexString()); });
+              return { model: !!R.isModel, clips: Object.fromEntries(['idle', 'walk', 'trot', 'run', 'eat', 'death', 'rear'].map(k => [k, A.map[k] && A.map[k].name])), speed: Object.fromEntries(Object.entries(A.speed).map(([k, v]) => [k, +v.toFixed(2)])), cols, back: +(A.back * A.scale).toFixed(2) }; })()""")
+            c = real['clips']
+            check('shipped horse: loads with Idle, Walk, Run (trot and gallop), Death and Jump (rearing); grazing is not mistaken for Death', real['model'] and c['idle'] == 'Idle' and c['walk'] == 'Walk' and c['run'] == 'Run' and c['trot'] == 'Run' and c['death'] == 'Death' and c['rear'] == 'Jump' and c['eat'] != 'Death', real)
+            check('shipped horse: coat in the horse\'s colour, mane and tail in its mane colour', sorted(set(real['cols'])) == ['#3b2618', '#a0673a'], real['cols'])
+            check('shipped horse: stride-matched clip speeds are sane and rise with the gait, saddle height is a horse\'s back', 0.2 < real['speed']['walk'] < real['speed']['run'] < 15 and 1.2 < real['back'] < 1.7, real)
+            await ev(pg, "HP.sim(2)"); check('shipped horse: no page errors', not [e for e in errs if 'favicon' not in e], errs[:3]); await b.close()
     n = sum(1 for r in RESULTS if r[1]); print(f'\n{n}/{len(RESULTS)} animal model checks passed')
     if n != len(RESULTS): raise SystemExit(1)
 if __name__ == '__main__': asyncio.run(main())
