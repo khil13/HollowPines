@@ -4217,7 +4217,8 @@ const Town = {
     this.events.push(ev); UI.toast('A wagon is stuck on the trail ahead', '');
   },
   duelist() {
-    S.flags.duelDay = S.time.day; const s = Encounters.spot(16), P = Game.player, nm = pick(['"Quick" Jack Tolliver', 'Vera Slade', 'Hollis Crow']);
+    const s = Encounters.spot(16), P = Game.player; if (Terrain.height(s.x, s.z) < WORLD.waterY + 0.5 || Terrain.height(P.pos.x, P.pos.z) < WORLD.waterY + 0.5) return; // never call someone out into a river
+    S.flags.duelDay = S.time.day; const nm = pick(['"Quick" Jack Tolliver', 'Vera Slade', 'Hollis Crow']);
     const n = NPC.spawn({ key: 'duelist', name: nm, x: s.x, z: s.z, lawful: false, wild: true, gun: 'revolver', hp: 100, maxHp: 100, brave: 1, state: 'scripted', tags: ['generic'], look: { skin: '#d8a57c', shirt: '#2b2b2b', coat: '#4a2a2a', hair: '#1b1b1b', hatColor: '#111' } });
     n.script = (dt, me) => { me.sp = 0; me.face(Game.player.pos); if (me.distP < 14 && !ev.called) { ev.called = true; me.say('They say you\'re quick, Wren. I\'d like to find out.', 4); } };
     n.talk = () => ev.done ? null : { start: { who: nm, text: 'Main street rules. We stand ten paces apart and draw on the word. Unless you\'re yellow.', choices: [
@@ -4244,7 +4245,8 @@ const Duel = {
   on: false,
   start(n) {
     const P = Game.player; if (P.state === 'ride') return; this.on = true; this.n = n; this.phase = 'walk'; this.t = 0; n.script = (dt, me) => { me.sp = 0; me.face(Game.player.pos); };
-    const a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.pos.x = P.pos.x + Math.sin(a) * 10; n.pos.z = P.pos.z + Math.cos(a) * 10; n.pos.y = Col.ground(n.pos.x, n.pos.z, 99);
+    let a = Math.atan2(n.pos.x - P.pos.x, n.pos.z - P.pos.z); for (let k = 0; k < 8; k++) { const t = a + k * 0.8; if (Terrain.height(P.pos.x + Math.sin(t) * 10, P.pos.z + Math.cos(t) * 10) > WORLD.waterY + 0.5) { a = t; break; } } // ten paces on dry ground
+    n.pos.x = P.pos.x + Math.sin(a) * 10; n.pos.z = P.pos.z + Math.cos(a) * 10; n.pos.y = Col.ground(n.pos.x, n.pos.z, 99);
     P.yaw = a; Game.cam.yaw = a; Game.cam.pitch = 0.08; P.setWeapon('revolver'); P.vel.set(0, 0, 0); Input.aimToggle = false; this.wait = rand(2, 4.5);
     this.react = rand(0.42, 0.7) + (Skills.lv('gun') - 1) * 0.05; this.show('Steady…'); Sfx.tone(180, 0.6, 0.05, 'triangle');
   },

@@ -65,7 +65,7 @@ async def main():
             ev.it.opts(HP.Game.player).find(x => x.label === 'Rob him').fn(); return { robbed: ev.robbed, crime: HP.S.stats.crimes - c0, took: HP.S.money > m0 }; })()""")
         check('road: robbing the settler pays but is a crime', r['robbed'] and r['crime'] == 1 and r['took'], r)
 
-        duel = """(how) => { X.reset(70, -14); HP.S.flags.duelDay = 0; Town.duelist(); const n = HP.NPC.byKey('duelist'); const t = n.talk(); const acc = t.start.choices.find(c => c.text.includes('Duel')); acc.do(); const P = HP.Game.player; P.inv = 0; const hp0 = HP.S.p.hp, d = Math.round(Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z));
+        duel = """(how) => { X.reset(-95, 30); HP.S.flags.duelDay = 0; Town.duelist(); const n = HP.NPC.byKey('duelist'); const t = n.talk(); const acc = t.start.choices.find(c => c.text.includes('Duel')); acc.do(); const P = HP.Game.player; P.inv = 0; const hp0 = HP.S.p.hp, d = Math.round(Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z));
             if (how === 'early') { HP.sim(0.5, X.F); X.click(); } else { for (let i = 0; i < 200 && Duel.phase === 'walk'; i++) HP.sim(X.F, X.F); if (how === 'spare') Input.aimToggle = true; if (how !== 'slow') X.click(); else HP.sim(1.2, X.F); Input.aimToggle = false; }
             HP.sim(0.2, X.F); return { d, last: Duel.last, on: Duel.on, alive: n.alive, fists: !!n.fists, hpLost: Math.round(hp0 - HP.S.p.hp), duels: HP.S.stats.duels || 0, honor: HP.S.honor }; }"""
         r = await ev(pg, f"({duel})('win')")
@@ -76,6 +76,9 @@ async def main():
         check('duel: drawing early gets you shot (and costs honor)', r['last'] == 'early' and r['hpLost'] > 30 and r['honor'] < 0, r)
         r = await ev(pg, f"({duel})('slow')")
         check('duel: too slow on the draw and they beat you to it', r['last'] == 'slow' and r['hpLost'] > 30 and r['alive'], r)
+
+        r = await ev(pg, "(()=>{ X.reset(70, -14); HP.S.flags.duelDay = 0; const wet = Terrain.height(70, 2) < WORLD.waterY + 0.5; Town.duelist(); return { wet, none: !HP.NPC.byKey('duelist') }; })()")
+        check('duel: nobody calls you out into a river', r['wet'] and r['none'], r)
 
         # --- skills ---
         r = await ev(pg, """(()=>{ X.reset(); HP.S.skills = { gun: 0, brawl: 0, survive: 0, ride: 0 }; const P = HP.Game.player; const s0 = P.spread(); const l0 = Skills.lv('brawl'); Skills.gain('brawl', 30); const l1 = Skills.lv('brawl'); Skills.gain('gun', 30); const s1 = P.spread();
