@@ -110,7 +110,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 #menuBtn{width:36px;height:30px;border-radius:10px;border:2px solid rgba(244,234,211,.55);background:rgba(29,42,37,.6);color:var(--paper);font-size:17px;pointer-events:auto;display:grid;place-items:center;padding:0}
 #horseCard{pointer-events:none;background:rgba(29,42,37,.72);border-radius:12px;padding:6px 12px;font-weight:800;font-size:12.5px;display:flex;gap:10px;align-items:center;white-space:nowrap}
 #horseCard i{display:inline-block;width:54px;height:6px;border-radius:3px;background:#0005;overflow:hidden;vertical-align:middle;margin-left:4px}#horseCard i b{display:block;height:100%;background:var(--sky)}
-@media (max-height:520px){#tcluster{transform:scale(.86);transform-origin:right bottom}#tctx{bottom:calc(178px + env(safe-area-inset-bottom,0px))}#stick{transform:scale(.88);transform-origin:left bottom}#mini{width:82px!important;height:82px!important}#prompts{bottom:calc(16px + env(safe-area-inset-bottom,0px))!important}#toasts{max-width:220px}}
+@media (max-height:520px){#tcluster{transform:scale(.86);transform-origin:right bottom}#tctx{bottom:calc(178px + env(safe-area-inset-bottom,0px));flex-wrap:nowrap;max-width:calc(100vw - 190px)}#stick{transform:scale(.88);transform-origin:left bottom}#mini{width:76px!important;height:76px!important}#tr{flex-direction:row;align-items:flex-start}#prompts{bottom:calc(16px + env(safe-area-inset-bottom,0px))!important}#toasts{max-width:220px}}
 body.touch #ammo{display:none}
 /* phone controls: a floating stick wherever the left thumb lands, push to the rim to run, scalable buttons, left-handed swap */
 #lzone{position:absolute;left:0;top:22%;bottom:0;width:42%;pointer-events:auto}
@@ -136,6 +136,8 @@ body.touch #prompts{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
 #fish{left:50%;top:38%;transform:translate(-50%,-50%);background:rgba(29,42,37,.85);padding:12px 18px;border-radius:14px;text-align:center;font-weight:900;pointer-events:auto;min-width:220px}
 #fish .bar{height:12px;border-radius:6px;background:#0005;margin-top:8px;overflow:hidden}#fish .bar i{display:block;height:100%;background:var(--sage)}
 @media (max-width:640px){#mini{width:90px;height:90px}#tr{flex-direction:column-reverse}#clock{font-size:11.5px}#objective{left:max(12px,env(safe-area-inset-left,0px));transform:none;top:calc(58px + env(safe-area-inset-top,0px));max-width:calc(100% - 140px);text-align:left}#toasts{top:calc(118px + env(safe-area-inset-top,0px))}#horseCard{font-size:11.5px;flex-wrap:wrap;justify-content:center;white-space:normal;max-width:92vw}#objective{font-size:12px;max-width:46vw}}
+/* inside an embedding viewer on a phone (the artifact page), its header floats over the top of the frame: keep the HUD clear of it */
+body.framed #tl,body.framed #tr,body.framed #objective,body.framed #wanted,body.framed #toasts{margin-top:46px}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
 </style>
 

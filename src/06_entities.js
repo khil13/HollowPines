@@ -59,7 +59,8 @@ function rayPerson(o, d, h) { // ray against an upright cylinder (r 0.36, ground
 }
 function rayHit(o, d, range, skip) { // nearest living thing the ray hits within range, with line of sight to the hit point
   let best = null; for (const h of HURTABLE) { if (h === skip || !h.alive) continue; let r = null;
-    if (h instanceof Person) { r = rayPerson(o, d, h); const th = Brawl.handRay(o, d, h); if (th > 0 && (!r || (r.zone !== 'head' && th < r.t + 0.05))) r = { t: th, zone: 'hand' }; } else { const t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
+    if (h instanceof Person) { r = rayPerson(o, d, h); const th = Brawl.handRay(o, d, h); if (th > 0 && (!r || (r.zone !== 'head' && th < r.t + 0.05))) r = { t: th, zone: 'hand' }; } else { let t = -1; if (h.hitLen) { /* an imported horse: three spheres along its body, rump to chest, below the saddle */ const fx = Math.sin(h.yaw), fz = Math.cos(h.yaw); for (const k of [-1, 0, 1]) { const tk = raySphere(o, d, { x: h.pos.x + fx * h.hitLen * k, y: h.pos.y + h.hitH, z: h.pos.z + fz * h.hitLen * k }, h.hitR + 0.08); if (tk > 0 && (t < 0 || tk < t)) t = tk; } }
+      else t = raySphere(o, d, { x: h.pos.x, y: h.pos.y + h.hitH, z: h.pos.z }, h.hitR + 0.08); if (t > 0) r = { t, zone: 'body' }; }
     if (r && r.t < range && (!best || r.t < best.t)) best = Object.assign(r, { h }); }
   if (best) { const x = o.x + d.x * best.t, y = o.y + d.y * best.t, z = o.z + d.z * best.t; if (!Col.los(o.x, o.y, o.z, x - d.x * 0.3, y - d.y * 0.3, z - d.z * 0.3)) return null; }
   return best;
@@ -73,7 +74,7 @@ class Player {
   constructor() { this.pos = new THREE.Vector3(S.p.x, 0, S.p.z); this.vel = new THREE.Vector3(); this.yaw = S.p.yaw; this.state = 'ground'; this.crouch = false; this.weapon = 'fists'; this.combo = 0; this.comboT = 0; this.cool = 0; this.inv = 0; this.alive = true; this.downT = 0; this.coyote = 0; this.aimT = 0; this.lock = null; this.bloom = 0; this.aimWas = false; this.hover = null; this.reloading = false; this.hurtT = 0; this.stDelay = 0; this.blocking = false; this.dodgeT = 0; this.carry = null; this.rest = 0; this.brandish = new Map(); this.loco = new LocoFSM(); this.buildRig(); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); HURTABLE.push(this); this.hitR = 0.45; this.hitH = 1.1; this.isPlayer = true; this.name = 'Wren'; }
   buildRig() { if (this.rig) Game.scene.remove(this.rig.root); const o = OUTFITS[S.outfit] || OUTFITS.duster; this.rig = makeCharacter({ skin: '#e2a57c', shirt: o.shirt, sleeve: o.coat || o.shirt, coat: o.coat, vest: o.vest, pants: '#3e3a4a', hat: true, hatColor: o.hat, hair: '#7a3b1e', longHair: true, scarf: '#e8833a', scale: 1.05 }); Game.scene.add(this.rig.root); const old = this.anim; this.anim = makeAnimator(this.rig, this); if (old) { this.anim.cur = old.cur; if (old.dispose) old.dispose(); }
     this.gun = new THREE.Group(); this.gun.add(M(GEO.box, '#2b2b2b', 0.05, 0.08, 0.26, 0, 0, 0.1)); this.gun.add(M(GEO.box, '#6b4226', 0.05, 0.12, 0.06, 0, -0.07, -0.02)); this.gun.position.set(0, -0.08, 0.05); this.rig.R.hand.add(this.gun);
-    this.rifle = new THREE.Group(); this.rifle.add(M(GEO.box, '#2b2b2b', 0.05, 0.06, 0.8, 0, 0, 0.3)); this.rifle.add(M(GEO.box, '#7a4a26', 0.07, 0.1, 0.4, 0, -0.04, -0.12)); this.rifle.position.set(0, -0.06, 0.05); this.rig.R.hand.add(this.rifle);
+    this.rifle = PropAssets.make('rifle') || (() => { const g = new THREE.Group(); g.add(M(GEO.box, '#2b2b2b', 0.05, 0.06, 0.8, 0, 0, 0.3)); g.add(M(GEO.box, '#7a4a26', 0.07, 0.1, 0.4, 0, -0.04, -0.12)); return g; })(); this.rifle.position.set(0, -0.06, 0.05); this.rig.R.hand.add(this.rifle);
     this.held = new THREE.Group(); this.rig.R.hand.add(this.held); }
   get hp() { return S.p.hp; } set hp(v) { S.p.hp = v; }
   get maxHp() { return S.p.maxHp; }
@@ -269,7 +270,7 @@ class Player {
 
 /* ---------- Horse ---------- */
 class Horse {
-  constructor() { this.rig = makeQuad({ type: 'horse', color: '#a0673a', dark: '#2b1d14', mane: '#3b2618', tail: '#3b2618', muzzle: '#8a5530', blaze: true, sock: '#a0673a', scale: 1.0 }); Game.scene.add(this.rig.root); this.anim = new QuadAnimator(this.rig, this); this.pos = new THREE.Vector3(S.h.x, 0, S.h.z); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); this.yaw = S.h.yaw; this.speed = 0; this.vy = 0; this.gait = 'walk'; this.gl = 0; this.state = 'idle'; this.rider = null; this.fear = 0; this.rear = 0; this.turnRate = 0; this.gallopT = 0; this.wander = 0; this.alive = true; this.isHorse = true; this.hitR = 0.7; this.hitH = 1.3; HURTABLE.push(this); this.patT = 0;
+  constructor() { this.rig = makeQuad({ type: 'horse', color: '#a0673a', dark: '#2b1d14', mane: '#3b2618', tail: '#3b2618', muzzle: '#8a5530', blaze: true, sock: '#a0673a', scale: 1.0 }); Game.scene.add(this.rig.root); this.anim = new QuadAnimator(this.rig, this); this.pos = new THREE.Vector3(S.h.x, 0, S.h.z); this.pos.y = Col.ground(this.pos.x, this.pos.z, 99); this.yaw = S.h.yaw; this.speed = 0; this.vy = 0; this.gait = 'walk'; this.gl = 0; this.state = 'idle'; this.rider = null; this.fear = 0; this.rear = 0; this.turnRate = 0; this.gallopT = 0; this.wander = 0; this.alive = true; this.isHorse = true; this.hitR = 0.7; this.hitH = 1.3; modelBodyHit(this); HURTABLE.push(this); this.patT = 0;
     this.bags = M(GEO.box, '#5a361c', 0.9, 0.3, 0.3, 0, 0.35, -0.4); this.rig.body.add(this.bags);
     this.box = M(GEO.box, '#5a4a3a', 0.5, 0.35, 0.4, 0, 0.75, -0.55); this.box.visible = false; this.rig.body.add(this.box);
     Interact.add({ pos: () => this.pos, r: 2.6, pri: 0.2, opts: p => this.opts(p) });
@@ -374,7 +375,7 @@ class Person {
     Object.assign(this, { brave: 0.5, lawful: true, lawman: false, hp: 100, maxHp: 100, tags: [], gun: null, schedule: null, sense: 1, accuracy: 0.42, dmg: 13, hostileTo: null }, c);
     this.rig = makeCharacter(c.look || {}); Game.scene.add(this.rig.root); this.anim = makeAnimator(this.rig, this);
     this.pos = new THREE.Vector3(c.x, 0, c.z); this.pos.y = Col.ground(c.x, c.z, 99); this.yaw = c.yaw || 0; this.vel = new THREE.Vector3(); this.state = c.state || 'routine'; this.path = null; this.alive = true; this.downed = false; this.t = 0; this.perceiveT = rand(0, 0.3); this.lines = 0; this.say_t = 0; this.alert = 0; this.lastSeen = null; this.cover = null; this.coverT = 0; this.shootT = rand(1, 2); this.stuck = 0; this.hitR = 0.42; this.hitH = 1.1; this.sp = 0; this.antagonized = 0;
-    if (c.gun) { this.gunM = new THREE.Group(); this.gunM.add(M(GEO.box, '#2b2b2b', 0.05, 0.08, c.gun === 'rifle' ? 0.8 : 0.26, 0, 0, c.gun === 'rifle' ? 0.3 : 0.1)); this.gunM.position.set(0, -0.08, 0.05); this.rig.R.hand.add(this.gunM); this.gunM.visible = false; }
+    if (c.gun) { this.gunM = (c.gun === 'rifle' && PropAssets.make('rifle')) || new THREE.Group(); if (!this.gunM.children.length) this.gunM.add(M(GEO.box, '#2b2b2b', 0.05, 0.08, c.gun === 'rifle' ? 0.8 : 0.26, 0, 0, c.gun === 'rifle' ? 0.3 : 0.1)); this.gunM.position.set(0, -0.08, 0.05); this.rig.R.hand.add(this.gunM); this.gunM.visible = false; }
     HURTABLE.push(this); this.it = Interact.add({ pos: () => this.pos, r: 2.4, pri: 0.3, opts: p => this.opts(p) });
     if (this.key && S.chars[this.key] === 'dead') this.setDead(true);
   }

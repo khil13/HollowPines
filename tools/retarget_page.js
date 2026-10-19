@@ -1,6 +1,6 @@
 /* In-page retargeter (runs in test.html, which already loads three.js, GLTFLoader, SkeletonUtils and the game's
    character as Assets.gltf). Retargets clips from a UE5-style 65-bone skeleton (Quaternius Universal Animation
-   Library) onto the game's 23-bone character:
+   Library) or a Mixamo skeleton (renamed to the UE5 names on load) onto the game's 23-bone character:
    - every mapped target bone is rotated so it points where its source bone points (C aligns the two rest
      directions once), keeping the source's rotation changes for twist: W_t = D(t) * C * Q_t0, D(t) = Q_s(t) Q_s0^-1
    - hips (Body_1) and the IK foot targets use source positions scaled by the hip-height ratio
@@ -23,10 +23,32 @@ window.RT = (() => {
   const ORDER = ['Body_1', 'Hips', 'Abdomen', 'Torso', 'Neck', 'Head', 'ShoulderL', 'UpperArmL', 'LowerArmL', 'FistL', 'ShoulderR', 'UpperArmR', 'LowerArmR', 'FistR', 'UpperLegL', 'LowerLegL', 'UpperLegR', 'LowerLegR', 'FootL', 'FootR'];
   const wq = (o) => o.getWorldQuaternion(Q()), wp = (o) => o.getWorldPosition(V());
   let src = null, refSpec = null; // refSpec: [source clip, time] giving a relaxed standing pose to measure changes from
+  // Mixamo skeletons (mixamorig:Hips, mixamorig:LeftArm...) are renamed to the UE5 names above on load, so the same
+  // retargeting runs on both. FBXLoader drops the colon, so names arrive as mixamorigHips or mixamorig:Hips.
+  const MIXAMO = { pelvis: 'Hips', spine_01: 'Spine', spine_02: 'Spine1', spine_03: 'Spine2', neck_01: 'Neck', Head: 'Head',
+    clavicle_l: 'LeftShoulder', upperarm_l: 'LeftArm', lowerarm_l: 'LeftForeArm', hand_l: 'LeftHand', clavicle_r: 'RightShoulder', upperarm_r: 'RightArm', lowerarm_r: 'RightForeArm', hand_r: 'RightHand',
+    thigh_l: 'LeftUpLeg', calf_l: 'LeftLeg', foot_l: 'LeftFoot', ball_l: 'LeftToeBase', thigh_r: 'RightUpLeg', calf_r: 'RightLeg', foot_r: 'RightFoot', ball_r: 'RightToeBase' };
+  const bare = n => n.replace(/^mixamorig\d*[:_]?/i, '');
+  function adopt(scene, clips) {
+    const toUE = {}; for (const k in MIXAMO) toUE[MIXAMO[k]] = k; let mixamo = false;
+    scene.traverse(o => { if (o.isBone && /^mixamorig/i.test(o.name)) mixamo = true; }); if (!mixamo) return false;
+    scene.traverse(o => { if (o.isBone) { const b = bare(o.name); o.name = toUE[b] || b; } });
+    for (const c of clips) for (const t of c.tracks) { const i = t.name.lastIndexOf('.'), b = bare(t.name.slice(0, i)); t.name = (toUE[b] || b) + t.name.slice(i); }
+    return true;
+  }
+  const bytes = b64 => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
   async function loadSource(b64) {
-    const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-    src = await new Promise((res, rej) => new THREE.GLTFLoader().parse(u.buffer, '', res, rej));
+    src = await new Promise((res, rej) => new THREE.GLTFLoader().parse(bytes(b64), '', res, rej));
+    src.mixamo = adopt(src.scene, src.animations);
     return src.animations.map(a => [a.name, +a.duration.toFixed(3)]);
+  }
+  // a batch of Mixamo downloads: one FBX per animation ([file name, base64] pairs). The first file's skeleton is the
+  // source; each file's clip is named after its file.
+  function loadFBX(files) {
+    const L = new THREE.FBXLoader(); let scene = null; const animations = [];
+    for (const [name, b64] of files) { const g = L.parse(bytes(b64), ''); if (!scene) scene = g; const c = g.animations[0]; if (!c) continue; c.name = name; animations.push(c); }
+    src = { scene, animations }; src.mixamo = adopt(scene, animations);
+    return animations.map(a => [a.name, +a.duration.toFixed(3)]);
   }
   function setRef(spec) { refSpec = spec; }
   function setup(align = false) {
@@ -87,12 +109,13 @@ window.RT = (() => {
     const S = THREE.SkeletonUtils.clone(src.scene); const box = new THREE.Box3();
     const clip = toClip(name, d), srcClip = src.animations.find(a => a.name === name);
     for (const [row, obj, c] of [[0, T, clip], [1, S, srcClip]]) {
-      sc.add(obj); const mx = new THREE.AnimationMixer(obj), a = mx.clipAction(c); a.play();
-      for (let i = 0; i < cols; i++) { a.time = c.duration * i / (cols - 1); mx.update(0); obj.updateMatrixWorld(true); box.setFromObject(obj); const ctr = box.getCenter(V()), h = box.max.y - box.min.y || 1;
+      sc.add(obj); let mesh = false; obj.traverse(o => { if (o.isMesh) mesh = true; }); const bonesOnly = mesh ? null : new THREE.SkeletonHelper(obj); if (bonesOnly) sc.add(bonesOnly); /* draw the bones when there is no mesh */
+      const mx = new THREE.AnimationMixer(obj), a = mx.clipAction(c); a.play();
+      for (let i = 0; i < cols; i++) { a.time = c.duration * i / (cols - 1); mx.update(0); obj.updateMatrixWorld(true); box.setFromObject(obj); if (box.isEmpty()) obj.traverse(o => { if (o.isBone) box.expandByPoint(o.getWorldPosition(V())); }); /* a skin-less Mixamo download: frame its bones */ const ctr = box.getCenter(V()), h = box.max.y - box.min.y || 1;
         cam.position.set(ctr.x + h * 1.6, ctr.y + h * 0.35, ctr.z + h * 1.9); cam.lookAt(ctr); r.render(sc, cam); g.drawImage(r.domElement, i * W, row * H);
         g.fillStyle = '#222'; g.font = '12px sans-serif'; g.fillText(`${row ? 'source' : 'game'} ${(a.time).toFixed(2)}s`, i * W + 6, row * H + 16); }
-      sc.remove(obj); }
+      sc.remove(obj); if (bonesOnly) sc.remove(bonesOnly); }
     r.dispose(); return cv.toDataURL('image/png');
   }
-  return { loadSource, setRef, bake, sheet, toClip, setup };
+  return { loadSource, loadFBX, setRef, bake, sheet, toClip, setup, isMixamo: () => !!(src && src.mixamo) };
 })();

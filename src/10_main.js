@@ -2,7 +2,7 @@
 const Game = {
   running: false, time: 0, lamps: [], fires: [], shakeA: 0, treeCasters: [], quality: 'high',
   async init() {
-    await Assets.init();
+    await Assets.init(); await AnimalAssets.init(); await PropAssets.init();
     const canvas = $('view'); this.mobile = matchMedia('(pointer:coarse)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent); this.quality = Settings.v.quality === 'auto' ? (this.mobile ? 'medium' : 'high') : Settings.v.quality;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !this.mobile, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.quality === 'high' ? 1.6 : this.quality === 'medium' ? 1.25 : 0.9)); this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
