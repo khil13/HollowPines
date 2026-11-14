@@ -92,6 +92,20 @@ async def main():
         check('cod: big fire button with aim above it, jump at the edge, a second fire button above the stick, reload beside fire', all(r['layout'].values()) and r['reloadShown'], r['layout'])
         check('cod: holding fire keeps shooting, and dragging the fire button turns the view', r['held']['shots'] >= 3 and r['held']['turned'] > 0.15, r['held'])
         check('cod: sights on an attacker fire by themselves, never at a bystander, and the setting turns it off', r['attacker'] >= 2 and r['hurt'] and r['bystander'] == 0 and r['off'] == 0, r)
+        # --- aim assist on phones ---
+        r = await ev(pg, """(()=>{ const P = HP.Game.player, C = HP.Game.cam; if (HP.Missions.active) HP.Missions.abandon(true); HP.tp(-100, -20); P.yaw = 0; C.yaw = 0; C.pitch = 0.1; P.inv = 1e9; P.setWeapon('revolver'); HP.S.ammoClip.revolver = 6; Settings.v.autoFire = false; HP.sim(0.4, 1 / 60);
+          const mk = (k, dx, dz) => { const n = HP.NPC.spawn({ key: k, name: 'T', x: P.pos.x + dx, z: P.pos.z + dz, lawful: false, wild: true, hp: 60, maxHp: 60, tags: ['generic'], look: {} }); n.update = () => {}; n.hostileToPlayer = true; return n; };
+          const off = n => { const d = C.dir(), ex = n.pos.x - C.pos.x, ey = n.pos.y + 1.15 - C.pos.y, ez = n.pos.z - C.pos.z, l = Math.hypot(ex, ey, ez); return +(Math.acos(Math.min(1, (d.x * ex + d.y * ey + d.z * ez) / l)) * 57.3).toFixed(1); };
+          const a = mk('aaA', 0, 14); HP.sim(0.2, 1 / 60); C.yaw = Math.atan2(a.pos.x - C.pos.x, a.pos.z - C.pos.z) + 0.16; C.pitch = 0.02; Input.aimToggle = true; HP.sim(1 / 60, 1 / 60); C.snapT = 0; C.yaw += 0.16; const before = off(a); HP.sim(0.8, 1 / 60); const after = off(a), onA = !!(P.hover && P.hover.h === a);
+          /* it follows a target that moves */ for (let i = 0; i < 60; i++) { a.pos.x += 0.05; HP.sim(1 / 60, 1 / 60); } const tracked = off(a), stillOn = !!(P.hover && P.hover.h === a);
+          /* a near miss on the locked target still lands */ Settings.v.aimAssist = 0; HP.sim(0.1, 1 / 60); C.yaw += 0.065; HP.sim(0.4, 1 / 60); const missAim = !(P.hover && P.hover.h === a); const hp0 = a.hp; Input.mouse.lp = true; HP.sim(1 / 60, 1 / 60); Input.mouse.lp = false; HP.sim(0.3, 1 / 60); const nearHit = a.hp < hp0;
+          /* when a target drops, the sights swing to the next attacker */ delete Settings.v.aimAssist; const b = mk('aaB', 4, 13); HP.sim(0.4, 1 / 60); a.takeHit({ dmg: 999, from: P, gun: 'revolver' }); HP.sim(0.9, 1 / 60); const next = off(b), onB = !!(P.hover && P.hover.h === b);
+          Settings.v.aimAssist = 0; C.yaw += 0.2; HP.sim(0.6, 1 / 60); const offStays = off(b) > 6; delete Settings.v.aimAssist; delete Settings.v.autoFire; Input.aimToggle = false; for (const k of ['aaA', 'aaB']) { const n = HP.NPC.byKey(k); if (n) HP.NPC.despawn(n); } P.setWeapon('fists'); HP.sim(0.3);
+          return { before, after, onA, tracked, stillOn, missAim, nearHit, next, onB, offStays, sel: (UI.open('system'), !!document.getElementById('setAA') && !!document.getElementById('setAsens')) }; })()""")
+        await ev(pg, "UI.close()")
+        check('aim assist: sights a few degrees off an attacker are pulled onto them, and follow as they move', r['after'] < 2.5 and r['onA'] and r['tracked'] < 3.5 and r['stillOn'], r)
+        check('aim assist: a near miss on the locked target still lands; when one drops the sights swing to the next attacker', r['missAim'] and r['nearHit'] and r['onB'] and r['next'] < 3, r)
+        check('aim assist: turning it off leaves the sights where you put them, and the settings offer strength and aim speed', r['offStays'] and r['sel'], r)
         bad = [e for e in errs if 'favicon' not in e]
         check('no page errors', not bad, bad[:5])
         await b.close()

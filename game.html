@@ -42,6 +42,7 @@ button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 #cross::before,#cross::after{content:"";position:absolute;background:var(--paper);box-shadow:0 0 2px #000}
 #cross::before{left:10px;top:0;width:2px;height:22px}#cross::after{top:10px;left:0;height:2px;width:22px}
 #cross.lock::before,#cross.lock::after{background:#e5484d}
+body.touch #cross{width:30px;height:30px;margin:-15px 0 0 -15px}body.touch #cross::before{left:13.5px;width:3px;height:30px}body.touch #cross::after{top:13.5px;height:3px;width:30px}body.touch #cross.lock{filter:drop-shadow(0 0 4px #e5484d)}
 #ammo{right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));font-weight:900;background:rgba(29,42,37,.6);padding:4px 10px;border-radius:10px;font-variant-numeric:tabular-nums}
 #tags{inset:0}
 .tag{position:absolute;transform:translate(-50%,-100%);font:900 15px var(--body);text-shadow:0 1px 3px #000;white-space:nowrap}
@@ -2078,7 +2079,7 @@ class Player {
     if (Input.tb('grab') && !this.grab && this.state === 'ground' && this.weapon === 'fists') { Brawl.tryGrab(this); return; } // the phone's Grab button
     const atk = Input.mouse.lp || Input.hit('f') || Input.tb('attack');
     // target lock (aim assist): nearest hostile/animal in the camera cone
-    const prevLock = this.lock; this.lock = null; if (aiming) { const cf = Game.cam.dir(); let best = 0.0; if (prevLock && prevLock.alive && !prevLock.downed) { const dx = prevLock.pos.x - Game.cam.pos.x, dy = (prevLock.pos.y + prevLock.hitH) - Game.cam.pos.y, dz = prevLock.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if ((dx * cf.x + dy * cf.y + dz * cf.z) / d > 0.94 && d < 45) { this.lock = prevLock; best = 2; } } for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > (this.weapon === 'rifle' ? 70 : 40)) continue; const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; const cone = Input.touch ? 0.95 : 0.985; if (dot > cone && dot > best && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; this.lock = h; } } }
+    const prevLock = this.lock; this.lock = null; if (aiming) { const cf = Game.cam.dir(); let best = 0.0; if (prevLock && prevLock.alive && !prevLock.downed) { const dx = prevLock.pos.x - Game.cam.pos.x, dy = (prevLock.pos.y + prevLock.hitH) - Game.cam.pos.y, dz = prevLock.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if ((dx * cf.x + dy * cf.y + dz * cf.z) / d > 0.94 && d < 45) { this.lock = prevLock; best = 2; } } for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > (this.weapon === 'rifle' ? 70 : 40)) continue; const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; const cone = Input.touch ? 0.9 : 0.985; if (dot > cone && dot > best && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; this.lock = h; } } }
     // brandishing at townsfolk
     if (aiming && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
     if (DeadEye.on) { if (atk && aiming) DeadEye.mark(this); return; } // in Dead Eye a trigger pull paints a target
@@ -2098,6 +2099,7 @@ class Player {
   aimTick(dt, aiming) {
     this.bloom *= Math.exp(-(Skills.has('gun', 5) ? 10 : 5) * dt); if (this.bloom < 1e-4) this.bloom = 0;
     if (aiming && !this.aimWas) { const t = this.softLockTarget(); if (t) Game.cam.snapTo(t); }
+    if (aiming && this.aimWas && this.lockWas && (!this.lockWas.alive || this.lockWas.downed) && (Input.touch || Settings.v.aimAssist > 0)) { const t = this.softLockTarget(); if (t && (t.hostileToPlayer || t.state === 'combat' || t.state === 'attack')) Game.cam.snapTo(t); } this.lockWas = this.lock; /* a target drops: swing to the next one that is fighting */
     this.aimWas = aiming;
     this.hover = aiming ? rayHit(Game.cam.pos, Game.cam.dir(), (GUN[this.weapon] || GUN.revolver).range, this) : null;
     // phones: with the sights held on someone who is attacking you, the gun fires by itself (Call of Duty Mobile's simple mode)
@@ -2109,7 +2111,7 @@ class Player {
       const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; if (dot < 0.9) continue; const sc = dot + (h.hostileToPlayer || h.state === 'combat' ? 0.1 : 0) - d * 0.0005; if (sc > bs && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { bs = sc; best = h; } }
     return best;
   }
-  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02) * (Skills.has('gun', 2) ? 0.85 : 1); } /* whiskey makes the aim wander */
+  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02) * (Skills.has('gun', 2) ? 0.85 : 1) * (Input.touch ? 0.5 : 1); } /* whiskey makes the aim wander */
   shoot(aimed) {
     const w = this.weapon; if (this.reloading) return; if (S.ammoClip[w] <= 0) { Sfx.tone(1200, 0.03, 0.05, 'square'); this.reload(); return; }
     const g = GUN[w], boost = S.upgrades.barrel && w === 'revolver' ? 1.25 : 1, range = g.range * boost;
@@ -2123,7 +2125,7 @@ class Player {
       if (this.forceHit) { const m = this.forceHit, c = m.h.pos.clone().add(m.off); hit = { h: m.h, zone: m.zone, t: o.distanceTo(c) }; dir.copy(c).sub(o).normalize(); } // a Dead Eye mark lands where it was painted
       if (!hit && this.lock && this.lock.alive) { // a little bullet magnetism toward the locked target, like RDR2's aim assist
         const c = new THREE.Vector3(this.lock.pos.x, this.lock.pos.y + this.lock.hitH, this.lock.pos.z), t = c.clone().sub(o).dot(dir);
-        if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + 0.12 + t * 0.003 && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
+        if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + (Input.touch ? 0.45 : 0.12) + t * (Input.touch ? 0.012 : 0.003) && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
       point = hit ? o.clone().addScaledVector(dir, hit.t) : (FX.groundHit(o, dir, range) || o.clone().addScaledVector(dir, range));
       this.bloom = Math.min(0.05, this.bloom + g.bloom); Game.cam.kick(g.kick);
     } else { // hip fire: whatever is in front, likelier the closer it is
@@ -5300,6 +5302,8 @@ const UI = {
     <label class="range">Button size <select id="setBtn">${[[0.85, 'Small'], [1, 'Medium'], [1.2, 'Large']].map(([v, n]) => `<option value="${v}" ${+V.btnScale === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="range"><input type="checkbox" id="setLefty" ${V.lefty ? 'checked' : ''}> Left-handed layout (stick on the right, buttons on the left)</label>
     <label class="range"><input type="checkbox" id="setRun" ${V.autoRun !== false ? 'checked' : ''}> Push the stick to the edge to run</label>
+    <label class="range">Aim assist<select id="setAA">${[['0', 'Off'], ['1', 'Light'], ['2', 'Strong']].map(([v, n]) => `<option value="${v}" ${String(V.aimAssist === undefined ? (Input.touch ? 2 : 0) : V.aimAssist) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label class="range">Look speed while aiming<input type="range" id="setAsens" min="0.4" max="2.5" step="0.05" value="${V.aimSens || 1}"><span>${(V.aimSens || 1).toFixed(2)}</span></label>
     <label class="range"><input type="checkbox" id="setAF" ${V.autoFire !== false ? 'checked' : ''}> Fire automatically when the sights are on an attacker</label>
     <label class="range"><input type="checkbox" id="setHap" ${V.haptics !== false ? 'checked' : ''}> Vibration on hits, counters and level-ups</label>
     <div class="sec">Graphics & sound</div>
@@ -5313,7 +5317,7 @@ const UI = {
     on('setZoom', 'input', e => { Game.cam.zoom = +e.target.value; Settings.set('zoom', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(1); });
     on('setTsens', 'input', e => { Settings.set('tsens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); });
     on('setBtn', 'change', e => { Settings.set('btnScale', +e.target.value); Input.applyLayout(); }); on('setLefty', 'change', e => { Settings.set('lefty', e.target.checked); Input.applyLayout(); });
-    on('setRun', 'change', e => Settings.set('autoRun', e.target.checked)); on('setAF', 'change', e => Settings.set('autoFire', e.target.checked)); on('setHap', 'change', e => Settings.set('haptics', e.target.checked));
+    on('setRun', 'change', e => Settings.set('autoRun', e.target.checked)); on('setAF', 'change', e => Settings.set('autoFire', e.target.checked)); on('setAA', 'change', e => Settings.set('aimAssist', +e.target.value)); on('setAsens', 'input', e => { Settings.set('aimSens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); }); on('setHap', 'change', e => Settings.set('haptics', e.target.checked));
     on('setInv', 'change', e => Settings.set('invertY', e.target.checked)); on('setAuto', 'change', e => Settings.set('autoCam', e.target.checked));
     on('setLock', 'change', e => { Settings.set('mouseLock', e.target.checked); if (!e.target.checked && document.pointerLockElement) document.exitPointerLock(); });
     on('setQ', 'change', e => Settings.set('quality', e.target.value)); on('setVol', 'input', e => { Settings.set('sound', +e.target.value); e.target.nextElementSibling.textContent = Math.round(e.target.value * 100) + '%'; });
@@ -5632,7 +5636,7 @@ class CamRig {
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) { Settings.v.zoom = this.zoom; clearTimeout(this._zs); this._zs = setTimeout(() => Settings.save(), 600); } } /* remember the zoom once you stop scrolling */
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
-    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { dx *= 0.55; dy *= 0.55; } // finer thumb aim // zoomed in: same feel per degree
+    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { const a = 0.6 * (Settings.v.aimSens || 1) * (P.hover && P.hover.h ? 0.6 : 1); dx *= a; dy *= a; } // finer thumb aim, finer still with the sights on someone
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
     if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') { if (P.rig && P.rig.root) P.rig.root.visible = true; return this.convo(dt); }
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
@@ -5643,7 +5647,12 @@ class CamRig {
     if (this.snapT > 0) { this.snapT -= dt; const t = this.snapTgt; if (!aim || !t || !t.alive) this.snapT = 0; else { // steer the actual view ray onto the target's chest
       const d = this.dir(), tx = t.pos.x - this.pos.x, ty = t.pos.y + t.hitH - this.pos.y, tz = t.pos.z - this.pos.z, k = 1 - Math.exp(-28 * dt);
       this.yaw += angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)) * k; this.pitch = clamp(this.pitch - (Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1))) * k, -0.42, 1.15); } }
-    if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
+    { // aim assist: the sights are drawn onto the locked target and stay with it as it moves. It works on the real view ray
+      // (yaw and pitch), eases off while the thumb is steering so you can still pull up to the head or across to someone else
+      const lvl = Settings.v.aimAssist === undefined ? (Input.touch ? 2 : 0) : +Settings.v.aimAssist, l = P.lock; this.assist = 0;
+      if (aim && l && l.alive && lvl > 0 && this.snapT <= 0 && !DeadEye.firing) { const d = this.dir(), tx = l.pos.x - this.pos.x, ty = l.pos.y + l.hitH * (l instanceof Person ? 1.05 : 1) - this.pos.y, tz = l.pos.z - this.pos.z;
+        const ey = angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)), ep = Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1)), k = 1 - Math.exp(-(manual ? (lvl > 1 ? 4 : 2) : (lvl > 1 ? 11 : 6)) * dt);
+        this.yaw += ey * k; this.pitch = clamp(this.pitch - ep * k * (manual ? 0.5 : 1), -0.42, 1.15); this.assist = 1; } }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
     // close-quarters framing (grab, counter, duel, a fistfight at arm's length): tighter, over the shoulder, both fighters in view

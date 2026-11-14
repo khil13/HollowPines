@@ -102,7 +102,7 @@ class CamRig {
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) { Settings.v.zoom = this.zoom; clearTimeout(this._zs); this._zs = setTimeout(() => Settings.save(), 600); } } /* remember the zoom once you stop scrolling */
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
-    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { dx *= 0.55; dy *= 0.55; } // finer thumb aim // zoomed in: same feel per degree
+    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { const a = 0.6 * (Settings.v.aimSens || 1) * (P.hover && P.hover.h ? 0.6 : 1); dx *= a; dy *= a; } // finer thumb aim, finer still with the sights on someone
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
     if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') { if (P.rig && P.rig.root) P.rig.root.visible = true; return this.convo(dt); }
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
@@ -113,7 +113,12 @@ class CamRig {
     if (this.snapT > 0) { this.snapT -= dt; const t = this.snapTgt; if (!aim || !t || !t.alive) this.snapT = 0; else { // steer the actual view ray onto the target's chest
       const d = this.dir(), tx = t.pos.x - this.pos.x, ty = t.pos.y + t.hitH - this.pos.y, tz = t.pos.z - this.pos.z, k = 1 - Math.exp(-28 * dt);
       this.yaw += angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)) * k; this.pitch = clamp(this.pitch - (Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1))) * k, -0.42, 1.15); } }
-    if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
+    { // aim assist: the sights are drawn onto the locked target and stay with it as it moves. It works on the real view ray
+      // (yaw and pitch), eases off while the thumb is steering so you can still pull up to the head or across to someone else
+      const lvl = Settings.v.aimAssist === undefined ? (Input.touch ? 2 : 0) : +Settings.v.aimAssist, l = P.lock; this.assist = 0;
+      if (aim && l && l.alive && lvl > 0 && this.snapT <= 0 && !DeadEye.firing) { const d = this.dir(), tx = l.pos.x - this.pos.x, ty = l.pos.y + l.hitH * (l instanceof Person ? 1.05 : 1) - this.pos.y, tz = l.pos.z - this.pos.z;
+        const ey = angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)), ep = Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1)), k = 1 - Math.exp(-(manual ? (lvl > 1 ? 4 : 2) : (lvl > 1 ? 11 : 6)) * dt);
+        this.yaw += ey * k; this.pitch = clamp(this.pitch - ep * k * (manual ? 0.5 : 1), -0.42, 1.15); this.assist = 1; } }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
     // close-quarters framing (grab, counter, duel, a fistfight at arm's length): tighter, over the shoulder, both fighters in view

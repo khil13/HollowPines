@@ -104,6 +104,8 @@ const UI = {
     <label class="range">Button size <select id="setBtn">${[[0.85, 'Small'], [1, 'Medium'], [1.2, 'Large']].map(([v, n]) => `<option value="${v}" ${+V.btnScale === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="range"><input type="checkbox" id="setLefty" ${V.lefty ? 'checked' : ''}> Left-handed layout (stick on the right, buttons on the left)</label>
     <label class="range"><input type="checkbox" id="setRun" ${V.autoRun !== false ? 'checked' : ''}> Push the stick to the edge to run</label>
+    <label class="range">Aim assist<select id="setAA">${[['0', 'Off'], ['1', 'Light'], ['2', 'Strong']].map(([v, n]) => `<option value="${v}" ${String(V.aimAssist === undefined ? (Input.touch ? 2 : 0) : V.aimAssist) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label class="range">Look speed while aiming<input type="range" id="setAsens" min="0.4" max="2.5" step="0.05" value="${V.aimSens || 1}"><span>${(V.aimSens || 1).toFixed(2)}</span></label>
     <label class="range"><input type="checkbox" id="setAF" ${V.autoFire !== false ? 'checked' : ''}> Fire automatically when the sights are on an attacker</label>
     <label class="range"><input type="checkbox" id="setHap" ${V.haptics !== false ? 'checked' : ''}> Vibration on hits, counters and level-ups</label>
     <div class="sec">Graphics & sound</div>
@@ -117,7 +119,7 @@ const UI = {
     on('setZoom', 'input', e => { Game.cam.zoom = +e.target.value; Settings.set('zoom', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(1); });
     on('setTsens', 'input', e => { Settings.set('tsens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); });
     on('setBtn', 'change', e => { Settings.set('btnScale', +e.target.value); Input.applyLayout(); }); on('setLefty', 'change', e => { Settings.set('lefty', e.target.checked); Input.applyLayout(); });
-    on('setRun', 'change', e => Settings.set('autoRun', e.target.checked)); on('setAF', 'change', e => Settings.set('autoFire', e.target.checked)); on('setHap', 'change', e => Settings.set('haptics', e.target.checked));
+    on('setRun', 'change', e => Settings.set('autoRun', e.target.checked)); on('setAF', 'change', e => Settings.set('autoFire', e.target.checked)); on('setAA', 'change', e => Settings.set('aimAssist', +e.target.value)); on('setAsens', 'input', e => { Settings.set('aimSens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); }); on('setHap', 'change', e => Settings.set('haptics', e.target.checked));
     on('setInv', 'change', e => Settings.set('invertY', e.target.checked)); on('setAuto', 'change', e => Settings.set('autoCam', e.target.checked));
     on('setLock', 'change', e => { Settings.set('mouseLock', e.target.checked); if (!e.target.checked && document.pointerLockElement) document.exitPointerLock(); });
     on('setQ', 'change', e => Settings.set('quality', e.target.value)); on('setVol', 'input', e => { Settings.set('sound', +e.target.value); e.target.nextElementSibling.textContent = Math.round(e.target.value * 100) + '%'; });

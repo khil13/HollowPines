@@ -181,7 +181,7 @@ class Player {
     if (Input.tb('grab') && !this.grab && this.state === 'ground' && this.weapon === 'fists') { Brawl.tryGrab(this); return; } // the phone's Grab button
     const atk = Input.mouse.lp || Input.hit('f') || Input.tb('attack');
     // target lock (aim assist): nearest hostile/animal in the camera cone
-    const prevLock = this.lock; this.lock = null; if (aiming) { const cf = Game.cam.dir(); let best = 0.0; if (prevLock && prevLock.alive && !prevLock.downed) { const dx = prevLock.pos.x - Game.cam.pos.x, dy = (prevLock.pos.y + prevLock.hitH) - Game.cam.pos.y, dz = prevLock.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if ((dx * cf.x + dy * cf.y + dz * cf.z) / d > 0.94 && d < 45) { this.lock = prevLock; best = 2; } } for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > (this.weapon === 'rifle' ? 70 : 40)) continue; const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; const cone = Input.touch ? 0.95 : 0.985; if (dot > cone && dot > best && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; this.lock = h; } } }
+    const prevLock = this.lock; this.lock = null; if (aiming) { const cf = Game.cam.dir(); let best = 0.0; if (prevLock && prevLock.alive && !prevLock.downed) { const dx = prevLock.pos.x - Game.cam.pos.x, dy = (prevLock.pos.y + prevLock.hitH) - Game.cam.pos.y, dz = prevLock.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if ((dx * cf.x + dy * cf.y + dz * cf.z) / d > 0.94 && d < 45) { this.lock = prevLock; best = 2; } } for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > (this.weapon === 'rifle' ? 70 : 40)) continue; const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; const cone = Input.touch ? 0.9 : 0.985; if (dot > cone && dot > best && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; this.lock = h; } } }
     // brandishing at townsfolk
     if (aiming && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
     if (DeadEye.on) { if (atk && aiming) DeadEye.mark(this); return; } // in Dead Eye a trigger pull paints a target
@@ -201,6 +201,7 @@ class Player {
   aimTick(dt, aiming) {
     this.bloom *= Math.exp(-(Skills.has('gun', 5) ? 10 : 5) * dt); if (this.bloom < 1e-4) this.bloom = 0;
     if (aiming && !this.aimWas) { const t = this.softLockTarget(); if (t) Game.cam.snapTo(t); }
+    if (aiming && this.aimWas && this.lockWas && (!this.lockWas.alive || this.lockWas.downed) && (Input.touch || Settings.v.aimAssist > 0)) { const t = this.softLockTarget(); if (t && (t.hostileToPlayer || t.state === 'combat' || t.state === 'attack')) Game.cam.snapTo(t); } this.lockWas = this.lock; /* a target drops: swing to the next one that is fighting */
     this.aimWas = aiming;
     this.hover = aiming ? rayHit(Game.cam.pos, Game.cam.dir(), (GUN[this.weapon] || GUN.revolver).range, this) : null;
     // phones: with the sights held on someone who is attacking you, the gun fires by itself (Call of Duty Mobile's simple mode)
@@ -212,7 +213,7 @@ class Player {
       const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; if (dot < 0.9) continue; const sc = dot + (h.hostileToPlayer || h.state === 'combat' ? 0.1 : 0) - d * 0.0005; if (sc > bs && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { bs = sc; best = h; } }
     return best;
   }
-  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02) * (Skills.has('gun', 2) ? 0.85 : 1); } /* whiskey makes the aim wander */
+  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02) * (Skills.has('gun', 2) ? 0.85 : 1) * (Input.touch ? 0.5 : 1); } /* whiskey makes the aim wander */
   shoot(aimed) {
     const w = this.weapon; if (this.reloading) return; if (S.ammoClip[w] <= 0) { Sfx.tone(1200, 0.03, 0.05, 'square'); this.reload(); return; }
     const g = GUN[w], boost = S.upgrades.barrel && w === 'revolver' ? 1.25 : 1, range = g.range * boost;
@@ -226,7 +227,7 @@ class Player {
       if (this.forceHit) { const m = this.forceHit, c = m.h.pos.clone().add(m.off); hit = { h: m.h, zone: m.zone, t: o.distanceTo(c) }; dir.copy(c).sub(o).normalize(); } // a Dead Eye mark lands where it was painted
       if (!hit && this.lock && this.lock.alive) { // a little bullet magnetism toward the locked target, like RDR2's aim assist
         const c = new THREE.Vector3(this.lock.pos.x, this.lock.pos.y + this.lock.hitH, this.lock.pos.z), t = c.clone().sub(o).dot(dir);
-        if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + 0.12 + t * 0.003 && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
+        if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + (Input.touch ? 0.45 : 0.12) + t * (Input.touch ? 0.012 : 0.003) && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
       point = hit ? o.clone().addScaledVector(dir, hit.t) : (FX.groundHit(o, dir, range) || o.clone().addScaledVector(dir, range));
       this.bloom = Math.min(0.05, this.bloom + g.bloom); Game.cam.kick(g.kick);
     } else { // hip fire: whatever is in front, likelier the closer it is
