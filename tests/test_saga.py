@@ -42,13 +42,24 @@ async def main():
         check('hunt: Bill asks for venison; a deer brought down and skinned moves the mission on (one shot counts as a clean kill)', r['st'] == 'hunt' and r['sk'] and r['meat'] >= 2 and r['st2'] == 'deliver' and r['clean'], r)
         r = await ev(pg, """(()=>{ const m0 = HP.S.money; const c = Q.talk('bill'); const ok = Q.pick('[Give him the venison]'); Q.pick('Continue'); Q.close(); HP.sim(1); const jos = Q.talk('marlowe'); Q.pick('What happens now'); Q.close();
           return { ok, s2: Q.st('s2'), chapter: HP.S.chapter, paid: +(HP.S.money - m0).toFixed(2), jos, meat: HP.S.inv.meat_raw || 0 }; })()""")
-        check('camp: feeding the outfit ends Chapter 1 (Chapter 2 unlocked in the journal, a share from the camp tin, Marlowe talks about the Cranes)', r['ok'] and r['s2'] == 'done' and r['chapter'] == 2 and r['paid'] == 3 and any('What happens now' in c for c in r['jos']), r)
+        check('camp: feeding the outfit ends Chapter 1 (Chapter 2 unlocked in the journal, a share from the camp tin, Marlowe has the mill job ready)', r['ok'] and r['s2'] == 'done' and r['chapter'] == 2 and r['paid'] == 3 and any('Tell me what you know' in c for c in r['jos']), r)
+        # ---------- Chapter 2: Crane Money ----------
+        r = await ev(pg, """(()=>{ HP.sim(6); document.querySelectorAll('.toast').forEach(t => t.remove()); const st0 = Q.st('s3'); const c = Q.talk('marlowe'); Q.pick('Why the Cranes'); Q.pick('Continue'); const ok = Q.pick('I'); Q.pick('Continue'); Q.close(); HP.sim(0.3);
+          const st = Q.stage('s3'); HP.tp(MILL.x - 40, MILL.z + 5); HP.sim(1); const st2 = Q.stage('s3'), cranes = HP.NPC.all.filter(n => n.group === 'crane').length, d = HP.NPC.byKey('dutchy');
+          HP.Dialog.start(d, SAGA.dutchyTree(d)); const ch = HP.choices(); Q.pick('"You look hungry'); Q.close(); HP.sim(0.5); const offer = [HP.S.decisions.s3_dutchy, HP.S.flags.dutchy_offer];
+          const P = HP.Game.player, box = Carry.list.find(c => c.id === 'strongbox'); HP.tp(box.mesh.position.x + 0.6, box.mesh.position.z); HP.sim(0.3); const pk = HP.press('Pick up strongbox'); HP.sim(1.5);
+          return { st0, c, ok, st, st2, cranes, ch, offer, pk, carrying: !!(P.carry && P.carry.id === 'strongbox'), st3: Q.stage('s3'), alarm: HP.Missions.ctx.m.c.alarm || 0 }; })()""")
+        check('ch2: Marlowe gives the mill job; the Cranes are at Coyote Mill; Dutchy can be offered a way out; the box comes out unseen', r['st0'] == 'available' and r['ok'] and r['st'] == 'ride' and r['st2'] == 'take' and r['cranes'] >= 3 and r['offer'] == ['offered', True] and r['pk'] and r['carrying'] and r['st3'] == 'return' and not r['alarm'], r)
+        r = await ev(pg, """(()=>{ const m0 = HP.S.money, h0 = HP.S.honor; Q.near('marlowe', 1.4); HP.sim(0.3); const c = Q.talk('marlowe'); const ok = Q.pick('[Hand it over]'); Q.pick('Continue'); Q.close(); HP.sim(1);
+          return { c, ok, s3: Q.st('s3'), out: HP.Missions.st('s3').outcome, paid: +(HP.S.money - m0).toFixed(2), honor: HP.S.honor - h0, chapter: HP.S.chapter, mill: HP.S.locations.mill, cranes: HP.NPC.all.filter(n => n.group === 'crane').length, dutchy: HP.S.chars.dutchy, carry: !!HP.Game.player.carry, unaware: HP.S.flags.crane_unaware }; })()""")
+        check('ch2: handing Josiah the whole box pays a share and honor, ends the chapter, and the Cranes never learn who robbed them', r['ok'] and r['s3'] == 'done' and r['paid'] == 18 and r['honor'] > 0 and r['chapter'] == 3 and r['cranes'] == 0 and r['dutchy'] == 'deserted' and not r['carry'] and r['unaware'] and 'every dollar' in r['out'], r)
         r = await ev(pg, """(()=>{ UI.open('story'); const t = document.getElementById('pBody').textContent; UI.close(); return { ashes: t.includes('Ashes'), marlowe: t.includes('Josiah Marlowe'), noOld: !t.includes('Cold Trail') }; })()""")
         check('journal: the Story tab shows the saga\'s chapters and people', r['ashes'] and r['marlowe'] and r['noOld'], r)
         # save, reload, continue
         await ev(pg, "HP.Save.save(true)"); await pg.wait_for_timeout(500); await pg.reload(); await pg.wait_for_function('document.getElementById("loading").textContent===""', timeout=180000); await pg.click('#bCont'); await pg.wait_for_timeout(500); await ev(pg, H)
         r = await ev(pg, "(()=>{ HP.sim(1); return { story: HP.S.story, s1: Q.st('s1'), s2: Q.st('s2'), how: HP.S.decisions.s1_med, gang: !!HP.NPC.byKey('marlowe'), m1: Q.st('m1') }; })()")
-        check('save: continuing keeps the saga, its decisions and the camp', r == {'story': 'saga', 's1': 'done', 's2': 'done', 'how': 'favor', 'gang': True, 'm1': 'locked'}, r)
+        r2 = await ev(pg, "[Q.st('s3'), HP.S.decisions.s3_box, HP.S.chapter]")
+        check('save: continuing keeps the saga, its decisions and the camp', r == {'story': 'saga', 's1': 'done', 's2': 'done', 'how': 'favor', 'gang': True, 'm1': 'locked'} and r2 == ['done', 'all', 3], [r, r2])
         check('no page errors (saga)', not [e for e in errs if 'favicon' not in e], errs[:3]); await b.close()
 
         # the other three ways to get the kit
@@ -60,6 +71,11 @@ async def main():
         check('kit: paying $10 works when Wren has it', r['paid']['how'] == 'paid' and r['paid']['money'] == 2 and r['paid']['kit'] == 1 and r['paid']['st'] == 'back', r['paid'])
         check('kit: taking it at gunpoint costs honor and the doctor remembers', r['threat']['how'] == 'threat' and r['threat']['honor'] <= -8 and r['threat']['kit'] == 1 and r['threat']['robbed'], r['threat'])
         check('kit: it can be lifted from the washstand while the doctor is out', r['stole']['took'] and r['stole']['how'] == 'stole' and r['stole']['kit'] == 1 and r['stole']['st'] == 'back', r['stole'])
+        r = await ev(pg, """(()=>{ HP.S.missions.s1.status = 'done'; HP.S.missions.s2 = { status: 'done', stage: 0, c: {}, opt: {}, outcome: '' }; HP.Missions.active = null; HP.S.activeMission = null; HP.Missions.ctx = null; HP.Missions.refresh(); HP.Missions.start('s3'); HP.tp(MILL.x - 40, MILL.z + 5); HP.sim(1);
+          const P = HP.Game.player, f = HP.NPC.byKey('fenwick'); f.alertGroup(P.pos); HP.sim(0.5); const alarm = HP.Missions.ctx.m.c.alarm; const box = Carry.list.find(c => c.id === 'strongbox'); HP.tp(box.mesh.position.x + 0.6, box.mesh.position.z); P.inv = 1e9; HP.sim(0.2); HP.press('Pick up strongbox'); HP.sim(1.2); const st = Q.stage('s3');
+          for (const n of HP.NPC.all.slice()) if (n.group === 'crane' && n.alive) n.takeHit({ dmg: 999, from: P, gun: 'revolver' }); HP.sim(1); const st2 = Q.stage('s3'); const m0 = HP.S.money, h0 = HP.S.honor; Q.near('marlowe', 1.4); HP.sim(0.3); Q.talk('marlowe'); Q.pick('[Lie]'); Q.pick('Continue'); Q.close(); HP.sim(1);
+          return { alarm, st, st2, s3: Q.st('s3'), paid: +(HP.S.money - m0).toFixed(2), honor: HP.S.honor - h0, war: HP.S.flags.crane_war, out: HP.Missions.st('s3').outcome, fen: HP.S.chars.fenwick }; })()""")
+        check('ch2: going in loud means fighting clear of the Cranes; keeping $45 back costs honor and starts a feud', r['alarm'] and r['st'] == 'escape' and r['st2'] == 'return' and r['s3'] == 'done' and r['paid'] == 45 and r['honor'] < 0 and r['war'] and 'Kept $45' in r['out'], r)
         check('no page errors (kit routes)', not [e for e in errs if 'favicon' not in e], errs[:3]); await b.close()
 
         # the classic story from its own button

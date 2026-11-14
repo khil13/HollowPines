@@ -4777,7 +4777,7 @@ const Duel = {
    in him. What is left of the outfit is hiding at Hollow Cabin, broke, hungry and hunted. Over six chapters the jobs get
    bigger and Josiah Marlowe gets harder to follow, and Wren has to decide what she owes a family that is coming apart.
    New games start this story (S.story === 'saga'); the original land-grab story stays in the game as the classic story.
-   Playable so far: Chapter 1. Chapters 2 to 6 are outlined in SAGA.CHAPTERS and will be built on this file. */
+   Playable so far: Chapters 1 and 2. Chapters 3 to 6 are outlined in SAGA.CHAPTERS and will be built on this file. */
 const SAGA = {
   on() { return S.story === 'saga'; },
   CAMP: { x: -146.5, z: -76.5 }, BED: { x: -151.6, z: -83.7 },
@@ -4794,7 +4794,7 @@ const SAGA = {
   },
   CHAPTERS: [
     { n: 1, title: 'Ashes', playable: true, text: 'Eleven days after Bitter Creek. Eli is gut-shot, the camp is starving, and nobody has said out loud that the job was a mistake.' },
-    { n: 2, title: 'Honest Work', playable: false, text: 'Marlowe wants a stake. The Crane gang\'s whiskey money sits at Coyote Mill, and Fenwick Crane does not know the outfit is in his valley yet.' },
+    { n: 2, title: 'Honest Work', playable: true, text: 'Marlowe wants a stake. The Crane gang\'s whiskey money sits at Coyote Mill, and Fenwick Crane does not know the outfit is in his valley yet.' },
     { n: 3, title: 'The Halvorsen Payroll', playable: false, text: 'The same railroad, the same money, a second try: the payroll comes through Tamarack Pass. Scout it, plan it, and choose how loud it gets.' },
     { n: 4, title: 'Thicker Than Water', playable: false, text: 'A railroad detective reaches Juniper Gap with a list of names. Somebody in camp has been talking to her.' },
     { n: 5, title: 'Preacher\'s War', playable: false, text: 'Marlowe means to burn his way out of the valley, starting with the town. Wren can ride with him or ride ahead of him.' },
@@ -4872,7 +4872,9 @@ const SAGA = {
   /* ---------- camp talk ---------- */
   line(n, lines) { return pick(lines); },
   talkMarlowe(n) {
-    const s1 = Missions.st('s1'), s2 = Missions.st('s2'), st = this.stage('s1');
+    const s1 = Missions.st('s1'), s2 = Missions.st('s2'), s3 = Missions.st('s3'), st = this.stage('s1'), st3 = this.stage('s3'), P = Game.player, box = P.carry && P.carry.id === 'strongbox';
+    if (st3 === 'return' && box) return this.boxTree(n);
+    if (s3.status === 'available' || s3.status === 'active' || s3.status === 'done') return this.marloweCh2(n, s3, st3);
     return {
       start: { on: () => { if (st === 'camp' && !S.flags.saga_briefed) S.flags.saga_briefed = true; },
         text: () => st === 'camp' ? 'Wren. Sit a minute. Your brother had a bad night. Bill has done what a teamster can do with whiskey and a bootlace, and it is not enough. There is a doctor in Juniper Gap, southeast, where the two roads meet. I need you to go and get what a doctor has.'
@@ -4893,6 +4895,57 @@ const SAGA = {
       creek2: { text: 'I think it is a small valley and we are a smaller family. Do not carry that thought around camp for me. Carry it quietly.' },
       creek3: { text: 'It was my plan. So you are saying the dead are mine. They are. I have not asked anyone else to hold them. But mind how you say it in front of the others, Wren. A family that doubts its father does not eat.' },
       next: { text: 'Now we get well, and then we get paid. Fenwick Crane keeps his takings in a strongbox at Coyote Mill, and he does not know we are in his valley. I mean to introduce us. Not today. When Eli can sit a horse.' },
+    };
+  },
+  marloweCh2(n, s3, st3) {
+    return {
+      start: { text: () => s3.status === 'available' ? 'Eli sat a horse this morning. Twice round the yard and he only cursed once. So. Coyote Mill, east across Willow Bridge. Fenwick Crane sells rotgut to three counties and keeps what he makes in an iron box, because no bank will have him. I want that box, Wren.'
+          : st3 === 'return' ? 'Where is it? I do not see an iron box. Bring it here, to my hand.'
+          : s3.status === 'active' ? 'East across Willow Bridge. A lookout on the west side, a boy, more frightened than he looks. The box is inside the mill. Quiet, if you can be.'
+          : this.line(n, S.decisions.s3_box === 'skim' ? ['I counted that box twice, Wren. Fenwick Crane is a careless man, but he is not that careless. I will say no more. Today.', 'There is a railroad payroll that owes us, and it comes through Tamarack Pass. I am listening for when.'] : ['You did well at the mill. I told the others so. Cole did not enjoy hearing it.', 'There is a railroad payroll that owes us, and it comes through Tamarack Pass. I am listening for when.', S.flags.crane_war ? 'Fenwick Crane knows our faces now. Good. Let him lie awake.' : 'Fenwick Crane is looking for a thief and does not know where to look. I find that restful.']),
+        choices: [
+          { text: 'I\'ll do it. Tell me what you know.', hide: () => s3.status !== 'available', do: () => Missions.start('s3'), next: 'brief' },
+          { text: 'Why the Cranes, and not the railroad?', hide: () => s3.status !== 'available', next: 'why' },
+          { text: 'Not yet.', hide: () => s3.status !== 'available', next: null },
+          { text: 'What went wrong at Bitter Creek, Josiah?', hide: () => s3.status === 'available', next: 'creek' },
+          { text: 'Later.', hide: () => s3.status === 'available', next: null },
+        ] },
+      why: { text: 'Because the railroad has detectives and Fenwick Crane has cousins. Because a thief cannot go to the law. And because I will not ask this family to face rifles again until it has eaten for a month. Does that satisfy you?', next: 'start' },
+      brief: { text: 'Four of them at most. Fenwick, two hands, and the boy on lookout, name of Dutchy. Buy the boy, scare him or go round him, I do not care which. Tess wanted to come and I said no; one rider is a traveler, two is a raid. Take the box and bring it here. Not to Bill, not to Cole. To me.' },
+      creek: { text: 'Somebody told the Halvorsen men we were coming. I have gone through it every night since, name by name. Do not ask me again until I have an answer I can live with.' },
+    };
+  },
+  /* setting the strongbox down in front of Marlowe: hand it all over, or keep some back first */
+  boxTree(n) {
+    const give = how => { const P = Game.player, b = P.carry; P.carry = null; if (b) Carry.remove(b); S.decisions.s3_box = how; S.flags.s3_delivered = true;
+      if (how === 'all') { Inv.money(18, 'your share'); Rep.honor(4, 'dealt straight with the outfit'); journal('Put Crane\'s box in Josiah\'s hands, every dollar. He counted out shares at the fire like a man dealing cards.', 'decision'); }
+      else { Inv.money(45, 'kept back from the box'); Rep.honor(-6, 'stole from your own'); S.flags.skimmed_outfit = true; journal('I took forty-five dollars out of Crane\'s box before Josiah saw it. For Eli and me, for after. I told myself that. Tess watched me do the buckle back up.', 'decision'); } };
+    return {
+      start: { text: 'There it is. Lord, the weight of it. Set it down, Wren. Is it all there?', choices: [
+          { text: '[Hand it over] All of it. I didn\'t open it.', do: () => give('all'), next: 'all' },
+          { text: '[Lie] All of it. (You took $45 out on the road.)', do: () => give('skim'), next: 'skim' } ] },
+      all: { text: 'Two hundred and twelve dollars. Shares tonight, and the rest goes in the tin for when we ride. You see, all of you? This is what we are when we hold together.' },
+      skim: { text: 'One hundred and sixty-seven. ...Fenwick Crane sells whiskey to three counties and this is all he keeps? Well. Shares tonight. We will speak of arithmetic another time.' },
+    };
+  },
+  /* Dutchy Moss on lookout at the mill, saga version: he can be bought, scared off, talked past or offered a way out */
+  dutchyWatch(dt, me) {
+    const m = Missions.st('s3'); if (m.status !== 'active' || m.c.alarm || m.c.dutchy || Dialog.open) return; const P = Game.player;
+    if (me.seesPlayer && me.distP < 13 && !P.crouch) { m.c.dutchy = 1; me.face(P.pos); me.say('Hold it right there!'); Dialog.start(me, this.dutchyTree(me)); }
+  },
+  dutchyTree(me) {
+    const m = Missions.st('s3');
+    return {
+      start: { text: 'That\'s far enough. This is Crane ground. Who are you, and what do you want with it?', choices: [
+        { text: 'Bribe him ($8)', cond: () => S.money >= 8, why: 'Need $8', do: () => { Inv.money(-8, 'to Dutchy'); S.decisions.s3_dutchy = 'bribed'; Rep.rel('dutchy', 25); STORY.distractGang(me); }, next: 'bribed' },
+        { text: '"You look hungry. I know an outfit that feeds its people."', do: () => { S.decisions.s3_dutchy = 'offered'; S.flags.dutchy_offer = true; Rep.rel('dutchy', 30); Rep.honor(2, 'offered the boy a way out'); STORY.distractGang(me); }, next: 'offer' },
+        { text: 'Threaten him (gun drawn)', cond: () => Game.player.weapon !== 'fists', why: 'Draw a gun first', do: () => { S.decisions.s3_dutchy = 'threatened'; Rep.rel('dutchy', -20); me.fled = true; me.state = 'scripted'; me.say('Don\'t shoot! I\'m gone!'); me.script = (dt, n) => { n.moveTo(170, -40, 5, dt); }; later(() => { const f = NPC.byKey('fenwick') || NPC.byKey('sal'); if (f && f.alive && !m.c.boxTaken) { f.say('Dutchy? What\'s he yelling about?'); f.alertGroup(Game.player.pos); } }, 7000); }, next: 'threat' },
+        { text: 'Back off', do: () => { m.c.dutchy = 0; m.c.dutchyWarned = (m.c.dutchyWarned || 0) + 1; if (m.c.dutchyWarned > 1) { me.say('I warned you!'); me.alertGroup(Game.player.pos); } }, next: null },
+        { text: 'Attack', do: () => { S.decisions.s3_dutchy = 'fought'; me.alertGroup(Game.player.pos); }, next: null },
+      ] },
+      bribed: { text: 'Eight dollars. Fenwick owes me nine weeks. ...The box is in the mill. I\'ll call them down to the creek. You get a minute, and you never saw me.' },
+      offer: { text: 'Feeds them. Real food? ...I ain\'t had a hot supper since the thaw. Where? No, don\'t say it here. Hollow Cabin way, I\'ve seen the smoke. I\'ll get them down to the creek. If I come looking for that supper, you tell your people not to shoot.' },
+      threat: { text: 'Okay! Okay! I ain\'t dying for Fenwick Crane!' },
     };
   },
   talkBill(n) {
@@ -4988,15 +5041,42 @@ Missions.def({ id: 's2', saga: true, type: 'main', chapter: 1, title: 'Empty Bel
   fail: [],
   complete: ctx => { S.chapter = Math.max(S.chapter, 2); Inv.money(3, 'your share of the camp tin'); if (ctx.m.opt.clean || ctx.m.c.clean) Rep.honor(2, 'a clean kill'); ctx.m.outcome = 'The outfit ate' + (ctx.m.c.clean ? ' · one clean shot' : '');
     journal('We ate like people tonight. Josiah said grace for four minutes and then told us about a mill east of the river where Fenwick Crane keeps his money. Tess looked at me across the fire. I looked at the fire.', 'note');
-    later(() => UI.banner('End of Chapter 1', 'Ashes', 'Chapter 2, "Honest Work", is still being written. The valley is open: bounties, strangers, hunting and the saloon are all there.'), 4500); },
+    later(() => UI.banner('Chapter 2', 'Honest Work', 'Josiah has a job. Speak with him at the fire.'), 4500); },
   cleanup: () => {}, failOutcome: () => 'The camp went hungry.',
 });
+
+Missions.def({ id: 's3', saga: true, type: 'main', chapter: 2, title: 'Crane Money', giver: 'marlowe', summary: 'Fenwick Crane keeps his whiskey money in an iron box at Coyote Mill. Josiah wants it.',
+  prereq: () => SAGA.on() && Missions.st('s2').status === 'done',
+  start: () => { const n = NPC.byKey('marlowe'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : null; },
+  stages: [
+    { id: 'ride', text: 'Ride east across Willow Bridge to Coyote Mill.', objectives: [O.goto('mill', 'Ride to Coyote Mill', MILL.x, MILL.z, 48)], enter: () => { S.locations.mill = 'gang'; World.apply(); } },
+    { id: 'take', text: 'Take the Cranes\' strongbox. Buy the lookout, scare him, go round him, or fight.', objectives: [O.check('box', 'Take the strongbox from the mill', ctx => ctx.m.c.boxTaken, () => ({ x: 138, z: -87, y: 4 })), O.check('unseen', 'Optional: take it without raising the alarm', ctx => ctx.m.c.boxTaken && !ctx.m.c.alarm, null, { optional: true })],
+      enter: ctx => { if (!ctx.box) { const b = Carry.make('strongbox', 138, -87.5); b.mesh.position.y = Col.ground(138, -87.5, 5) + 0.2; ctx.box = b; b.onPick = () => { ctx.m.c.boxTaken = 1; }; } },
+      on: { alarm: (d, ctx) => { if (d.group === 'crane') ctx.m.c.alarm = 1; } },
+      next: ctx => ctx.m.c.alarm && NPC.all.some(n => n.group === 'crane' && n.alive && !n.downed && !n.fled) ? 'escape' : 'return' },
+    { id: 'escape', text: 'The Cranes are on you. Lose them or put them down.', enter: () => SAGA.ensureBox(), on: { alarm: (d, ctx) => { if (d.group === 'crane') ctx.m.c.alarm = 1; } }, objectives: [O.check('lose', 'Lose the Crane gang or defeat them', () => NPC.all.filter(n => n.group === 'crane' && n.alive && !n.downed && !n.fled && n.state === 'combat').every(n => n.distP > 85))] },
+    { id: 'return', text: 'Carry the strongbox to Josiah Marlowe at Hollow Cabin. Stow it on Biscuit for the ride.', enter: () => SAGA.ensureBox(), on: { alarm: (d, ctx) => { if (d.group === 'crane') ctx.m.c.alarm = 1; } },
+      objectives: [O.flag('deliver', 'Bring the strongbox to Josiah (carry it to him)', 's3_delivered', () => { const n = NPC.byKey('marlowe'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: SAGA.CAMP.x, z: SAGA.CAMP.z }; })] },
+  ],
+  fail: [],
+  complete: ctx => { const m = ctx.m; S.decisions.s3_approach = m.c.alarm ? 'loud' : S.decisions.s3_dutchy === 'bribed' ? 'bribe' : S.decisions.s3_dutchy === 'offered' ? 'offer' : 'stealth';
+    if (m.c.alarm) { S.flags.crane_war = true; Rep.faction('crane', -30); } else S.flags.crane_unaware = true;
+    if (S.decisions.s3_dutchy === 'bribed' || S.decisions.s3_dutchy === 'threatened' || S.decisions.s3_dutchy === 'offered') S.chars.dutchy = 'deserted';
+    S.locations.mill = 'abandoned'; for (const n of NPC.all.slice()) if (n.group === 'crane') NPC.despawn(n); S.chapter = Math.max(S.chapter, 3);
+    m.outcome = `${S.decisions.s3_box === 'all' ? 'Gave Josiah every dollar' : 'Kept $45 back from the outfit'} · ${{ loud: 'the Cranes saw who robbed them', bribe: 'bought the lookout', offer: 'offered Dutchy Moss a way out', stealth: 'in and out unseen' }[S.decisions.s3_approach]}${S.chars.fenwick === 'dead' ? ' · Fenwick Crane killed' : ''}`;
+    journal(m.c.alarm ? 'The Cranes know who took their money. Josiah calls that a message. Bill calls it a second set of people who want us dead.' : 'Fenwick Crane is turning his mill over looking for a thief. Nobody there saw my face.', 'note');
+    later(() => UI.banner('End of Chapter 2', 'Honest Work', 'Chapter 3, "The Halvorsen Payroll", is still being written. The valley is open: bounties, strangers, hunting and the saloon.'), 4500); },
+  cleanup: () => { for (const c of Carry.list.slice()) if (c.id === 'strongbox') Carry.remove(c); },
+  failOutcome: () => 'The Cranes kept their money.',
+});
+SAGA.ensureBox = () => { const P = Game.player; if (S.flags.s3_delivered || S.horseCarry || (P.carry && P.carry.id === 'strongbox') || Carry.list.some(c => c.id === 'strongbox')) return; const f = fwd(P.yaw); Carry.make('strongbox', P.pos.x + f.x, P.pos.z + f.z); };
 
 /* ---------- wiring: the saga and the classic story share one world ---------- */
 { // classic main missions only run in the classic story
   for (const id of Missions.order) { const d = Missions.defs[id]; if (d.saga || d.type !== 'main') continue;
     const pr = d.prereq, tk = d.tick; d.prereq = () => !SAGA.on() && (!pr || pr()); if (tk) d.tick = (dt, m) => { if (!SAGA.on()) tk(dt, m); }; }
   const spawn = STORY.spawnWorldNPCs.bind(STORY); STORY.spawnWorldNPCs = function () { spawn(); if (!SAGA.on()) return; for (const c of SAGA.roster()) { if ((c.cond && !c.cond()) || NPC.byKey(c.key)) continue; NPC.spawn(c); } };
+  const dw = STORY.dutchyWatch.bind(STORY); STORY.dutchyWatch = (dt, me) => SAGA.on() ? SAGA.dutchyWatch(dt, me) : dw(dt, me);
   const doc = STORY.talkDoc.bind(STORY); STORY.talkDoc = n => SAGA.on() && SAGA.stage('s1') === 'med' && !Inv.count('medkit') ? SAGA.docTree(n) : doc(n);
 }
 
