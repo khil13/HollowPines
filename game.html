@@ -2005,7 +2005,10 @@ class Player {
       if (Input.hit('b') || Input.tb('camp')) Camp.make();
       if ((Input.hit('x') || Input.tb('dodge')) && !this.grab && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
-    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
+    // Call of Duty Mobile style on phones: with a gun out the crosshair is always up and shots go where it points (hip fire);
+    // the Aim button only zooms in and steadies the shot (ADS). Running lowers the gun.
+    const ads = Input.mouse.r || Input.aimToggle, hipReady = Input.touch && Settings.v.codAim !== false && !(I.sprint && I.mag > 0.2);
+    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (ads || hipReady); this.hipOnly = aiming && !ads;
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !this.grab && !aiming && this.state === 'ground'; this.blockT = this.blocking ? (this.blockT || 0) + dt : 0; // how long the guard has been up (a fresh one counters)
     this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry || this.grab ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
     this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
@@ -2032,7 +2035,7 @@ class Player {
   step(dt, I, aiming) { // one fixed physics step: speed, facing, gravity, jumping, collision
     const swimming = this.state === 'swim', tired = S.p.st < 1; let spd = this.crouch ? PLAYER.CROUCH : I.walk ? PLAYER.WALK : PLAYER.JOG;
     if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = PLAYER.SPRINT * (1 + S.p.xpSt * 0.0004); S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
-    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.grab) spd = 0; if (this.anim.busy() || !this.canAct()) spd = 0;
+    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, this.hipOnly ? 4.4 : 2.2); if (this.blocking) spd = 1.2; if (this.grab) spd = 0; if (this.anim.busy() || !this.canAct()) spd = 0;
     if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
     this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45;
     this.stagger = Math.max(0, (this.stagger || 0) - dt); if (this.stagger > 0 && !swimming) spd *= 0.35; if (S.p.hp < S.p.maxHp * 0.25 && !swimming) spd = Math.min(spd, PLAYER.JOG * 0.8); // badly hurt: a limp, no running // brief recovery after a hard landing
@@ -2081,7 +2084,7 @@ class Player {
     // target lock (aim assist): nearest hostile/animal in the camera cone
     const prevLock = this.lock; this.lock = null; if (aiming) { const cf = Game.cam.dir(); let best = 0.0; if (prevLock && prevLock.alive && !prevLock.downed) { const dx = prevLock.pos.x - Game.cam.pos.x, dy = (prevLock.pos.y + prevLock.hitH) - Game.cam.pos.y, dz = prevLock.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if ((dx * cf.x + dy * cf.y + dz * cf.z) / d > 0.94 && d < 45) { this.lock = prevLock; best = 2; } } for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > (this.weapon === 'rifle' ? 70 : 40)) continue; const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; const cone = Input.touch ? 0.9 : 0.985; if (dot > cone && dot > best && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; this.lock = h; } } }
     // brandishing at townsfolk
-    if (aiming && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
+    if (aiming && !this.hipOnly && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
     if (DeadEye.on) { if (atk && aiming) DeadEye.mark(this); return; } // in Dead Eye a trigger pull paints a target
     if (!atk || this.cool > 0 || this.anim.busy()) return;
     if (this.carry) return; // hands full
@@ -2111,7 +2114,7 @@ class Player {
       const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; if (dot < 0.9) continue; const sc = dot + (h.hostileToPlayer || h.state === 'combat' ? 0.1 : 0) - d * 0.0005; if (sc > bs && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { bs = sc; best = h; } }
     return best;
   }
-  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02) * (Skills.has('gun', 2) ? 0.85 : 1) * (Input.touch ? 0.5 : 1); } /* whiskey makes the aim wander */
+  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02 + (this.hipOnly ? 0.014 : 0)) * (Skills.has('gun', 2) ? 0.85 : 1) * (Input.touch ? 0.5 : 1); } /* whiskey makes the aim wander */
   shoot(aimed) {
     const w = this.weapon; if (this.reloading) return; if (S.ammoClip[w] <= 0) { Sfx.tone(1200, 0.03, 0.05, 'square'); this.reload(); return; }
     const g = GUN[w], boost = S.upgrades.barrel && w === 'revolver' ? 1.25 : 1, range = g.range * boost;
@@ -2157,7 +2160,7 @@ class Player {
       const a = this.state === 'mount' ? side : seat, b = this.state === 'mount' ? seat : side; this.pos.lerpVectors(a, b, ease(u)); const sd = this.rig.isModel ? 0.24 : 0.64; this.pos.y += Math.sin(u * Math.PI) * 0.5 - (this.state === 'mount' ? sd * ease(u) : sd * (1 - ease(u))); this.yaw = dampAngle(this.yaw, H.yaw, 10, dt);
       this.anim.update(dt, { state: u > 0.6 && this.state === 'mount' ? 'ride' : 'ground', speed: 0 }); this.place();
       if (u >= 1) { if (this.state === 'mount') { this.state = 'ride'; H.rider = this; } else { this.state = 'ground'; this.pos.y = Col.ground(this.pos.x, this.pos.z, this.pos.y + 1); } } return; }
-    if (this.canAct()) { const aiming = this.weapon !== 'fists' && (Input.mouse.r || Input.aimToggle); this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
+    if (this.canAct()) { const ads = Input.mouse.r || Input.aimToggle, aiming = this.weapon !== 'fists' && (ads || (Input.touch && Settings.v.codAim !== false)); this.hipOnly = aiming && !ads; this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
       if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon(); if ((Input.hit('2') || Input.tb('w2')) && S.weapons.revolver) this.setWeapon('revolver'); if ((Input.hit('3') || Input.tb('w3')) && S.weapons.rifle) this.setWeapon('rifle'); if ((Input.hit('1') || Input.tb('w1'))) this.setWeapon('fists');
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (this.weapon !== 'fists' && (Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && this.cool <= 0) { if (aiming) this.combat(dt, true); else this.shoot(false); } else if (aiming) this.combat(dt, true); }
@@ -5302,6 +5305,7 @@ const UI = {
     <label class="range">Button size <select id="setBtn">${[[0.85, 'Small'], [1, 'Medium'], [1.2, 'Large']].map(([v, n]) => `<option value="${v}" ${+V.btnScale === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="range"><input type="checkbox" id="setLefty" ${V.lefty ? 'checked' : ''}> Left-handed layout (stick on the right, buttons on the left)</label>
     <label class="range"><input type="checkbox" id="setRun" ${V.autoRun !== false ? 'checked' : ''}> Push the stick to the edge to run</label>
+    <label class="range"><input type="checkbox" id="setCod" ${V.codAim !== false ? 'checked' : ''}> Crosshair always up with a gun drawn (fire from the hip; Aim zooms)</label>
     <label class="range">Aim assist<select id="setAA">${[['0', 'Off'], ['1', 'Light'], ['2', 'Strong']].map(([v, n]) => `<option value="${v}" ${String(V.aimAssist === undefined ? (Input.touch ? 2 : 0) : V.aimAssist) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="range">Look speed while aiming<input type="range" id="setAsens" min="0.4" max="2.5" step="0.05" value="${V.aimSens || 1}"><span>${(V.aimSens || 1).toFixed(2)}</span></label>
     <label class="range"><input type="checkbox" id="setAF" ${V.autoFire !== false ? 'checked' : ''}> Fire automatically when the sights are on an attacker</label>
@@ -5317,7 +5321,7 @@ const UI = {
     on('setZoom', 'input', e => { Game.cam.zoom = +e.target.value; Settings.set('zoom', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(1); });
     on('setTsens', 'input', e => { Settings.set('tsens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); });
     on('setBtn', 'change', e => { Settings.set('btnScale', +e.target.value); Input.applyLayout(); }); on('setLefty', 'change', e => { Settings.set('lefty', e.target.checked); Input.applyLayout(); });
-    on('setRun', 'change', e => Settings.set('autoRun', e.target.checked)); on('setAF', 'change', e => Settings.set('autoFire', e.target.checked)); on('setAA', 'change', e => Settings.set('aimAssist', +e.target.value)); on('setAsens', 'input', e => { Settings.set('aimSens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); }); on('setHap', 'change', e => Settings.set('haptics', e.target.checked));
+    on('setRun', 'change', e => Settings.set('autoRun', e.target.checked)); on('setAF', 'change', e => Settings.set('autoFire', e.target.checked)); on('setCod', 'change', e => Settings.set('codAim', e.target.checked)); on('setAA', 'change', e => Settings.set('aimAssist', +e.target.value)); on('setAsens', 'input', e => { Settings.set('aimSens', +e.target.value); e.target.nextElementSibling.textContent = (+e.target.value).toFixed(2); }); on('setHap', 'change', e => Settings.set('haptics', e.target.checked));
     on('setInv', 'change', e => Settings.set('invertY', e.target.checked)); on('setAuto', 'change', e => Settings.set('autoCam', e.target.checked));
     on('setLock', 'change', e => { Settings.set('mouseLock', e.target.checked); if (!e.target.checked && document.pointerLockElement) document.exitPointerLock(); });
     on('setQ', 'change', e => Settings.set('quality', e.target.value)); on('setVol', 'input', e => { Settings.set('sound', +e.target.value); e.target.nextElementSibling.textContent = Math.round(e.target.value * 100) + '%'; });
@@ -5636,7 +5640,7 @@ class CamRig {
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) { Settings.v.zoom = this.zoom; clearTimeout(this._zs); this._zs = setTimeout(() => Settings.save(), 600); } } /* remember the zoom once you stop scrolling */
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
-    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { const a = 0.6 * (Settings.v.aimSens || 1) * (P.hover && P.hover.h ? 0.6 : 1); dx *= a; dy *= a; } // finer thumb aim, finer still with the sights on someone
+    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { const a = (P.hipOnly ? 0.85 : 0.6) * (Settings.v.aimSens || 1) * (P.hover && P.hover.h ? 0.6 : 1); dx *= a; dy *= a; } // finer thumb aim, finer still with the sights on someone
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
     if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') { if (P.rig && P.rig.root) P.rig.root.visible = true; return this.convo(dt); }
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
@@ -5659,7 +5663,7 @@ class CamRig {
     const lc = Brawl.lastCounter, close = aim || riding ? null : P.grab || (lc && Game.time - lc.t < 1.4 && lc.n.alive ? lc.n : null) || (Duel.on ? Duel.n : null) || (foe && fd < 2.6 && P.weapon === 'fists' && foe instanceof Person && (foe.fists || !foe.gun) ? foe : null);
     this.cine = damp(this.cine || 0, close ? 1 : 0, 4, dt); this.closeFoe = close;
     if (close && this.idleT > 0.35) { const a = Math.atan2(close.pos.x - P.pos.x, close.pos.z - P.pos.z) + 0.38; this.yaw = dampAngle(this.yaw, a, 5 * this.cine, dt); this.pitch = damp(this.pitch, 0.14, 3 * this.cine, dt); }
-    const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
+    const hip = aim && P.hipOnly; const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? (hip ? (riding ? 4.6 : 3.1) : 2.1) : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
@@ -5680,7 +5684,7 @@ class CamRig {
     this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
     if (P.rig && P.rig.root) P.rig.root.visible = this.pos.distanceTo(base) > 0.85 || P.state === 'ride'; // pressed into a corner: don't look out from inside Wren's head
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
-    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
+    const fov = damp(this.cam.fov, aim && !hip ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }
   convo(dt) { // two-shot conversation framing
     const P = Game.player, N = Dialog.npc.pos, dxx = N.x - P.pos.x, dzz = N.z - P.pos.z, L = Math.hypot(dxx, dzz) || 1, ux = dxx / L, uz = dzz / L; const mid = new THREE.Vector3((N.x + P.pos.x) / 2, Math.max(N.y, P.pos.y) + 1.45, (N.z + P.pos.z) / 2);

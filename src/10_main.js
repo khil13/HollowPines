@@ -102,7 +102,7 @@ class CamRig {
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) { Settings.v.zoom = this.zoom; clearTimeout(this._zs); this._zs = setTimeout(() => Settings.save(), 600); } } /* remember the zoom once you stop scrolling */
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
-    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { const a = 0.6 * (Settings.v.aimSens || 1) * (P.hover && P.hover.h ? 0.6 : 1); dx *= a; dy *= a; } // finer thumb aim, finer still with the sights on someone
+    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { const a = (P.hipOnly ? 0.85 : 0.6) * (Settings.v.aimSens || 1) * (P.hover && P.hover.h ? 0.6 : 1); dx *= a; dy *= a; } // finer thumb aim, finer still with the sights on someone
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
     if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') { if (P.rig && P.rig.root) P.rig.root.visible = true; return this.convo(dt); }
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
@@ -125,7 +125,7 @@ class CamRig {
     const lc = Brawl.lastCounter, close = aim || riding ? null : P.grab || (lc && Game.time - lc.t < 1.4 && lc.n.alive ? lc.n : null) || (Duel.on ? Duel.n : null) || (foe && fd < 2.6 && P.weapon === 'fists' && foe instanceof Person && (foe.fists || !foe.gun) ? foe : null);
     this.cine = damp(this.cine || 0, close ? 1 : 0, 4, dt); this.closeFoe = close;
     if (close && this.idleT > 0.35) { const a = Math.atan2(close.pos.x - P.pos.x, close.pos.z - P.pos.z) + 0.38; this.yaw = dampAngle(this.yaw, a, 5 * this.cine, dt); this.pitch = damp(this.pitch, 0.14, 3 * this.cine, dt); }
-    const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
+    const hip = aim && P.hipOnly; const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? (hip ? (riding ? 4.6 : 3.1) : 2.1) : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
@@ -146,7 +146,7 @@ class CamRig {
     this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
     if (P.rig && P.rig.root) P.rig.root.visible = this.pos.distanceTo(base) > 0.85 || P.state === 'ride'; // pressed into a corner: don't look out from inside Wren's head
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
-    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
+    const fov = damp(this.cam.fov, aim && !hip ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }
   convo(dt) { // two-shot conversation framing
     const P = Game.player, N = Dialog.npc.pos, dxx = N.x - P.pos.x, dzz = N.z - P.pos.z, L = Math.hypot(dxx, dzz) || 1, ux = dxx / L, uz = dzz / L; const mid = new THREE.Vector3((N.x + P.pos.x) / 2, Math.max(N.y, P.pos.y) + 1.45, (N.z + P.pos.z) / 2);

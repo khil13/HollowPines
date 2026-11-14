@@ -107,7 +107,10 @@ class Player {
       if (Input.hit('b') || Input.tb('camp')) Camp.make();
       if ((Input.hit('x') || Input.tb('dodge')) && !this.grab && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
-    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (Input.mouse.r || Input.aimToggle);
+    // Call of Duty Mobile style on phones: with a gun out the crosshair is always up and shots go where it points (hip fire);
+    // the Aim button only zooms in and steadies the shot (ADS). Running lowers the gun.
+    const ads = Input.mouse.r || Input.aimToggle, hipReady = Input.touch && Settings.v.codAim !== false && !(I.sprint && I.mag > 0.2);
+    const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (ads || hipReady); this.hipOnly = aiming && !ads;
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !this.grab && !aiming && this.state === 'ground'; this.blockT = this.blocking ? (this.blockT || 0) + dt : 0; // how long the guard has been up (a fresh one counters)
     this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry || this.grab ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
     this.aiming = aiming; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
@@ -134,7 +137,7 @@ class Player {
   step(dt, I, aiming) { // one fixed physics step: speed, facing, gravity, jumping, collision
     const swimming = this.state === 'swim', tired = S.p.st < 1; let spd = this.crouch ? PLAYER.CROUCH : I.walk ? PLAYER.WALK : PLAYER.JOG;
     if (I.sprint && !tired && !this.crouch && !this.carry && !aiming && I.mag > 0.2) { spd = PLAYER.SPRINT * (1 + S.p.xpSt * 0.0004); S.p.st -= 13 * dt; this.stDelay = 0.9; S.p.xpSt += dt * 0.5; }
-    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, 2.2); if (this.blocking) spd = 1.2; if (this.grab) spd = 0; if (this.anim.busy() || !this.canAct()) spd = 0;
+    if (this.carry) spd = Math.min(spd, 2.3); if (aiming) spd = Math.min(spd, this.hipOnly ? 4.4 : 2.2); if (this.blocking) spd = 1.2; if (this.grab) spd = 0; if (this.anim.busy() || !this.canAct()) spd = 0;
     if (swimming) { spd = I.sprint && S.p.st > 1 ? 3.4 : 2.1; if (I.sprint) { S.p.st -= 8 * dt; this.stDelay = 1; } }
     this.landSlow = Math.max(0, (this.landSlow || 0) - dt); if (this.landSlow > 0 && !swimming) spd *= 0.45;
     this.stagger = Math.max(0, (this.stagger || 0) - dt); if (this.stagger > 0 && !swimming) spd *= 0.35; if (S.p.hp < S.p.maxHp * 0.25 && !swimming) spd = Math.min(spd, PLAYER.JOG * 0.8); // badly hurt: a limp, no running // brief recovery after a hard landing
@@ -183,7 +186,7 @@ class Player {
     // target lock (aim assist): nearest hostile/animal in the camera cone
     const prevLock = this.lock; this.lock = null; if (aiming) { const cf = Game.cam.dir(); let best = 0.0; if (prevLock && prevLock.alive && !prevLock.downed) { const dx = prevLock.pos.x - Game.cam.pos.x, dy = (prevLock.pos.y + prevLock.hitH) - Game.cam.pos.y, dz = prevLock.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if ((dx * cf.x + dy * cf.y + dz * cf.z) / d > 0.94 && d < 45) { this.lock = prevLock; best = 2; } } for (const h of HURTABLE) { if (h === this || !h.alive || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > (this.weapon === 'rifle' ? 70 : 40)) continue; const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; const cone = Input.touch ? 0.9 : 0.985; if (dot > cone && dot > best && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { best = dot; this.lock = h; } } }
     // brandishing at townsfolk
-    if (aiming && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
+    if (aiming && !this.hipOnly && this.lock && this.lock.lawful && !this.lock.hostileToPlayer) { const t = (this.brandish.get(this.lock) || 0) + dt; this.brandish.set(this.lock, t); this.lock.aimedAt(t); } else this.brandish.clear();
     if (DeadEye.on) { if (atk && aiming) DeadEye.mark(this); return; } // in Dead Eye a trigger pull paints a target
     if (!atk || this.cool > 0 || this.anim.busy()) return;
     if (this.carry) return; // hands full
@@ -213,7 +216,7 @@ class Player {
       const dot = (dx * cf.x + dy * cf.y + dz * cf.z) / d; if (dot < 0.9) continue; const sc = dot + (h.hostileToPlayer || h.state === 'combat' ? 0.1 : 0) - d * 0.0005; if (sc > bs && Col.los(Game.cam.pos.x, Game.cam.pos.y, Game.cam.pos.z, h.pos.x, h.pos.y + h.hitH, h.pos.z)) { bs = sc; best = h; } }
     return best;
   }
-  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02) * (Skills.has('gun', 2) ? 0.85 : 1) * (Input.touch ? 0.5 : 1); } /* whiskey makes the aim wander */
+  spread() { const g = GUN[this.weapon] || GUN.revolver; return (g.spread + this.bloom + (Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0) + (this.state === 'ride' ? (Skills.has('ride', 4) ? 0.004 : 0.008) : 0) + Parlor.sway() * 0.02 + (this.hipOnly ? 0.014 : 0)) * (Skills.has('gun', 2) ? 0.85 : 1) * (Input.touch ? 0.5 : 1); } /* whiskey makes the aim wander */
   shoot(aimed) {
     const w = this.weapon; if (this.reloading) return; if (S.ammoClip[w] <= 0) { Sfx.tone(1200, 0.03, 0.05, 'square'); this.reload(); return; }
     const g = GUN[w], boost = S.upgrades.barrel && w === 'revolver' ? 1.25 : 1, range = g.range * boost;
@@ -259,7 +262,7 @@ class Player {
       const a = this.state === 'mount' ? side : seat, b = this.state === 'mount' ? seat : side; this.pos.lerpVectors(a, b, ease(u)); const sd = this.rig.isModel ? 0.24 : 0.64; this.pos.y += Math.sin(u * Math.PI) * 0.5 - (this.state === 'mount' ? sd * ease(u) : sd * (1 - ease(u))); this.yaw = dampAngle(this.yaw, H.yaw, 10, dt);
       this.anim.update(dt, { state: u > 0.6 && this.state === 'mount' ? 'ride' : 'ground', speed: 0 }); this.place();
       if (u >= 1) { if (this.state === 'mount') { this.state = 'ride'; H.rider = this; } else { this.state = 'ground'; this.pos.y = Col.ground(this.pos.x, this.pos.z, this.pos.y + 1); } } return; }
-    if (this.canAct()) { const aiming = this.weapon !== 'fists' && (Input.mouse.r || Input.aimToggle); this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
+    if (this.canAct()) { const ads = Input.mouse.r || Input.aimToggle, aiming = this.weapon !== 'fists' && (ads || (Input.touch && Settings.v.codAim !== false)); this.hipOnly = aiming && !ads; this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
       if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon(); if ((Input.hit('2') || Input.tb('w2')) && S.weapons.revolver) this.setWeapon('revolver'); if ((Input.hit('3') || Input.tb('w3')) && S.weapons.rifle) this.setWeapon('rifle'); if ((Input.hit('1') || Input.tb('w1'))) this.setWeapon('fists');
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (this.weapon !== 'fists' && (Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && this.cool <= 0) { if (aiming) this.combat(dt, true); else this.shoot(false); } else if (aiming) this.combat(dt, true); }
