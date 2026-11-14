@@ -130,11 +130,11 @@ const World = {
     const sc = Game.scene;
     /* --- Juniper Gap --- */
     const store = building({ x: -58, z: 8, w: 10, d: 8, door: 'S', wall: '#d79a5b', roof: '#8a4b33', sign: 'GENERAL STORE', facade: true, name: 'General store' });
-    const saloon = building({ x: -40, z: 7, w: 12, d: 10, door: 'S', wall: '#b9644a', roof: '#5d3a2a', sign: 'THE PINE KNOT', facade: true, name: 'Saloon' });
+    const saloon = building({ x: -40, z: 7, w: 12, d: 10, door: 'S', wall: '#b9644a', roof: '#5d3a2a', sign: 'THE PINE KNOT', facade: true, name: 'Saloon', paper: true, inside: '#a8474a', wainscot: '#5a3220' });
     const sheriff = building({ x: -22, z: 8, w: 8, d: 7, door: 'S', wall: '#c9b18b', roof: '#4a5a6a', sign: 'SHERIFF', facade: true, name: "Sheriff's office" });
-    const maeH = building({ x: -58, z: 34, w: 7, d: 6, door: 'N', wall: '#a8c3a0', roof: '#6b4a3a', name: "Mae's house" });
-    const docH = building({ x: -40, z: 34, w: 8, d: 7, door: 'N', wall: '#e6dcc5', roof: '#a33a2e', sign: 'DOCTOR', name: "Doc Pell's" });
-    const board = building({ x: -22, z: 34, w: 8, d: 6, door: 'N', wall: '#9fb6c9', roof: '#5a4a3a', name: 'Boarding house' });
+    const maeH = building({ x: -58, z: 34, w: 7, d: 6, door: 'N', wall: '#a8c3a0', roof: '#6b4a3a', name: "Mae's house", paper: true, inside: '#b7cdb0' });
+    const docH = building({ x: -40, z: 34, w: 8, d: 7, door: 'N', wall: '#e6dcc5', roof: '#a33a2e', sign: 'DOCTOR', name: "Doc Pell's", paper: true, inside: '#e2dcc6', wainscot: '#8a6a4a' });
+    const board = building({ x: -22, z: 34, w: 8, d: 6, door: 'N', wall: '#9fb6c9', roof: '#5a4a3a', name: 'Boarding house', paper: true, inside: '#a9bccd' });
     store.door.locked = () => (S.time.hour >= 20 || S.time.hour < 7); store.owner = 'mae'; store.private = () => store.door.locked();
     maeH.owner = 'mae'; maeH.private = () => true; docH.owner = 'doc'; docH.private = () => S.time.hour >= 21 || S.time.hour < 7; board.owner = 'hank'; board.private = () => true;
     for (const b of [store, saloon, sheriff, maeH, docH, board]) doorInteract(b.door);
@@ -183,7 +183,7 @@ const World = {
     place('well', -38.6, 21.5, -Math.PI / 2, 'chat'); place('well2', -41.4, 18.6, Math.PI / 2, 'chat'); place('street', -52, 21, 0, 'idle', { wander: 6 }); place('streetE', -14, 20, 0, 'idle', { wander: 5 }); place('storePorch', -61, 13.4, 0, 'sit'); place('patrolW', -66, 20, 0, 'idle', { wander: 8 }); place('patrolE', -12, 21, 0, 'idle', { wander: 8 });
     store.g.add(M(GEO.box, '#6b4226', 1.6, 0.45, 0.45, -3, 0.55, 5.3)); // porch bench
     /* --- Greer farm --- */
-    const farmH = building({ x: -125, z: 88, w: 8, d: 7, door: 'S', wall: '#e0c590', roof: '#7a3b2e', name: 'Greer farmhouse' }); doorInteract(farmH.door); farmH.owner = 'ezra'; farmH.private = () => S.locations.farm === 'occupied' && (S.time.hour >= 21 || S.time.hour < 6) && (S.rel.ezra || 0) < 30;
+    const farmH = building({ x: -125, z: 88, w: 8, d: 7, door: 'S', wall: '#e0c590', roof: '#7a3b2e', name: 'Greer farmhouse', paper: true, inside: '#e0cf9c' }); doorInteract(farmH.door); farmH.owner = 'ezra'; farmH.private = () => S.locations.farm === 'occupied' && (S.time.hour >= 21 || S.time.hour < 6) && (S.rel.ezra || 0) < 30;
     bed(farmH, -2, 1.5); container({ id: 'farm_chest', label: 'hope chest', x: -122.5, z: 89.8, y: farmH.floor, owner: null, loot: [['deed', 1]], once: true, restock: 999 });
     const barn = building({ x: -106, z: 82, w: 10, d: 9, door: 'S', wall: '#a3392e', roof: '#5a3a2a', trim: '#f4ead3', name: 'Greer barn', porch: false, lamp: false }); doorInteract(barn.door); this.barn = barn; this.farmH = farmH;
     for (let i = 0; i < 4; i++) { barn.g.add(M(GEO.box, '#e0c068', 1.2, 0.8, 0.9, -3.5 + i * 2.2, 0.75, -3)); Col.box(-106 - 3.5 + i * 2.2 - 0.6, -106 - 3.5 + i * 2.2 + 0.6, 78.6, 79.5, barn.y - 1, barn.y + 1.15, { walk: true, block: true }); }

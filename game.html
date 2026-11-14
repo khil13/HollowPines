@@ -552,6 +552,11 @@ const SURF = {
   siding: () => canvasTex('siding', 256, (g, S, R) => { const n = 8, bh = S / n; for (let i = 0; i < n; i++) { const v = 205 + R() * 40; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(0, i * bh, S, bh); for (let k = 0; k < 9; k++) { const y = i * bh + 3 + R() * (bh - 6), a = 0.06 + R() * 0.1; g.strokeStyle = `rgba(60,40,20,${a})`; g.lineWidth = 1; g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= S; x += 32) g.lineTo(x, y + Math.sin(x * 0.04 + k) * 1.2); g.stroke(); }
       g.fillStyle = 'rgba(0,0,0,0.38)'; g.fillRect(0, i * bh + bh - 3, S, 3); g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(0, i * bh, S, 1.5); for (let x = 20 + R() * 40; x < S; x += 90 + R() * 60) { g.fillStyle = 'rgba(40,30,20,0.5)'; g.fillRect(x, i * bh + bh * 0.5, 2, 2); } } }),
   panel: () => canvasTex('panel', 256, (g, S, R) => { const n = 6, bw = S / n; for (let i = 0; i < n; i++) { const v = 200 + R() * 45; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * bw, 0, bw, S); for (let k = 0; k < 7; k++) { const x = i * bw + 3 + R() * (bw - 6); g.strokeStyle = `rgba(60,40,20,${0.05 + R() * 0.1})`; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= S; y += 32) g.lineTo(x + Math.sin(y * 0.05 + k) * 1.3, y); g.stroke(); } g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(i * bw + bw - 2.5, 0, 2.5, S); } }),
+  // parlor wallpaper: broad stripes with a small repeating motif (tinted by the wall colour)
+  paper: () => canvasTex('paper', 256, (g, S, R) => { g.fillStyle = 'rgb(232,232,232)'; g.fillRect(0, 0, S, S); const n = 4, bw = S / n;
+    for (let i = 0; i < n; i++) { g.fillStyle = 'rgba(0,0,0,0.13)'; g.fillRect(i * bw + bw * 0.3, 0, bw * 0.4, S); g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(i * bw + bw * 0.3 - 2, 0, 2, S); g.fillRect(i * bw + bw * 0.7, 0, 2, S);
+      for (let k = 0; k < 4; k++) { const cx = i * bw + bw * 0.5, cy = (k + 0.5) * S / 4; g.fillStyle = 'rgba(0,0,0,0.22)'; g.beginPath(); g.moveTo(cx, cy - 13); g.quadraticCurveTo(cx + 9, cy, cx, cy + 13); g.quadraticCurveTo(cx - 9, cy, cx, cy - 13); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.beginPath(); g.arc(cx, cy, 2.5, 0, 6.3); g.fill();
+        g.fillStyle = 'rgba(0,0,0,0.12)'; g.beginPath(); g.arc(i * bw + bw * 0.02, cy + S / 8, 4, 0, 6.3); g.fill(); } } }),
   floor: () => canvasTex('floor', 256, (g, S, R) => { const n = 5, bw = S / n; for (let i = 0; i < n; i++) { const v = 195 + R() * 45; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * bw, 0, bw, S); for (let k = 0; k < 8; k++) { const x = i * bw + 2 + R() * (bw - 4); g.strokeStyle = `rgba(50,30,15,${0.06 + R() * 0.12})`; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= S; y += 32) g.lineTo(x + Math.sin(y * 0.06 + k) * 1.5, y); g.stroke(); }
       const cut = R() * S; g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(i * bw, cut, bw, 2); g.fillRect(i * bw + bw - 2, 0, 2, S); if (R() < 0.6) { g.fillStyle = 'rgba(70,45,25,0.45)'; g.beginPath(); g.ellipse(i * bw + bw * 0.5, R() * S, 4, 6, 0, 0, 6.3); g.fill(); } } }),
   shingle: () => canvasTex('shingle', 256, (g, S, R) => { const n = 8, rw = S / n; // rows run down the slope's u axis, so courses lie along the ridge
@@ -590,7 +595,7 @@ function building(o) {
   // ceiling (it casts shadow, so rooms are shaded like real rooms once the roof hides when you step inside)
   if (o.interior !== false) {
     const iw = o.inside || '#b98f65', wain = o.wainscot || '#7a5232', inT = 0.02, ix = hw - t - inT, iz = hd - t - inT;
-    const pm = texMat('panel', iw), wm2 = texMat('panel', wain), panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; const up = new THREE.Mesh(uvBox(w, H - 1.05, d, 1.6), pm); up.position.set(cx, fy + 1.05 + (H - 1.05) / 2, cz); up.receiveShadow = true; g.add(up); const lo = new THREE.Mesh(uvBox(w, 1.0, d, 0.9), wm2); lo.position.set(cx, fy + 0.5, cz); lo.receiveShadow = true; g.add(lo); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
+    const pm = texMat(o.paper ? 'paper' : 'panel', iw), wm2 = texMat('panel', wain), panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; const up = new THREE.Mesh(uvBox(w, H - 1.05, d, 1.6), pm); up.position.set(cx, fy + 1.05 + (H - 1.05) / 2, cz); up.receiveShadow = true; g.add(up); const lo = new THREE.Mesh(uvBox(w, 1.0, d, 0.9), wm2); lo.position.set(cx, fy + 0.5, cz); lo.receiveShadow = true; g.add(lo); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
     const doorZ = side === 'S' ? iz : -iz;
     for (const zc of [iz, -iz]) { const dzc = zc + (zc > 0 ? -inT : inT); if ((zc > 0) === (side === 'S') && side !== 'W') { panel(-ix, -dw / 2, dzc - inT, dzc + inT); panel(dw / 2, ix, dzc - inT, dzc + inT); } else panel(-ix, ix, dzc - inT, dzc + inT); }
     for (const xc of [ix, -ix]) panel(xc - inT, xc + inT, -iz, iz);
@@ -2732,11 +2737,11 @@ const World = {
     const sc = Game.scene;
     /* --- Juniper Gap --- */
     const store = building({ x: -58, z: 8, w: 10, d: 8, door: 'S', wall: '#d79a5b', roof: '#8a4b33', sign: 'GENERAL STORE', facade: true, name: 'General store' });
-    const saloon = building({ x: -40, z: 7, w: 12, d: 10, door: 'S', wall: '#b9644a', roof: '#5d3a2a', sign: 'THE PINE KNOT', facade: true, name: 'Saloon' });
+    const saloon = building({ x: -40, z: 7, w: 12, d: 10, door: 'S', wall: '#b9644a', roof: '#5d3a2a', sign: 'THE PINE KNOT', facade: true, name: 'Saloon', paper: true, inside: '#a8474a', wainscot: '#5a3220' });
     const sheriff = building({ x: -22, z: 8, w: 8, d: 7, door: 'S', wall: '#c9b18b', roof: '#4a5a6a', sign: 'SHERIFF', facade: true, name: "Sheriff's office" });
-    const maeH = building({ x: -58, z: 34, w: 7, d: 6, door: 'N', wall: '#a8c3a0', roof: '#6b4a3a', name: "Mae's house" });
-    const docH = building({ x: -40, z: 34, w: 8, d: 7, door: 'N', wall: '#e6dcc5', roof: '#a33a2e', sign: 'DOCTOR', name: "Doc Pell's" });
-    const board = building({ x: -22, z: 34, w: 8, d: 6, door: 'N', wall: '#9fb6c9', roof: '#5a4a3a', name: 'Boarding house' });
+    const maeH = building({ x: -58, z: 34, w: 7, d: 6, door: 'N', wall: '#a8c3a0', roof: '#6b4a3a', name: "Mae's house", paper: true, inside: '#b7cdb0' });
+    const docH = building({ x: -40, z: 34, w: 8, d: 7, door: 'N', wall: '#e6dcc5', roof: '#a33a2e', sign: 'DOCTOR', name: "Doc Pell's", paper: true, inside: '#e2dcc6', wainscot: '#8a6a4a' });
+    const board = building({ x: -22, z: 34, w: 8, d: 6, door: 'N', wall: '#9fb6c9', roof: '#5a4a3a', name: 'Boarding house', paper: true, inside: '#a9bccd' });
     store.door.locked = () => (S.time.hour >= 20 || S.time.hour < 7); store.owner = 'mae'; store.private = () => store.door.locked();
     maeH.owner = 'mae'; maeH.private = () => true; docH.owner = 'doc'; docH.private = () => S.time.hour >= 21 || S.time.hour < 7; board.owner = 'hank'; board.private = () => true;
     for (const b of [store, saloon, sheriff, maeH, docH, board]) doorInteract(b.door);
@@ -2785,7 +2790,7 @@ const World = {
     place('well', -38.6, 21.5, -Math.PI / 2, 'chat'); place('well2', -41.4, 18.6, Math.PI / 2, 'chat'); place('street', -52, 21, 0, 'idle', { wander: 6 }); place('streetE', -14, 20, 0, 'idle', { wander: 5 }); place('storePorch', -61, 13.4, 0, 'sit'); place('patrolW', -66, 20, 0, 'idle', { wander: 8 }); place('patrolE', -12, 21, 0, 'idle', { wander: 8 });
     store.g.add(M(GEO.box, '#6b4226', 1.6, 0.45, 0.45, -3, 0.55, 5.3)); // porch bench
     /* --- Greer farm --- */
-    const farmH = building({ x: -125, z: 88, w: 8, d: 7, door: 'S', wall: '#e0c590', roof: '#7a3b2e', name: 'Greer farmhouse' }); doorInteract(farmH.door); farmH.owner = 'ezra'; farmH.private = () => S.locations.farm === 'occupied' && (S.time.hour >= 21 || S.time.hour < 6) && (S.rel.ezra || 0) < 30;
+    const farmH = building({ x: -125, z: 88, w: 8, d: 7, door: 'S', wall: '#e0c590', roof: '#7a3b2e', name: 'Greer farmhouse', paper: true, inside: '#e0cf9c' }); doorInteract(farmH.door); farmH.owner = 'ezra'; farmH.private = () => S.locations.farm === 'occupied' && (S.time.hour >= 21 || S.time.hour < 6) && (S.rel.ezra || 0) < 30;
     bed(farmH, -2, 1.5); container({ id: 'farm_chest', label: 'hope chest', x: -122.5, z: 89.8, y: farmH.floor, owner: null, loot: [['deed', 1]], once: true, restock: 999 });
     const barn = building({ x: -106, z: 82, w: 10, d: 9, door: 'S', wall: '#a3392e', roof: '#5a3a2a', trim: '#f4ead3', name: 'Greer barn', porch: false, lamp: false }); doorInteract(barn.door); this.barn = barn; this.farmH = farmH;
     for (let i = 0; i < 4; i++) { barn.g.add(M(GEO.box, '#e0c068', 1.2, 0.8, 0.9, -3.5 + i * 2.2, 0.75, -3)); Col.box(-106 - 3.5 + i * 2.2 - 0.6, -106 - 3.5 + i * 2.2 + 0.6, 78.6, 79.5, barn.y - 1, barn.y + 1.15, { walk: true, block: true }); }
@@ -3117,6 +3122,38 @@ const Interiors = {
   sack(b, x, z, ly = 0) { this.put(b, GEO.sphLo, '#d9c58f', 0.32, 0.4, 0.28, x, ly, z); },
   bed(b, x, z, ry = 0, col = '#4f7ca8') { const g = new THREE.Group(); g.position.set(x, this.F, z); g.rotation.y = ry; g.add(M(GEO.box, '#6b4226', 1.1, 0.35, 2.1, 0, 0.27, 0)); g.add(M(GEO.box, col, 1.06, 0.14, 1.5, 0, 0.5, 0.25)); g.add(M(GEO.box, '#f4ead3', 0.8, 0.14, 0.4, 0, 0.52, -0.75)); g.add(M(GEO.box, '#5a3a22', 1.15, 0.8, 0.08, 0, 0.45, -1.06)); b.g.add(g); },
   window(b) { /* inner frames come from building() */ },
+  /* ---- parlor pieces (decor only: none of these block movement, so NPC routes are unchanged) ---- */
+  // cloth curtains either side of every window, hung from a rod
+  curtains(b, col = '#8a3b3b') {
+    const o = b.o, ix = o.w / 2 - 0.4, iz = o.d / 2 - 0.4, front = o.door === 'N' ? -iz : iz;
+    for (const s of [-1, 1]) { for (const e of [-1, 1]) this.put(b, GEO.box, col, 0.05, 1.35, 0.3, s * ix, 0.7, e * 0.72); this.put(b, GEO.cyl, '#3b2a1e', 0.02, 1.9, 0.02, s * ix, 2.06 - 0.95, 0, { rx: Math.PI / 2 }); /* put() measures from the piece's bottom before it is turned */ this.put(b, GEO.box, col, 0.06, 0.16, 1.5, s * ix, 1.92, 0); }
+    if (o.w > 6) for (const s of [-1, 1]) { const wx = s * o.w / 2 * 0.55; for (const e of [-1, 1]) this.put(b, GEO.box, col, 0.3, 1.35, 0.05, wx + e * 0.72, 0.7, front); this.put(b, GEO.box, col, 1.5, 0.16, 0.06, wx, 1.92, front); }
+  },
+  // a stone fireplace against a wall, facing local +z before ry: hearth, glowing fire, logs, mantel with a clock
+  fireplace(b, x, z, ry = 0) {
+    const g = new THREE.Group(); g.position.set(x, this.F, z); g.rotation.y = ry; b.g.add(g); const stone = '#8d8a83';
+    g.add(M(GEO.box, stone, 1.5, 3.05, 0.4, 0, 1.52, 0)); g.add(M(GEO.box, '#7d7a73', 1.8, 0.08, 0.8, 0, 0.04, 0.25)); g.add(M(GEO.box, '#1b1512', 0.85, 0.8, 0.1, 0, 0.48, 0.17));
+    for (const [sx, sy, px, py] of [[0.22, 0.2, -0.52, 0.3], [0.22, 0.2, 0.52, 0.7], [0.3, 0.18, -0.5, 1.9], [0.26, 0.2, 0.45, 2.4], [0.24, 0.18, 0.1, 2.75]]) g.add(M(GEO.box, '#a19d94', sx, sy, 0.02, px, py, 0.21)); // a few proud stones
+    for (const s of [-1, 1]) { const lg = M(GEO.cyl, '#4a3020', 0.06, 0.6, 0.06, s * 0.05, 0.14 + (s > 0 ? 0.08 : 0), 0.3); lg.rotation.z = Math.PI / 2 + s * 0.2; g.add(lg); }
+    const fl = M(GEO.cone, '#ff9a3a', 0.2, 0.45, 0.12, 0, 0.42, 0.28, { emissive: '#ff6a1a', emissiveIntensity: 1.0 }); g.add(fl); g.add(M(GEO.cone, '#ffd27a', 0.1, 0.28, 0.08, 0.05, 0.36, 0.3, this.glow)); this.flames.push(fl);
+    g.add(M(GEO.box, '#5a3a22', 1.75, 0.09, 0.55, 0, 1.3, 0.1)); g.add(M(GEO.box, '#5a3a22', 0.3, 0.42, 0.14, 0, 1.56, 0.12)); g.add(M(GEO.cyl, '#f4ead3', 0.1, 0.02, 0.1, 0, 1.62, 0.2).rotateX(Math.PI / 2)); // mantel and clock
+    for (const s of [-1, 1]) { g.add(M(GEO.cyl, '#f4ead3', 0.03, 0.14, 0.03, s * 0.62, 1.42, 0.14)); g.add(M(GEO.sphLo, '#ffd27a', 0.03, 0.05, 0.03, s * 0.62, 1.52, 0.14, this.glow)); }
+  },
+  flames: [],
+  bookcase(b, x, z, ry = 0, w = 1.0, h = 1.9) {
+    const g = new THREE.Group(); g.position.set(x, this.F, z); g.rotation.y = ry; b.g.add(g); const R = mulberry(Math.round(x * 31 + z * 17) + 99), cols = ['#8a3b3b', '#3c5a6e', '#5f7a4a', '#b08a3a', '#5a3a50', '#d9c58f'];
+    g.add(M(GEO.box, '#5a3a22', w, h, 0.05, 0, h / 2, -0.13)); for (const s of [-1, 1]) g.add(M(GEO.box, '#6b4226', 0.05, h, 0.3, s * w / 2, h / 2, 0)); g.add(M(GEO.box, '#6b4226', w + 0.08, 0.06, 0.34, 0, h, 0));
+    for (let r = 0; r < 4; r++) { const y = 0.08 + r * (h - 0.1) / 4; g.add(M(GEO.box, '#6b4226', w, 0.04, 0.3, 0, y, 0)); let bx = -w / 2 + 0.08; while (bx < w / 2 - 0.12) { const bw = 0.05 + R() * 0.05, bh = 0.24 + R() * 0.12; if (R() > 0.15) g.add(M(GEO.box, cols[Math.floor(R() * cols.length)], bw, bh, 0.2, bx + bw / 2, y + 0.02 + bh / 2, 0)); bx += bw + 0.008; } }
+  },
+  armchair(b, x, z, ry = 0, col = '#7a3b3b') {
+    const g = new THREE.Group(); g.position.set(x, this.F, z); g.rotation.y = ry; b.g.add(g);
+    g.add(M(GEO.box, col, 0.75, 0.3, 0.7, 0, 0.3, 0)); g.add(M(GEO.box, col, 0.75, 0.75, 0.16, 0, 0.72, -0.3)); for (const s of [-1, 1]) { g.add(M(GEO.box, col, 0.14, 0.34, 0.7, s * 0.36, 0.55, 0)); g.add(M(GEO.box, '#3b2a1e', 0.07, 0.15, 0.07, s * 0.3, 0.075, 0.28)); g.add(M(GEO.box, '#3b2a1e', 0.07, 0.15, 0.07, s * 0.3, 0.075, -0.28)); }
+    g.add(M(GEO.box, '#e6dcc5', 0.5, 0.05, 0.5, 0, 0.47, 0.04));
+  },
+  clock(b, x, y, z, ry = 0) { const g = new THREE.Group(); g.position.set(x, this.F + y, z); g.rotation.y = ry; b.g.add(g); g.add(M(GEO.box, '#5a3a22', 0.34, 0.7, 0.1, 0, 0, 0)); g.add(M(GEO.cyl, '#f4ead3', 0.12, 0.02, 0.12, 0, 0.16, 0.06).rotateX(Math.PI / 2)); g.add(M(GEO.box, '#2b2b2b', 0.015, 0.09, 0.01, 0, 0.19, 0.075)); g.add(M(GEO.cyl, '#c9a23a', 0.04, 0.02, 0.04, 0, -0.2, 0.06).rotateX(Math.PI / 2)); },
+  sideTable(b, x, z) { this.put(b, GEO.box, '#6b4226', 0.45, 0.05, 0.4, x, 0.5, z); for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) this.put(b, GEO.box, '#5a3a22', 0.04, 0.5, 0.04, x + lx * 0.18, 0, z + lz * 0.15); this.candle(b, x, 0.55, z); },
+  sconce(b, x, y, z) { this.put(b, GEO.box, '#c9a23a', 0.08, 0.16, 0.08, x, y - 0.12, z); this.put(b, GEO.sphLo, '#ffd27a', 0.07, 0.1, 0.07, x, y, z, { mat: this.glow }); },
+  plant(b, x, z) { this.put(b, GEO.cyl, '#a0603a', 0.16, 0.28, 0.16, x, 0, z); for (let k = 0; k < 5; k++) { const a = k / 5 * TAU; this.put(b, GEO.sphLo, '#4f8a4a', 0.07, 0.34, 0.16, x + Math.cos(a) * 0.12, 0.28, z + Math.sin(a) * 0.12, { rz: Math.cos(a) * 0.5, rx: -Math.sin(a) * 0.5 }); } },
 
   sheriff(b) { if (!b) return;
     this.rug(b, 0, -0.3, 3.2, 2.2, '#8a3b3b');
@@ -3149,6 +3186,18 @@ const Interiors = {
     for (const tx of [-3, 3]) { for (let k = 0; k < 4; k++) this.put(b, GEO.box, '#f4ead3', 0.08, 0.005, 0.12, tx - 0.25 + k * 0.17, 0.83, 2 + (k % 2) * 0.1, { ry: k * 0.4 }); for (let k = 0; k < 3; k++) this.put(b, GEO.cyl, ['#c8443a', '#f4ead3', '#2b2b2b'][k], 0.05, 0.03 + k * 0.02, 0.05, tx + 0.25, 0.82, 1.85 + k * 0.08); this.put(b, GEO.cyl, '#cfa040', 0.05, 0.14, 0.05, tx - 0.35, 0.82, 2.25, { mat: { transparent: true, opacity: 0.8 } }); }
     { const x = 0, z = 0.8, y = 2.9; this.put(b, GEO.cyl, '#2b2b2b', 0.02, 0.45, 0.02, x, y + 0.4, z); this.put(b, GEO.cyl, '#3b2a1e', 0.75, 0.06, 0.75, x, y, z); for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; this.candle(b, x + Math.cos(a) * 0.62, y + 0.06, z + Math.sin(a) * 0.62); } }
     this.put(b, GEO.box, '#5a3a22', 0.6, 0.45, 0.35, -5, 0, 2.0); // piano stool
+    // parlor dressing: felt card tables, a brass foot rail, a back bar stacked with bottles under a long mirror, glasses and
+    // a beer pull on the bar, piano keys and sheet music, wall sconces and heavy curtains
+    for (const tx of [-3, 3]) this.put(b, GEO.cyl, '#2f6b3f', 0.63, 0.012, 0.63, tx, 0.792, 2);
+    this.put(b, GEO.cyl, '#c9a23a', 0.03, 7.6, 0.03, 0, 0.2 - 3.8, -2.02, { rz: Math.PI / 2 }); for (const x of [-3.6, -1.2, 1.2, 3.6]) this.put(b, GEO.box, '#c9a23a', 0.04, 0.2, 0.12, x, 0.02, -2.08);
+    { const cols = ['#6b8e23', '#8b4513', '#b0c4de', '#a33a2e', '#d9a441', '#2f4f3f', '#e6dcc5'], R = mulberry(77);
+      for (const [y, n] of [[1.05, 22], [1.6, 22]]) { this.put(b, GEO.box, '#5a3a22', 8.6, 0.05, 0.22, 0, y, -4.2); for (let k = 0; k < n; k++) { if (Math.abs(k - (n - 1) / 2) < 4.2 && y > 1.5) continue; const hgt = 0.2 + R() * 0.14; this.put(b, GEO.cyl, cols[Math.floor(R() * cols.length)], 0.045, hgt, 0.045, -4.1 + k * 8.2 / (n - 1), y + 0.05, -4.2); this.put(b, GEO.cyl, '#2b2b2b', 0.018, 0.07, 0.018, -4.1 + k * 8.2 / (n - 1), y + 0.05 + hgt, -4.2); } }
+      this.put(b, GEO.box, '#c9a23a', 3.3, 0.86, 0.03, 0, 1.68, -4.29); this.put(b, GEO.box, '#bcd0d8', 3.1, 0.7, 0.03, 0, 1.76, -4.27, { mat: { emissive: '#9ab0b8', emissiveIntensity: 0.25 } });
+      for (let k = 0; k < 7; k++) this.put(b, GEO.cyl, '#dfeef2', 0.04, 0.1, 0.04, -3.3 + k * 1.1 + R() * 0.3, 1.1, -2.75 + R() * 0.25, { mat: { transparent: true, opacity: 0.6 } }); }
+    this.put(b, GEO.box, '#c9a23a', 0.1, 0.3, 0.1, 2.2, 1.1, -2.8); this.put(b, GEO.cyl, '#2b2b2b', 0.02, 0.2, 0.02, 2.2, 1.36, -2.76, { rx: 0.5 });
+    this.put(b, GEO.box, '#f4ead3', 1.3, 0.05, 0.2, -5, 0.7, 1.4); this.put(b, GEO.box, '#1b1b1b', 1.24, 0.03, 0.09, -5, 0.75, 1.35); this.put(b, GEO.box, '#2b1d14', 1.5, 0.06, 0.26, -5, 0.63, 1.4); this.put(b, GEO.box, '#f4ead3', 0.4, 0.3, 0.02, -5, 1.0, 1.31, { rx: -0.2 }); this.candle(b, -5.6, 1.3, 1.0); this.candle(b, -4.4, 1.3, 1.0);
+    for (const s of [-1, 1]) for (const z of [-2.9, 2.9]) this.sconce(b, s * 5.6, 2.2, z);
+    this.curtains(b, '#6e2430'); this.plant(b, 5.2, 4.2); this.plant(b, -5.2, 4.2); this.rug(b, 0, 2.2, 3.2, 2.0, '#6e2430', '#c9a23a');
     for (const [x, z] of [[-5.3, -1.5], [2.0, 3.6], [-1.6, 3.6]]) this.put(b, GEO.cyl, '#b08a3a', 0.18, 0.25, 0.18, x, 0, z);
     { const x = -5.64, y = 2.4, z = -1.0; this.put(b, GEO.box, '#5a3a22', 0.05, 0.4, 0.3, x, y, z); for (const s of [-1, 1]) { this.put(b, GEO.box, '#e6dcc5', 0.05, 0.5, 0.05, x + 0.05, y + 0.35, z + s * 0.25, { rx: s * 0.6 }); this.put(b, GEO.box, '#e6dcc5', 0.05, 0.3, 0.05, x + 0.05, y + 0.55, z + s * 0.45, { rx: s * 1.1 }); } } // antlers
     this.frame(b, 5.64, 1.9, 1.2, -Math.PI / 2, 1.4, 0.9, '#c97b5a'); this.frame(b, 5.64, 1.9, -2.0, -Math.PI / 2, 0.8, 1.0, '#6a7fb0');
@@ -3158,22 +3207,26 @@ const Interiors = {
     this.rug(b, 0.3, 0.3, 2.4, 1.8, '#9dbf8a', '#c97b5a'); this.table(b, 1.6, -0.6, 1.2, 0.8); this.chair(b, 1.0, -0.6, Math.PI / 2); this.chair(b, 2.25, -0.6, -Math.PI / 2);
     this.put(b, GEO.cyl, '#4f7ca8', 0.08, 0.18, 0.08, 1.6, 0.75, -0.6); this.put(b, GEO.sphLo, '#e9c46a', 0.12, 0.1, 0.12, 1.6, 0.93, -0.6); this.stove(b, -2.75, -2.1);
     this.shelf(b, 3.0, 0.6, -Math.PI / 2, 1.4, ['#f4ead3', '#cfe6ef', '#f4ead3', '#c8443a'], 2, 1.3); this.frame(b, -1.0, 1.75, 2.64, Math.PI, 0.7, 0.9, '#d9a07a'); this.lamp(b, 0, 0);
+    this.curtains(b, '#c97b5a'); this.fireplace(b, 0.3, 2.47, Math.PI); this.armchair(b, 0.9, 1.25, Math.PI + 0.5, '#5f7a6a'); this.bookcase(b, -3.0, -0.6, Math.PI / 2, 1.0); this.plant(b, 2.8, -2.3);
   },
   doc(b) { if (!b) return; // door N
     this.shelf(b, -3.5, -1.6, Math.PI / 2, 1.6, ['#cfe6ef', '#9b1c1c', '#4f7ca8', '#e9c46a', '#cfe6ef'], 3, 0.9);
     this.put(b, GEO.box, '#f4ead3', 0.6, 0.85, 0.45, 3.3, 0, -1.6, { col: true }); this.put(b, GEO.cyl, '#e6e6e6', 0.22, 0.08, 0.22, 3.3, 0.85, -1.6); this.frame(b, 3.62, 1.7, -1.6, -Math.PI / 2, 0.5, 0.7, '#cfe6ef');
     for (let k = 0; k < 3; k++) this.put(b, GEO.box, '#e6dcc5', 0.75, 1.5, 0.03, -0.05 + (k - 1) * 0.0, 0, 1.0 + (k - 1) * 0.72, { ry: Math.PI / 2 + (k % 2 ? 0.35 : -0.35) }); // folding screen between the cots
     this.frame(b, 0, 1.9, 3.14, Math.PI, 1.0, 0.7, '#f4ead3'); this.put(b, GEO.cyl, '#b0a070', 0.06, 0.04, 0.06, -3.3, 1.05, 2.2); this.lamp(b, 0, -0.5);
+    this.curtains(b, '#f4ead3'); this.clock(b, 1.6, 1.9, 3.12, Math.PI); this.bookcase(b, 3.5, 0.9, -Math.PI / 2, 0.9, 1.7); this.rug(b, 0, -0.9, 2.4, 1.5, '#5f7a8a', '#e6dcc5');
   },
   boarding(b) { if (!b) return; // door N
     for (const x of [-2.5, 2.5]) this.put(b, GEO.box, '#6b4226', 0.45, 0.55, 0.4, x + (x < 0 ? 0.95 : -0.95), 0, 2.4);
     this.candle(b, -1.55, 0.55, 2.4); this.put(b, GEO.box, '#7a5232', 0.6, 0.8, 0.45, 3.3, 0, -1.7, { col: true }); this.put(b, GEO.cyl, '#cfe6ef', 0.22, 0.08, 0.22, 3.3, 0.8, -1.7);
     this.chair(b, -3.2, -1.7, Math.PI / 2); this.rug(b, 0, 0, 2, 1.4, '#8a6a4a'); for (let k = 0; k < 3; k++) this.put(b, GEO.box, '#3b2a1e', 0.05, 0.05, 0.12, -1 + k * 0.5, 1.75, 2.62); this.lamp(b, 0, 0.2);
+    this.curtains(b, '#3c5a6e'); this.clock(b, 3.62, 1.9, -1.0, -Math.PI / 2); this.armchair(b, -1.2, -1.9, 0.5, '#3c5a6e'); this.plant(b, 3.3, -2.3);
   },
   farmhouse(b) { if (!b) return; // door S
     this.bed(b, 2, 1.5, 0, '#c97b5a'); // the second bed (Nell's)
     this.table(b, -0.2, -0.8, 1.4, 0.9); this.chair(b, -0.9, -0.8, Math.PI / 2); this.chair(b, 0.5, -0.8, -Math.PI / 2); this.stove(b, 3.1, -2.4); this.rug(b, 0, 0.5, 2.2, 1.6, '#c8443a');
     this.shelf(b, -3.5, -1.5, Math.PI / 2, 1.4, ['#f4ead3', '#e9c46a', '#d9c58f'], 2, 1.2); this.barrel(b, -3.2, 2.7); this.lamp(b, 0, -0.5);
+    this.curtains(b, '#5f7a4a'); this.fireplace(b, -1.3, -2.97, 0); this.clock(b, 0.8, 1.9, -3.12, 0); this.armchair(b, -2.7, -1.2, 0.9, '#8a6a3a'); this.sideTable(b, 3.15, 1.2);
   },
   barn(b) { if (!b) return; // rough: hay, stalls, tools
     for (const [x, z, ly] of [[-4, -3.2, 0], [-3, -3.4, 0], [-3.5, -3.3, 0.6], [4, -3.4, 0]]) this.put(b, GEO.box, '#e0c068', 1.0, 0.6, 0.6, x, ly, z, { col: ly === 0, cover: true });
@@ -5087,7 +5140,7 @@ const Game = {
     Post.render(this.scene, this.camera); Input.endFrame(); requestAnimationFrame(tt => this.frame(tt));
   },
   titleUpdate(dt) { this.tT = (this.tT || 0) + dt; World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time); const a = this.tT * 0.05; this.camera.position.set(-40 + Math.cos(a) * 42, 16, 20 + Math.sin(a) * 42); this.camera.lookAt(-40, 3, 20); this.cam.pos.copy(this.camera.position); S.time.hour = 17.2; Sky.update(0); for (const n of NPC.all) n.update(dt, false); FX.update(dt); this.fireFlicker(); },
-  fireFlicker() { for (const f of this.fires) { const k = 0.85 + Math.sin(this.time * 13 + f.x) * 0.1 + Math.random() * 0.08; f.fl.scale.set(0.3 * k, 0.7 * k * 1.1, 0.3 * k); f.light.intensity = 1.2 * k; } },
+  fireFlicker() { for (let i = 0; i < Interiors.flames.length; i++) { const k = 0.85 + Math.sin(this.time * 11 + i * 2.1) * 0.12 + Math.random() * 0.1; Interiors.flames[i].scale.set(0.2 * k, 0.45 * k * 1.1, 0.12); } for (const f of this.fires) { const k = 0.85 + Math.sin(this.time * 13 + f.x) * 0.1 + Math.random() * 0.08; f.fl.scale.set(0.3 * k, 0.7 * k * 1.1, 0.3 * k); f.light.intensity = 1.2 * k; } },
   update(dt) {
     const P = this.player, H = this.horse; Input.tick(dt);
     if (!Dialog.open && !UI.panelOpen) { if (Input.hit('tab') || Input.hit('i') || Input.tb('menu')) UI.open('items'); else if (Input.hit('m')) UI.open('map'); else if (Input.hit('j')) UI.open('journal'); }
