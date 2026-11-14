@@ -67,7 +67,7 @@ function makeModelQuad(o) {
     for (const gr of groups) { const mt = mats(m)[gr.materialIndex || 0]; if (mt && gr.count > coatN && !/eye/i.test(mt.name || '')) { coatN = gr.count; coat = mt; } } });
   const toonFor = (src, skin) => { const nm = (src.name || '').toLowerCase(); let c = '#' + (src.color ? src.color.getHexString() : '888888'); const lum = src.color ? src.color.r * 0.3 + src.color.g * 0.59 + src.color.b * 0.11 : 1;
     if (src === coat || /main|body|coat|fur/.test(nm)) c = o.color || c; else if ((/mane|hair|tail/.test(nm) || (lum < 0.06 && !/eye/.test(nm))) && o.mane) c = o.mane;
-    animalMat(c); /* makes sure the shared gradient exists */ const k = c + (skin ? 's' : ''); return _animalSkinMats[k] || (_animalSkinMats[k] = new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8, skinning: skin })); };
+    animalMat(c); /* makes sure the shared gradient exists */ const k = c + (skin ? 's' : ''); return _animalSkinMats[k] || (_animalSkinMats[k] = rimLit(new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8, skinning: skin }))); };
   model.traverse(m => { if (!m.isMesh) return; const list = mats(m).map(mt => toonFor(mt, !!m.isSkinnedMesh)); m.material = Array.isArray(m.material) ? list : list[0]; });
   const backY = A.back * A.scale;
   const body = new THREE.Group(); body.position.y = backY - dims.bh; vis.add(body);

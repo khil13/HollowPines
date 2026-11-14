@@ -89,14 +89,15 @@ const Terrain = {
     g.setAttribute('aDirt', new THREE.BufferAttribute(dirtA, 1));
     // rain turns trails and pond edges to dark mud, and puddles gather in them, reflecting the sky, rings spreading where drops land
     this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: groundTexture() }); this.groundU = { uWet: { value: 0 }, uRainT: { value: 0 }, uRain: { value: 0 }, uSkyC: { value: new THREE.Color('#cfe5ee') } }; const GU = this.groundU;
-    this.mat.onBeforeCompile = sh => { Object.assign(sh.uniforms, GU);
+    this.mat.onBeforeCompile = sh => { Object.assign(sh.uniforms, GU, CLOUDS);
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aDirt; varying float vDirt; varying vec3 vGp;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvDirt = aDirt; vGp = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet; uniform float uRainT; uniform float uRain; uniform vec3 uSkyC; varying float vDirt; varying vec3 vGp; float pud = 0.0;\n' + VNOISE3)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet; uniform float uRainT; uniform float uRain; uniform vec3 uSkyC; uniform float uCS; uniform float uCT; varying float vDirt; varying vec3 vGp; float pud = 0.0;\n' + VNOISE3)
         .replace('#include <color_fragment>', `#include <color_fragment>
           if (uWet > 0.01) { float n = vn3(vec3(vGp.xz * 0.32, 1.7)) * 0.7 + vn3(vec3(vGp.xz * 1.1, 4.1)) * 0.3;
             pud = smoothstep(0.62, 0.68, n + vDirt * 0.22 - (1.0 - uWet) * 0.5) * smoothstep(0.25, 0.6, vDirt) * uWet;
             diffuseColor.rgb *= (1.0 - uWet * 0.3 * vDirt) * (1.0 - pud * 0.7); }
-          diffuseColor.rgb *= 1.0 - uWet * 0.28; /* everything darkens a little when wet */`)
+          diffuseColor.rgb *= 1.0 - uWet * 0.28; /* everything darkens a little when wet */
+          diffuseColor.rgb *= 1.0 - uCS * smoothstep(0.5, 0.72, vn3(vec3(vGp.xz * 0.011 + vec2(uCT * 0.012, uCT * 0.004), 0.3)) * 0.75 + vn3(vec3(vGp.xz * 0.035 + uCT * 0.01, 2.0)) * 0.25); /* drifting cloud shadows */`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
           if (pud > 0.0) { vec2 cell = floor(vGp.xz * 1.4), f = fract(vGp.xz * 1.4) - 0.5; float hs = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5), ph = fract(uRainT * 0.9 + hs); f -= (vec2(hs, fract(hs * 7.31)) - 0.5) * 0.5; float ring = smoothstep(0.03, 0.0, abs(length(f) - ph * 0.35)) * (1.0 - ph) * uRain * step(0.35, fract(hs * 3.7));
             totalEmissiveRadiance += uSkyC * pud * (0.24 + ring * 0.22); }`); };
@@ -201,10 +202,17 @@ const Col = {
 
 /* ---------- Materials & mesh helpers (asset layer: swap these for real models later) ---------- */
 const MAT = {}; let GRAD;
+/* Atmosphere shared by several shaders: RIM is the sky-coloured edge light on people and animals; CLOUDS drives the
+   soft cloud shadows that drift over the ground and grass (strength, time); WINGLOW lights windows at night. */
+const RIM = { value: new THREE.Color('#fff2dc') }, CLOUDS = { uCS: { value: 0 }, uCT: { value: 0 } };
+function rimLit(m) { m.onBeforeCompile = sh => { sh.uniforms.uRim = RIM; sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uRim;')
+    .replace('#include <dithering_fragment>', 'float rimK = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 2.6); gl_FragColor.rgb += uRim * rimK * (0.25 + 0.75 * clamp(normal.y * 0.5 + 0.5, 0.0, 1.0)) * 0.42;\n#include <dithering_fragment>'); }; m.customProgramCacheKey = () => 'rim'; return m; }
+let WINGLOW = null;
+function winGlow() { if (!GRAD) toon('#fff'); return WINGLOW || (WINGLOW = new THREE.MeshToonMaterial({ color: '#3c5a6e', gradientMap: GRAD, emissive: '#ffb65c', emissiveIntensity: 0 })); }
 function toon(color, o = {}) {
   const k = color + JSON.stringify(o); if (MAT[k]) return MAT[k];
   if (!GRAD) { GRAD = new THREE.DataTexture(new Uint8Array([135, 180, 222, 255]), 4, 1, THREE.LuminanceFormat); GRAD.minFilter = GRAD.magFilter = THREE.NearestFilter; GRAD.needsUpdate = true; }
-  return MAT[k] = new THREE.MeshToonMaterial(Object.assign({ color, gradientMap: GRAD }, o));
+  MAT[k] = new THREE.MeshToonMaterial(Object.assign({ color, gradientMap: GRAD }, o)); if (o.skinning) rimLit(MAT[k]); /* skinned = a person: give them the edge light */ return MAT[k];
 }
 const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1), sph: new THREE.SphereGeometry(1, 16, 12), sphLo: new THREE.SphereGeometry(1, 10, 8),
@@ -263,8 +271,9 @@ function building(o) {
   addWall(-hw, -hw + t, -hd, hd); addWall(hw - t, hw, -hd, hd);
   // trim + windows
   const trim = o.trim || '#f4ead3';
-  for (const s of [-1, 1]) { const wx = s * hw * 0.55; if (W > 6) { g.add(M(GEO.box, '#3c5a6e', 1.1, 1.0, 0.06, wx, fy + 1.7, dz + (side === 'S' ? 0.02 : -0.02) * 1)); g.add(M(GEO.box, trim, 1.3, 0.12, 0.1, wx, fy + 1.15, dz)); } }
-  g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, hw + 0.02, fy + 1.7, 0)); g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, -hw - 0.02, fy + 1.7, 0));
+  const glass = o.lamp === false ? '#3c5a6e' : winGlow(); /* lived-in buildings light their windows after dark */
+  for (const s of [-1, 1]) { const wx = s * hw * 0.55; if (W > 6) { g.add(M(GEO.box, glass, 1.1, 1.0, 0.06, wx, fy + 1.7, dz + (side === 'S' ? 0.02 : -0.02) * 1)); g.add(M(GEO.box, trim, 1.3, 0.12, 0.1, wx, fy + 1.15, dz)); } }
+  g.add(M(GEO.box, glass, 0.06, 1.0, 1.1, hw + 0.02, fy + 1.7, 0)); g.add(M(GEO.box, glass, 0.06, 1.0, 1.1, -hw - 0.02, fy + 1.7, 0));
   // interior shell: plank walls with darker wainscoting and a skirting board, inside window frames, floorboards, beams and a
   // ceiling (it casts shadow, so rooms are shaded like real rooms once the roof hides when you step inside)
   if (o.interior !== false) {
