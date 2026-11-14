@@ -106,15 +106,17 @@ async def main():
         check('aim assist: sights a few degrees off an attacker are pulled onto them, and follow as they move', r['after'] < 2.5 and r['onA'] and r['tracked'] < 3.5 and r['stillOn'], r)
         check('aim assist: a near miss on the locked target still lands; when one drops the sights swing to the next attacker', r['missAim'] and r['nearHit'] and r['onB'] and r['next'] < 3, r)
         check('aim assist: turning it off leaves the sights where you put them, and the settings offer strength and aim speed', r['offStays'] and r['sel'], r)
-        # --- hip fire, Call of Duty Mobile style ---
+        # --- Call of Duty Mobile style shooting: the gun stays down until you fire ---
         r = await ev(pg, """(()=>{ const P = HP.Game.player, C = HP.Game.cam; HP.tp(-100, -20); P.yaw = 0; C.yaw = 0; C.pitch = 0.1; P.inv = 1e9; Input.aimToggle = false; P.setWeapon('revolver'); HP.S.ammoClip.revolver = 6; Settings.v.autoFire = false; HP.sim(0.6, 1 / 60);
-          const n = HP.NPC.spawn({ key: 'hipT', name: 'T', x: P.pos.x, z: P.pos.z + 12, lawful: false, wild: true, hp: 400, maxHp: 400, tags: ['generic'], look: {} }); n.update = () => {}; n.hostileToPlayer = true; HP.sim(1.2, 1 / 60);
-          const out = { aiming: P.aiming, hip: P.hipOnly, cross: !document.getElementById('cross').hidden, on: !!(P.hover && P.hover.h === n), fov: Math.round(HP.Game.camera.fov) };
-          const hp0 = n.hp; Input.btnP.add('attack'); HP.sim(1 / 60, 1 / 60); HP.sim(0.3, 1 / 60); out.hit = hp0 - n.hp > 0; const sHip = P.spread();
-          Input.aimToggle = true; HP.sim(0.8, 1 / 60); out.ads = { hip: P.hipOnly, fov: Math.round(HP.Game.camera.fov), tighter: P.spread() < sHip }; Input.aimToggle = false;
-          Settings.v.codAim = false; HP.sim(0.3, 1 / 60); out.offAiming = P.aiming; delete Settings.v.codAim; P.setWeapon('fists'); HP.sim(0.3, 1 / 60); out.fists = P.aiming; delete Settings.v.autoFire; HP.NPC.despawn(n); return out; })()""")
-        check('hip fire: with a gun out the crosshair is up without pressing Aim, the sights find the attacker, and Fire hits where it points', r['aiming'] and r['hip'] and r['cross'] and r['on'] and r['hit'] and r['fov'] >= 58, r)
-        check('hip fire: Aim zooms in and tightens the shot; the setting and putting the gun away turn the crosshair off', not r['ads']['hip'] and r['ads']['fov'] <= 50 and r['ads']['tighter'] and not r['offAiming'] and not r['fists'], r)
+          const n = HP.NPC.spawn({ key: 'hipT', name: 'T', x: P.pos.x + 2.5, z: P.pos.z + 12, lawful: false, wild: true, hp: 400, maxHp: 400, tags: ['generic'], look: {} }); n.update = () => {}; n.hostileToPlayer = true; HP.sim(1.2, 1 / 60);
+          const out = { downAiming: P.aiming, downCross: !document.getElementById('cross').hidden };
+          const hp0 = n.hp; Input.btnP.add('attack'); HP.sim(1 / 60, 1 / 60); out.firstHit = hp0 - n.hp > 0; HP.sim(0.5, 1 / 60); out.up = { aiming: P.aiming, hip: P.hipOnly, cross: !document.getElementById('cross').hidden, on: !!(P.hover && P.hover.h === n), fov: Math.round(HP.Game.camera.fov) };
+          const hp1 = n.hp; Input.btnP.add('attack'); HP.sim(1 / 60, 1 / 60); HP.sim(0.3, 1 / 60); out.secondHit = hp1 - n.hp > 0; const sHip = P.spread();
+          Input.aimToggle = true; HP.sim(0.8, 1 / 60); out.ads = { hip: P.hipOnly, fov: Math.round(HP.Game.camera.fov), tighter: P.spread() < sHip }; Input.aimToggle = false; HP.sim(2.2, 1 / 60); out.lowered = !P.aiming && document.getElementById('cross').hidden;
+          Settings.v.codAim = false; Input.btnP.add('attack'); HP.sim(1 / 60, 1 / 60); HP.sim(0.2, 1 / 60); out.offAiming = P.aiming; delete Settings.v.codAim; delete Settings.v.autoFire; P.setWeapon('fists'); HP.sim(0.3, 1 / 60); HP.NPC.despawn(n); return out; })()""")
+        check('shooting: with a gun drawn but not fired the gun stays down (no crosshair); pressing Fire raises it and the first shot lands on the attacker in view', not r['downAiming'] and not r['downCross'] and r['firstHit'], r)
+        check('shooting: the crosshair then stays up on the attacker, further shots go where it points, and it lowers a moment after the last shot', r['up']['aiming'] and r['up']['hip'] and r['up']['cross'] and r['up']['on'] and r['secondHit'] and r['lowered'], r)
+        check('shooting: Aim zooms in and tightens the shot; the setting turns fire-to-raise off', not r['ads']['hip'] and r['ads']['fov'] <= 50 and r['ads']['tighter'] and not r['offAiming'], r)
         bad = [e for e in errs if 'favicon' not in e]
         check('no page errors', not bad, bad[:5])
         await b.close()

@@ -104,7 +104,7 @@ const UI = {
     <label class="range">Button size <select id="setBtn">${[[0.85, 'Small'], [1, 'Medium'], [1.2, 'Large']].map(([v, n]) => `<option value="${v}" ${+V.btnScale === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="range"><input type="checkbox" id="setLefty" ${V.lefty ? 'checked' : ''}> Left-handed layout (stick on the right, buttons on the left)</label>
     <label class="range"><input type="checkbox" id="setRun" ${V.autoRun !== false ? 'checked' : ''}> Push the stick to the edge to run</label>
-    <label class="range"><input type="checkbox" id="setCod" ${V.codAim !== false ? 'checked' : ''}> Crosshair always up with a gun drawn (fire from the hip; Aim zooms)</label>
+    <label class="range"><input type="checkbox" id="setCod" ${V.codAim !== false ? 'checked' : ''}> Fire raises the gun and shoots where you look (Aim zooms in)</label>
     <label class="range">Aim assist<select id="setAA">${[['0', 'Off'], ['1', 'Light'], ['2', 'Strong']].map(([v, n]) => `<option value="${v}" ${String(V.aimAssist === undefined ? (Input.touch ? 2 : 0) : V.aimAssist) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="range">Look speed while aiming<input type="range" id="setAsens" min="0.4" max="2.5" step="0.05" value="${V.aimSens || 1}"><span>${(V.aimSens || 1).toFixed(2)}</span></label>
     <label class="range"><input type="checkbox" id="setAF" ${V.autoFire !== false ? 'checked' : ''}> Fire automatically when the sights are on an attacker</label>

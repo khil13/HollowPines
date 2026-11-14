@@ -107,9 +107,10 @@ class Player {
       if (Input.hit('b') || Input.tb('camp')) Camp.make();
       if ((Input.hit('x') || Input.tb('dodge')) && !this.grab && this.state === 'ground' && S.p.st > 15 && !this.carry) this.dodge(I);
     }
-    // Call of Duty Mobile style on phones: with a gun out the crosshair is always up and shots go where it points (hip fire);
-    // the Aim button only zooms in and steadies the shot (ADS). Running lowers the gun.
-    const ads = Input.mouse.r || Input.aimToggle, hipReady = Input.touch && Settings.v.codAim !== false && !(I.sprint && I.mag > 0.2);
+    // Call of Duty Mobile style shooting on phones: the gun stays lowered until you fire. Pressing Fire raises it, puts the
+    // crosshair up and sends the shot where the camera points (hip fire); it lowers again a moment after the last shot.
+    // The Aim button raises it and zooms in (ADS).
+    const ads = Input.mouse.r || Input.aimToggle, hipReady = this.hipHold(dt);
     const aiming = this.canAct() && this.weapon !== 'fists' && !this.carry && this.state !== 'swim' && (ads || hipReady); this.hipOnly = aiming && !ads;
     this.blocking = this.canAct() && (Input.down('q') || Input.btn.block) && !this.carry && !this.grab && !aiming && this.state === 'ground'; this.blockT = this.blocking ? (this.blockT || 0) + dt : 0; // how long the guard has been up (a fresh one counters)
     this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.block = this.blocking ? 1 : 0; this.anim.layers.carry = this.carry || this.grab ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0;
@@ -210,6 +211,9 @@ class Player {
     // phones: with the sights held on someone who is attacking you, the gun fires by itself (Call of Duty Mobile's simple mode)
     const foe = this.hover && this.hover.h, hot = foe && foe.alive && !foe.downed && (foe.hostileToPlayer || (foe.predator && foe.state === 'attack')); this.afT = hot && Input.touch && Settings.v.autoFire !== false && !DeadEye.on ? (this.afT || 0) + dt : 0; if (this.afT > 0.16) Input.btnP.add('attack');
   }
+  hipHold(dt) { // true while the gun is up from firing: from the Fire press until 1.6 s after the last one
+    const was = this.hipT > 0; if (Input.touch && Settings.v.codAim !== false && this.weapon !== 'fists' && (Input.tb('attack') || Input.btn.attack)) this.hipT = 1.6; else this.hipT = Math.max(0, (this.hipT || 0) - dt);
+    this.hipFresh = this.hipT > 0 && !was; return this.hipT > 0; }
   softLockTarget() { // hostiles first, then anyone (or any animal) near the middle of the screen
     const cf = Game.cam.dir(), range = (GUN[this.weapon] || GUN.revolver).range; let best = null, bs = -1;
     for (const h of HURTABLE) { if (h === this || !h.alive || h.downed || h.isHorse) continue; const dx = h.pos.x - Game.cam.pos.x, dy = (h.pos.y + h.hitH) - Game.cam.pos.y, dz = h.pos.z - Game.cam.pos.z, d = Math.hypot(dx, dy, dz); if (d > range) continue;
@@ -228,6 +232,7 @@ class Player {
       if (sp > 0) { const a = Math.random() * TAU, r = Math.sqrt(Math.random()) * sp, up = Math.abs(dir.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0), u = new THREE.Vector3().crossVectors(dir, up).normalize(), v = new THREE.Vector3().crossVectors(u, dir); dir.addScaledVector(u, Math.cos(a) * r).addScaledVector(v, Math.sin(a) * r).normalize(); }
       hit = rayHit(o, dir, range, this);
       if (this.forceHit) { const m = this.forceHit, c = m.h.pos.clone().add(m.off); hit = { h: m.h, zone: m.zone, t: o.distanceTo(c) }; dir.copy(c).sub(o).normalize(); } // a Dead Eye mark lands where it was painted
+      if (!hit && this.hipFresh && this.lock && this.lock.alive && (this.lock.hostileToPlayer || this.lock.state === 'combat' || this.lock.state === 'attack' || !(this.lock instanceof Person)) && Col.los(o.x, o.y, o.z, this.lock.pos.x, this.lock.pos.y + this.lock.hitH, this.lock.pos.z)) hit = { h: this.lock, zone: 'body', t: o.distanceTo(this.lock.pos) }; // snap shot at whoever is attacking (or the animal in front of you)
       if (!hit && this.lock && this.lock.alive) { // a little bullet magnetism toward the locked target, like RDR2's aim assist
         const c = new THREE.Vector3(this.lock.pos.x, this.lock.pos.y + this.lock.hitH, this.lock.pos.z), t = c.clone().sub(o).dot(dir);
         if (t > 0 && t < range && o.clone().addScaledVector(dir, t).distanceTo(c) < this.lock.hitR + (Input.touch ? 0.45 : 0.12) + t * (Input.touch ? 0.012 : 0.003) && Col.los(o.x, o.y, o.z, c.x, c.y, c.z)) hit = { h: this.lock, t, zone: 'body' }; }
@@ -262,7 +267,7 @@ class Player {
       const a = this.state === 'mount' ? side : seat, b = this.state === 'mount' ? seat : side; this.pos.lerpVectors(a, b, ease(u)); const sd = this.rig.isModel ? 0.24 : 0.64; this.pos.y += Math.sin(u * Math.PI) * 0.5 - (this.state === 'mount' ? sd * ease(u) : sd * (1 - ease(u))); this.yaw = dampAngle(this.yaw, H.yaw, 10, dt);
       this.anim.update(dt, { state: u > 0.6 && this.state === 'mount' ? 'ride' : 'ground', speed: 0 }); this.place();
       if (u >= 1) { if (this.state === 'mount') { this.state = 'ride'; H.rider = this; } else { this.state = 'ground'; this.pos.y = Col.ground(this.pos.x, this.pos.z, this.pos.y + 1); } } return; }
-    if (this.canAct()) { const ads = Input.mouse.r || Input.aimToggle, aiming = this.weapon !== 'fists' && (ads || (Input.touch && Settings.v.codAim !== false)); this.hipOnly = aiming && !ads; this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
+    if (this.canAct()) { const ads = Input.mouse.r || Input.aimToggle, aiming = this.weapon !== 'fists' && (ads || this.hipHold(dt)); this.hipOnly = aiming && !ads; this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
       if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon(); if ((Input.hit('2') || Input.tb('w2')) && S.weapons.revolver) this.setWeapon('revolver'); if ((Input.hit('3') || Input.tb('w3')) && S.weapons.rifle) this.setWeapon('rifle'); if ((Input.hit('1') || Input.tb('w1'))) this.setWeapon('fists');
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (this.weapon !== 'fists' && (Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && this.cool <= 0) { if (aiming) this.combat(dt, true); else this.shoot(false); } else if (aiming) this.combat(dt, true); }
