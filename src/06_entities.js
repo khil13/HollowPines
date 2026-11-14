@@ -100,7 +100,7 @@ class Player {
     // toggles
     if (this.canAct()) {
       if (Input.hit('c') || Input.tb('crouch')) { this.crouch = !this.crouch; Input.setBtnState('crouch', this.crouch); }
-      if (Input.hit('1')) this.setWeapon('fists'); if (Input.hit('2') && S.weapons.revolver) this.setWeapon('revolver'); if (Input.hit('3') && S.weapons.rifle) this.setWeapon('rifle');
+      if ((Input.hit('1') || Input.tb('w1'))) this.setWeapon('fists'); if ((Input.hit('2') || Input.tb('w2')) && S.weapons.revolver) this.setWeapon('revolver'); if ((Input.hit('3') || Input.tb('w3')) && S.weapons.rifle) this.setWeapon('rifle');
       if ((Input.hit('v') || Input.tb('weapon')) && !this.carry) this.cycleWeapon();
       if (Input.hit('h') || Input.tb('whistle')) this.whistle();
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
@@ -203,6 +203,8 @@ class Player {
     if (aiming && !this.aimWas) { const t = this.softLockTarget(); if (t) Game.cam.snapTo(t); }
     this.aimWas = aiming;
     this.hover = aiming ? rayHit(Game.cam.pos, Game.cam.dir(), (GUN[this.weapon] || GUN.revolver).range, this) : null;
+    // phones: with the sights held on someone who is attacking you, the gun fires by itself (Call of Duty Mobile's simple mode)
+    const foe = this.hover && this.hover.h, hot = foe && foe.alive && !foe.downed && (foe.hostileToPlayer || (foe.predator && foe.state === 'attack')); this.afT = hot && Input.touch && Settings.v.autoFire !== false && !DeadEye.on ? (this.afT || 0) + dt : 0; if (this.afT > 0.16) Input.btnP.add('attack');
   }
   softLockTarget() { // hostiles first, then anyone (or any animal) near the middle of the screen
     const cf = Game.cam.dir(), range = (GUN[this.weapon] || GUN.revolver).range; let best = null, bs = -1;
@@ -257,7 +259,7 @@ class Player {
       this.anim.update(dt, { state: u > 0.6 && this.state === 'mount' ? 'ride' : 'ground', speed: 0 }); this.place();
       if (u >= 1) { if (this.state === 'mount') { this.state = 'ride'; H.rider = this; } else { this.state = 'ground'; this.pos.y = Col.ground(this.pos.x, this.pos.z, this.pos.y + 1); } } return; }
     if (this.canAct()) { const aiming = this.weapon !== 'fists' && (Input.mouse.r || Input.aimToggle); this.aiming = aiming; this.anim.layers.aim = aiming ? 1 : 0; this.anim.layers.rifle = this.weapon === 'rifle' ? 1 : 0; this.anim.layers.carry = 0; this.anim.layers.block = 0; this.anim.lookPitch = aiming ? Game.cam.pitch - 0.15 : 0; this.aimTick(dt, aiming);
-      if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon(); if (Input.hit('2') && S.weapons.revolver) this.setWeapon('revolver'); if (Input.hit('3') && S.weapons.rifle) this.setWeapon('rifle'); if (Input.hit('1')) this.setWeapon('fists');
+      if (Input.hit('v') || Input.tb('weapon')) this.cycleWeapon(); if ((Input.hit('2') || Input.tb('w2')) && S.weapons.revolver) this.setWeapon('revolver'); if ((Input.hit('3') || Input.tb('w3')) && S.weapons.rifle) this.setWeapon('rifle'); if ((Input.hit('1') || Input.tb('w1'))) this.setWeapon('fists');
       if ((Input.hit('r') || Input.tb('reload')) && this.weapon !== 'fists') this.reload();
       if (this.weapon !== 'fists' && (Input.mouse.lp || Input.hit('f') || Input.tb('attack')) && this.cool <= 0) { if (aiming) this.combat(dt, true); else this.shoot(false); } else if (aiming) this.combat(dt, true); }
     H.control(dt, I);

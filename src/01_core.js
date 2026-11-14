@@ -71,6 +71,8 @@ const Input = {
         if (n === 'aim') { this.aimToggle = !this.aimToggle; b.classList.toggle('on', this.aimToggle); }
         if (n === 'crouch') b.classList.toggle('on');
       });
+      if (n === 'attack') { let lp = null; b.addEventListener('pointerdown', e => { lp = { id: e.pointerId, x: e.clientX, y: e.clientY }; try { b.setPointerCapture(e.pointerId); } catch (err) {} }); // drag the fire button to keep aiming while you shoot
+        b.addEventListener('pointermove', e => { if (!lp || e.pointerId !== lp.id) return; this.look.dx += e.clientX - lp.x; this.look.dy += e.clientY - lp.y; lp.x = e.clientX; lp.y = e.clientY; }); const lu = () => { lp = null; }; b.addEventListener('pointerup', lu); b.addEventListener('pointercancel', lu); }
       const up = () => { this.btn[n] = false; }; b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
     });
     addEventListener('touchstart', () => this.setTouch(true), { passive: true });
@@ -81,7 +83,8 @@ const Input = {
   setTouch(v) { this.touch = v; document.body.classList.toggle('touch', v); document.getElementById('touch').hidden = !v || !Game.running; },
   down(k) { return this.keys.has(k); }, hit(k) { return this.pressed.has(k); }, tb(n) { return this.btnP.has(n); },
   setBtnState(n, on) { const b = document.querySelector(`#touch .tb[data-b="${n}"]`); if (b) b.classList.toggle('on', on); },
-  tick(dt) { // push the stick to the rim and hold it there to break into a run (let it back in to slow down)
+  tick(dt) { if (this.btn.attack && this.touch) { this.holdT = (this.holdT || 0) + dt; if (this.holdT > 0.28 && Game.player.weapon !== 'fists' && !DeadEye.on) this.btnP.add('attack'); } else this.holdT = 0; /* hold the fire button to keep shooting */
+    // push the stick to the rim and hold it there to break into a run (let it back in to slow down)
     if (this.move.mag > 0.95) this.rimT += dt; else { this.rimT = 0; if (this.move.mag < 0.7) this.autoSprint = false; } if (this.rimT > 0.3 && this.touch && Settings.v.autoRun !== false) this.autoSprint = true;
     const k = document.getElementById('knob'); if (k && k.classList.contains('run') !== this.autoSprint) k.classList.toggle('run', this.autoSprint); },
   applyLayout() { document.body.classList.toggle('lefty', !!Settings.v.lefty); document.body.classList.toggle('framed', window.self !== window.top && matchMedia('(pointer:coarse)').matches); const t = document.getElementById('touch'); if (t) t.style.setProperty('--tbs', Settings.v.btnScale || 1); },
