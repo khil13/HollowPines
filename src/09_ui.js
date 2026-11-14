@@ -5,7 +5,7 @@ const UI = {
   panelOpen: false, tab: 'items', choices: [], tagPool: [],
   init() {
     $('pClose').onclick = () => this.close(); $('menuBtn').onclick = () => this.panelOpen ? this.close() : this.open('system');
-    $('prings').innerHTML = this.ring('hp', '#c8443a', '♥') + this.ring('st', '#e9c46a', '⚡');
+    $('prings').innerHTML = this.ring('hp', '#c8443a', '♥') + this.ring('st', '#e9c46a', '⚡') + this.ring('de', '#e8a23c', '◉');
     $('hrings').innerHTML = this.ring('hhp', '#9dbf8a', 'H') + this.ring('hst', '#8fc7e8', '»');
     const fish = $('fish'); fish.addEventListener('pointerdown', e => { Fishing.hold = true; e.preventDefault(); }); addEventListener('pointerup', () => Fishing.hold = false);
     this.mapImg = this.buildMapImage();
@@ -39,8 +39,8 @@ const UI = {
   close(force) { if (Missions.failing && !force) return; this.panelOpen = false; Input.uiOpen = Dialog.open; $('panel').hidden = true; Input.swallowClick = true; }, // the click that closes a menu isn't also a punch
   render() {
     const k = this.kind; const tabs = { system: 'Game', items: 'Satchel', wren: 'Wren', journal: 'Journal', story: 'Story', map: 'Map', horse: 'Horse' };
-    if (k === 'shop' || k === 'camp') { $('pTabs').innerHTML = ''; } else { $('pTabs').innerHTML = Object.entries(tabs).map(([t, n]) => `<button class="${this.tab === t ? 'on' : ''}" data-t="${t}">${n}</button>`).join(''); $('pTabs').querySelectorAll('button').forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.kind = this.tab; this.render(); }); }
-    const body = $('pBody'); const fn = { shop: 'renderShop', camp: 'renderCamp' }[k] || 'render_' + this.tab; $('pTitle').textContent = k === 'shop' ? 'Holloway General Store' : k === 'camp' ? 'Camp' : tabs[this.tab]; body.innerHTML = this[fn](); this.bind(body);
+    if (k === 'shop' || k === 'camp' || k === 'cards') { $('pTabs').innerHTML = ''; } else { $('pTabs').innerHTML = Object.entries(tabs).map(([t, n]) => `<button class="${this.tab === t ? 'on' : ''}" data-t="${t}">${n}</button>`).join(''); $('pTabs').querySelectorAll('button').forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.kind = this.tab; this.render(); }); }
+    const body = $('pBody'); const fn = { shop: 'renderShop', camp: 'renderCamp', cards: 'renderCards' }[k] || 'render_' + this.tab; $('pTitle').textContent = k === 'shop' ? 'Holloway General Store' : k === 'camp' ? 'Camp' : k === 'cards' ? 'Blackjack at the Pine Knot' : tabs[this.tab]; body.innerHTML = this[fn](); this.bind(body);
     if (this.tab === 'map' && k === 'map') this.drawBigMap(); if (this.tab === 'system' && k === 'system') this.bindSettings();
   },
   bind(body) { body.querySelectorAll('[data-act]').forEach(b => b.onclick = () => { const [a, id] = b.dataset.act.split(':'); this.act(a, id); this.render(); }); },
@@ -133,7 +133,9 @@ const UI = {
     <div class="sec">Craft</div><div class="list">${this.itemRow('tonic', 0, `<button data-act="craft:tonic" ${canTonic ? '' : 'disabled'}>Craft</button>`)}</div>
     <div class="sec">Rest</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn alt" data-act="rest:3">Rest 3 hours</button><button class="btn alt" data-act="rest:morning">Sleep until morning</button><button class="btn" data-act="save:">Save game</button><button class="btn" data-act="pack:">Pack up camp</button></div>`;
   },
+  renderCards() { return Parlor.render(); },
   act(a, id) {
+    if (a === 'bj') { Parlor.act(id); return; }
     const mul = Inv.priceMul();
     switch (a) {
       case 'eat': { const it = ITEMS[id]; if (!Inv.take(id)) return; const e = it.eat; Game.player.anim.play('eat'); Sfx.tone(300, 0.15, 0.05, 'triangle'); S.p.hp = Math.min(S.p.maxHp, S.p.hp + (e.hp || 0)); S.p.st = Math.min(S.p.maxSt, S.p.st + (e.st || 0)); S.p.hpCore = Math.min(100, S.p.hpCore + (e.core || 0)); S.p.stCore = Math.min(100, S.p.stCore + (e.core || 0) * 0.7); S.p.xpHp += 1; if (e.sick) { UI.toast('That didn\'t sit right. Cook meat first.', 'bad'); S.p.stCore = Math.max(0, S.p.stCore - 15); } this.levelCheck(); break; }
@@ -182,7 +184,7 @@ const UI = {
   drawBigMap() { const c = $('bigmap'); if (!c) return; const g = c.getContext('2d'), W = c.width, s = W / WORLD.size; g.imageSmoothingEnabled = true; g.drawImage(this.mapImg, 0, 0, W, W); this.drawMarks(g, x => (x + WORLD.half) * s, z => (z + WORLD.half) * s, s); },
   /* ---------- per-frame HUD ---------- */
   update(dt) {
-    const P = Game.player, H = Game.horse; this.setRing('hp', S.p.hp / S.p.maxHp, S.p.hpCore / 100); this.setRing('st', S.p.st / S.p.maxSt, S.p.stCore / 100);
+    const P = Game.player, H = Game.horse; this.setRing('hp', S.p.hp / S.p.maxHp, S.p.hpCore / 100); this.setRing('st', S.p.st / S.p.maxSt, S.p.stCore / 100); this.setRing('de', DeadEye.meter() / 100, DeadEye.on ? 1 : 0.45);
     $('hrings').hidden = P.state !== 'ride' && H.distP > 12; this.setRing('hhp', 1, S.h.fed / 100); this.setRing('hst', S.h.st / H.maxSt(), H.bondLevel() / 4);
     $('cash').textContent = '$' + S.money.toFixed(2);
     const h = S.time.hour, hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 15) * 15; $('clock').textContent = `Day ${S.time.day} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} · ${{ clear: 'Clear', cloudy: 'Overcast', rain: 'Rain', storm: 'Thunderstorm', fog: 'Fog' }[Sky.weather]}`;
@@ -191,7 +193,7 @@ const UI = {
     $('cross').hidden = !P.aiming; $('cross').classList.toggle('lock', !!(P.hover && P.hover.h)); if (P.aiming) $('cross').style.setProperty('--s', (1 + P.spread() * 45).toFixed(3)); /* red over a target, wider while the spread blooms */ const am = $('ammo'); am.hidden = P.weapon === 'fists'; if (!am.hidden) am.textContent = P.weapon === 'revolver' ? `${S.ammoClip.revolver} | ${Inv.count('ammo_rev')}` : `${S.ammoClip.rifle} | ${Inv.count('ammo_rifle')}`;
     const wind = P.weapon === 'fists' && P.state === 'ground' && !P.grab && NPC.all.some(n => n.windT > 0 && n.alive && !n.downed && n.distP < 3); // an enemy is winding up a punch: block now to counter
     const cue = $('cue'); if (cue) { const show = wind && !P.blocking && Settings.v.hints !== false; if (cue.hidden === show) cue.hidden = !show; } const bb = document.querySelector('#tctx [data-b="block"]'); if (bb && bb.classList.contains('cue') !== wind) bb.classList.toggle('cue', wind);
-    if (Input.touch) { const ctx = { reload: P.weapon !== 'fists' && S.ammoClip[P.weapon] < (P.weapon === 'rifle' ? 5 : 6) && Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev') > 0, weapon: !!(S.weapons.revolver || S.weapons.rifle), block: P.state === 'ground' && P.weapon === 'fists' && (this.threat() || P.blocking), grab: P.state === 'ground' && P.weapon === 'fists' && !P.grab && NPC.all.some(n => Brawl.canGrab(n) && n.distP < 1.9 && (n.hostileToPlayer || n.state === 'combat')), shove: !!P.grab, dodge: P.state === 'ground' && this.threat(), whistle: P.state !== 'ride' && H.distP > 14 };
+    if (Input.touch) { const ctx = { reload: P.weapon !== 'fists' && S.ammoClip[P.weapon] < (P.weapon === 'rifle' ? 5 : 6) && Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev') > 0, weapon: !!(S.weapons.revolver || S.weapons.rifle), block: P.state === 'ground' && P.weapon === 'fists' && (this.threat() || P.blocking), grab: P.state === 'ground' && P.weapon === 'fists' && !P.grab && NPC.all.some(n => Brawl.canGrab(n) && n.distP < 1.9 && (n.hostileToPlayer || n.state === 'combat')), shove: !!P.grab, dodge: P.state === 'ground' && this.threat(), whistle: P.state !== 'ride' && H.distP > 14, deadeye: P.aiming && P.weapon !== 'fists' && (DeadEye.on || DeadEye.meter() >= DeadEye.MIN) };
       for (const [k, v] of Object.entries(ctx)) { const b = document.querySelector(`#tctx [data-b="${k}"]`); if (b && b.hidden === v) b.hidden = !v; }
       const aimB = $('tAim'); if (aimB.hidden !== (P.weapon === 'fists')) aimB.hidden = P.weapon === 'fists'; if (P.weapon === 'fists' && Input.aimToggle) { Input.aimToggle = false; aimB.classList.remove('on'); }
       $('tCrouch').hidden = P.state === 'ride'; $('tJump').textContent = P.state === 'ride' ? 'Hop' : 'Jump'; const atk = document.querySelector('#tcluster [data-b="attack"]'), at = P.grab ? 'Punch' : P.weapon === 'fists' ? 'Attack' : `Shoot<br><small>${S.ammoClip[P.weapon]} | ${Inv.count(P.weapon === 'rifle' ? 'ammo_rifle' : 'ammo_rev')}</small>`; if (atk._t !== at) { atk._t = at; atk.innerHTML = at; } const wb = document.querySelector('#tctx [data-b="weapon"]'); if (wb) wb.textContent = P.weapon === 'fists' ? 'Draw gun' : P.weapon === 'revolver' ? (S.weapons.rifle ? 'Rifle' : 'Fists') : 'Fists'; }

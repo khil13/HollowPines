@@ -31,7 +31,7 @@ const Game = {
   restoreFromState(silent) {
     // rebuild dynamic world from S (used for new game, load, mission retry)
     this.gen = (this.gen || 0) + 1; if (Dialog.open) Dialog.close(); if (Fishing.on) Fishing.stop(); Camp.pending = false; // timers from before this point stand down
-    Brawl.clear(); Town.clear(); for (const n of NPC.all.slice()) NPC.despawn(n); Riders.clear(); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
+    Brawl.clear(); Town.clear(); DeadEye.stop(); for (const n of NPC.all.slice()) NPC.despawn(n); Riders.clear(); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
     STORY._cab = STORY._cave = false; if (STORY._trail) { for (const m of STORY._trail) this.scene.remove(m); STORY._trail = null; }
     const P = this.player; P.state = 'ground'; P.carry = null; P.alive = true; P.weapon = 'fists'; P.teleport(S.p.x, S.p.z, S.p.yaw); P.buildRig();
     const H = this.horse; H.pos.set(S.h.x, Col.ground(S.h.x, S.h.z, 99), S.h.z); H.yaw = S.h.yaw; H.rider = null; H.speed = 0; H.state = 'idle'; H.box.visible = !!S.horseCarry; H.cargoMesh = null;
@@ -70,18 +70,19 @@ const Game = {
     if (!Dialog.open && !UI.panelOpen) { if (Input.hit('tab') || Input.hit('i') || Input.tb('menu')) UI.open('items'); else if (Input.hit('m')) UI.open('map'); else if (Input.hit('j')) UI.open('journal'); }
     else if (UI.panelOpen && (Input.hit('escape') || Input.hit('tab') || Input.tb('menu'))) UI.close();
     if (UI.panelOpen || Missions.failing) { UI.update(0); return; } // menus and the fail screen pause the world
+    const rdt = dt; dt = DeadEye.tick(rdt, P); // Dead Eye slows the world; the camera and HUD stay in real time
     Sky.update(dt); P.update(dt); H.update(dt); Fishing.update(dt);
     for (const n of NPC.all) { const d = Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.update(dt, d > 110 && !n.tags.includes('story')); }
     for (const a of Animal.all) a.update(dt, a.distP > 150);
     DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); Riders.update(dt); Brawl.update(dt); Town.update(dt); Tactics.update(dt); this.wildlifeTick(dt); Dialog.update();
     if (!Dialog.open && !UI.panelOpen) Interact.update(P); else UI.prompts([]);
-    FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time);
+    FX.update(dt); this.fireFlicker(); this.cam.update(rdt); Parlor.update(rdt); Parlor.tilt(this.camera, this.time); World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time);
     // discovery
     for (const p of POIS) if (!S.discovered[p.id] && Math.hypot(P.pos.x - p.x, P.pos.z - p.z) < p.r) { S.discovered[p.id] = true; UI.banner('Discovered', p.name); journal(`Found ${p.name}.`); Missions.emit('discover', { id: p.id }); }
     // ambience
     const inTown = Math.hypot(P.pos.x + 40, P.pos.z - 20) < 50; Sfx.music(dt, inTown && !S.wanted && !NPC.all.some(n => n.state === 'combat'), Sky.night());
     const nf = this.fires.reduce((m, f) => Math.min(m, Math.hypot(f.x - P.pos.x, f.z - P.pos.z)), 99); Sfx.bed('fire', clamp(1 - nf / 10, 0, 1) * 0.05);
-    UI.update(dt); this.autosaveT = (this.autosaveT || 0) + dt; if (this.autosaveT > 120 && !Missions.active && !S.wanted) { this.autosaveT = 0; Save.save(true); }
+    UI.update(rdt); this.autosaveT = (this.autosaveT || 0) + dt; if (this.autosaveT > 120 && !Missions.active && !S.wanted) { this.autosaveT = 0; Save.save(true); }
   },
 };
 

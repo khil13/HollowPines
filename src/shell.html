@@ -121,6 +121,11 @@ body.lefty #lzone{left:auto;right:0}body.lefty #stick:not(.float){left:auto;righ
 body.lefty #tcluster{right:auto;left:max(16px,env(safe-area-inset-left,0px));transform-origin:left bottom}body.lefty #tctx{right:auto;left:max(16px,env(safe-area-inset-left,0px));justify-content:flex-start;transform-origin:left bottom}
 body.lefty #tcluster .big{right:auto;left:0}body.lefty #tJump{right:auto;left:90px}body.lefty #tRun{right:auto;left:6px}body.lefty #tAim{right:auto;left:80px}body.lefty #tCrouch{right:auto;left:154px}
 .tb.cue{animation:cue .35s ease-in-out infinite alternate;background:var(--ember);color:var(--pine)}@keyframes cue{to{transform:scale(1.15)}}
+.cards{display:flex;gap:8px;flex-wrap:wrap;min-height:74px;margin:4px 0 10px}.card{display:grid;place-items:center;width:50px;height:70px;border-radius:7px;background:#fffaf0;border:2px solid #cdbb94;font:900 19px var(--body);color:#1d2a25;box-shadow:0 2px 4px #0003}.card.red{color:#b3261e}.card.back{background:repeating-linear-gradient(45deg,#8a3b3b 0 6px,#7a2f2f 6px 12px);color:#f4ead3;border-color:#5a2020}
+.bjmsg{min-height:22px;font-weight:800;margin:6px 0}.bjrow{display:flex;gap:8px;flex-wrap:wrap}.bjrow .btn.on{background:var(--ember);color:var(--pine)}
+/* Dead Eye: an amber wash with dark edges, and an X on each painted target */
+#deTint{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(232,150,40,.14) 0%,rgba(180,90,10,.26) 55%,rgba(40,14,0,.72) 100%);mix-blend-mode:multiply}
+#deMarks{position:fixed;inset:0;z-index:4;pointer-events:none}.demark{position:absolute;left:0;top:0;font:900 26px var(--body);color:#e0261a;text-shadow:0 0 6px #000,0 0 2px #fff}
 #cue{left:50%;top:58%;transform:translateX(-50%);font:900 22px var(--body);color:var(--ember);text-shadow:0 2px 6px #000a;letter-spacing:.05em;animation:cue .3s ease-in-out infinite alternate}
 #duel{left:50%;top:30%;transform:translateX(-50%);font:900 34px var(--display,Georgia),serif;color:var(--paper);text-shadow:0 3px 10px #000c;letter-spacing:.08em;pointer-events:none}
 #duel.draw{color:var(--ember);font-size:64px}#duel.won{color:#bfe39a}#duel.lost{color:#ff8a7a}
@@ -154,7 +159,7 @@ body.framed #tl,body.framed #tr,body.framed #objective,body.framed #wanted,body.
 <div id="tr" class="hud" hidden><div style="display:flex;gap:6px;align-items:center"><div id="clock"></div><button id="menuBtn" aria-label="Menu">☰</button></div><canvas id="mini" width="236" height="236"></canvas></div>
 <div id="toasts" class="hud"></div>
 <div id="cross" class="hud" hidden></div>
-<div id="cue" class="hud" hidden>Block!</div><div id="duel" class="hud" hidden></div>
+<div id="deTint" hidden></div><div id="deMarks"></div><div id="cue" class="hud" hidden>Block!</div><div id="duel" class="hud" hidden></div>
 <div id="rotate"><div><b>Turn your phone sideways</b><br>Hollow Pines plays in landscape.</div></div>
 <div id="ammo" class="hud" hidden></div>
 <div id="prompts" class="hud"><div id="horseCard" hidden></div><div id="chips"></div></div>
@@ -164,7 +169,7 @@ body.framed #tl,body.framed #tr,body.framed #objective,body.framed #wanted,body.
   <div id="lzone"></div>
   <div id="stick"><div id="knob"></div></div>
   <div id="tctx">
-    <button class="tb sm" data-b="reload" hidden>Reload</button><button class="tb sm" data-b="weapon" hidden>Gun</button><button class="tb sm" data-b="block" hidden>Block</button><button class="tb sm" data-b="grab" hidden>Grab</button><button class="tb sm" data-b="shove" hidden>Shove</button><button class="tb sm" data-b="dodge" hidden>Roll</button><button class="tb sm" data-b="whistle" hidden>Call horse</button>
+    <button class="tb sm" data-b="reload" hidden>Reload</button><button class="tb sm" data-b="weapon" hidden>Gun</button><button class="tb sm" data-b="block" hidden>Block</button><button class="tb sm" data-b="grab" hidden>Grab</button><button class="tb sm" data-b="shove" hidden>Shove</button><button class="tb sm" data-b="dodge" hidden>Roll</button><button class="tb sm" data-b="whistle" hidden>Call horse</button><button class="tb sm" data-b="deadeye" hidden>Dead Eye</button>
   </div>
   <div id="tcluster">
     <button class="tb big" data-b="attack">Attack</button><button class="tb" data-b="jump" id="tJump">Jump</button><button class="tb" data-b="aim" id="tAim" hidden>Aim</button><button class="tb" data-b="sprint" id="tRun">Run</button><button class="tb sm" data-b="crouch" id="tCrouch">Crouch</button>
