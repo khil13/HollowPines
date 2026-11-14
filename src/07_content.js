@@ -301,6 +301,19 @@ const World = {
     // gatherables
     const RG = mulberry(5); let nb = 0, ns = 0; for (let i = 0; i < 600 && (nb < 34 || ns < 30); i++) { const x = (RG() - 0.5) * 420, z = (RG() - 0.5) * 420; if (avoid(x, z)) continue; const h = Terrain.height(x, z); if (h < WORLD.waterY + 0.6 || h > 20) continue; if (nb < 34 && RG() < 0.5) { gatherable('berries', x, z); nb++; } else if (ns < 30) { gatherable('sage', x, z); ns++; } }
     for (const [x, z] of [[-30, 48], [-80, 0], [-20, -10], [-160, -70], [-60, -128], [-110, 60]]) gatherable(x % 20 ? 'berries' : 'sage', x, z);
+    // --- reeds and cattails along the river banks and pond shores; old stumps scattered through the woods
+    { const reeds = [], tails = [], stumps = [], band = (x, z) => { const h = Terrain.height(x, z); return h > WORLD.waterY - 0.12 && h < WORLD.waterY + 0.4; };
+      for (let z = -WORLD.half + 20; z < WORLD.half - 20; z += 1.3) for (const s of [-1, 1]) { const x = riverX(z) + s * (3 + R() * 9), zz = z + (R() - 0.5); if (band(x, zz) && trailDist(x, zz) > 5) { for (let k = 0; k < 3; k++) reeds.push([x + (R() - 0.5) * 0.9, zz + (R() - 0.5) * 0.9, 0.7 + R() * 0.7]); if (R() < 0.4) tails.push([x + (R() - 0.5) * 0.6, zz + (R() - 0.5) * 0.6, 0.9 + R() * 0.5]); } }
+      for (const p of PONDS) for (let a = 0; a < TAU; a += 0.09) { const r = p.r + (R() - 0.5) * 3, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r; if (band(x, z) && R() < 0.75) { for (let k = 0; k < 3; k++) reeds.push([x + (R() - 0.5) * 0.9, z + (R() - 0.5) * 0.9, 0.7 + R() * 0.7]); if (R() < 0.45) tails.push([x, z, 0.9 + R() * 0.5]); } }
+      for (let i = 0; i < 2600 && stumps.length < 90; i++) { const x = (R() - 0.5) * WORLD.half * 1.8, z = (R() - 0.5) * WORLD.half * 1.8, h = Terrain.height(x, z); if (avoid(x, z, 2) || forestD(x, z) < 0.62 || h < WORLD.waterY + 0.6 || h > 18 || Math.hypot(x + 40, z - 20) < 45) continue; stumps.push([x, z, 0.28 + R() * 0.22, 0.3 + R() * 0.35]); }
+      const blade = new THREE.ConeGeometry(0.035, 1, 4); blade.translate(0, 0.5, 0);
+      inst(blade, toon('#7d9a4a'), reeds, (d, [x, z, s]) => { d.position.set(x, Terrain.height(x, z) - 0.05, z); d.rotation.set((R() - 0.5) * 0.35, R() * TAU, (R() - 0.5) * 0.35); d.scale.set(1.6, s, 1.6); }, false);
+      inst(blade, toon('#6b8a45'), tails, (d, [x, z, s]) => { d.position.set(x, Terrain.height(x, z) - 0.05, z); d.rotation.set(0, 0, 0); d.scale.set(0.8, s * 1.25, 0.8); }, false);
+      inst(new THREE.CylinderGeometry(0.045, 0.045, 0.24, 6), toon('#5a3a20'), tails, (d, [x, z, s]) => { d.position.set(x, Terrain.height(x, z) + s * 1.05, z); d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); }, false);
+      inst(cylUp, toon('#6b4a2f'), stumps, (d, [x, z, r, h]) => { d.position.set(x, Terrain.height(x, z) - 0.05, z); d.rotation.set(0, R() * TAU, 0); d.scale.set(r, h, r); });
+      inst(new THREE.CylinderGeometry(1, 1, 0.03, 9), toon('#d9b98a'), stumps, (d, [x, z, r, h]) => { d.position.set(x, Terrain.height(x, z) - 0.05 + h, z); d.rotation.set(0, 0, 0); d.scale.set(r * 0.7, 1, r * 0.7); }, false);
+      for (const [x, z, r] of stumps) Col.circle(x, z, r * 0.9, Terrain.height(x, z) - 1, Terrain.height(x, z) + 0.6, { block: true });
+    }
   },
   inCanopy(x, y, z) { if (!this.canopy) return false; const i0 = Math.floor(x / 8), j0 = Math.floor(z / 8); for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const l = this.canopy.get(i * 1000 + j); if (l) for (const c of l) { const dx = x - c[0], dy = (y - c[1]) * 1.25, dz = z - c[2]; if (dx * dx + dy * dy + dz * dz < c[3] * c[3]) return true; } } return false; },
   cullChunks() { const P = Game.cam.pos, f = Game.cam.dir(), r = { low: 55, medium: 70, high: 90 }[Game.quality] || 80; for (const g of this.grassChunks || []) { const dx = g.userData.c.x - P.x, dz = g.userData.c.z - P.z, d = Math.hypot(dx, dz); g.visible = d < r + 28 && (d < 40 || (dx * f.x + dz * f.z) / d > -0.2); } },

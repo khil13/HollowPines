@@ -207,6 +207,7 @@ const MAT = {}; let GRAD;
 const RIM = { value: new THREE.Color('#fff2dc') }, CLOUDS = { uCS: { value: 0 }, uCT: { value: 0 } };
 function rimLit(m) { m.onBeforeCompile = sh => { sh.uniforms.uRim = RIM; sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uRim;')
     .replace('#include <dithering_fragment>', 'float rimK = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 2.6); gl_FragColor.rgb += uRim * rimK * (0.25 + 0.75 * clamp(normal.y * 0.5 + 0.5, 0.0, 1.0)) * 0.42;\n#include <dithering_fragment>'); }; m.customProgramCacheKey = () => 'rim'; return m; }
+function shadeHex(c, k) { return '#' + new THREE.Color(c).multiplyScalar(k).getHexString(); }
 let WINGLOW = null;
 function winGlow() { if (!GRAD) toon('#fff'); return WINGLOW || (WINGLOW = new THREE.MeshToonMaterial({ color: '#3c5a6e', gradientMap: GRAD, emissive: '#ffb65c', emissiveIntensity: 0 })); }
 function toon(color, o = {}) {
@@ -274,6 +275,13 @@ function building(o) {
   const glass = o.lamp === false ? '#3c5a6e' : winGlow(); /* lived-in buildings light their windows after dark */
   for (const s of [-1, 1]) { const wx = s * hw * 0.55; if (W > 6) { g.add(M(GEO.box, glass, 1.1, 1.0, 0.06, wx, fy + 1.7, dz + (side === 'S' ? 0.02 : -0.02) * 1)); g.add(M(GEO.box, trim, 1.3, 0.12, 0.1, wx, fy + 1.15, dz)); } }
   g.add(M(GEO.box, glass, 0.06, 1.0, 1.1, hw + 0.02, fy + 1.7, 0)); g.add(M(GEO.box, glass, 0.06, 1.0, 1.1, -hw - 0.02, fy + 1.7, 0));
+  if (o.lamp !== false) { // lived-in buildings: painted shutters, window boxes on the homes, and a lantern by the door that glows after dark
+    const sg = side === 'S' ? 1 : -1, hash = (o.name || 'x').length * 7 + Math.round(o.x), shut = o.shutter || ['#3f5f4a', '#7a3b3b', '#3c5a6e', '#5a4a3a', '#8a6a3a'][Math.abs(hash) % 5], fl = ['#e9c46a', '#c8443a', '#f4ead3', '#d98ac0'];
+    if (W > 6) for (const s of [-1, 1]) { const wx = s * hw * 0.55; for (const e of [-1, 1]) g.add(M(GEO.box, shut, 0.24, 1.04, 0.05, wx + e * 0.69, fy + 1.7, dz + sg * 0.05));
+      if (!o.facade) { g.add(M(GEO.box, '#6b4226', 1.2, 0.16, 0.22, wx, fy + 1.06, dz + sg * 0.16)); for (let k = 0; k < 6; k++) g.add(M(GEO.sphLo, k % 2 ? '#4f8a4a' : fl[(k + Math.abs(hash)) % 4], 0.09, 0.09, 0.09, wx - 0.45 + k * 0.18, fy + 1.2, dz + sg * 0.16)); } }
+    for (const s of [-1, 1]) for (const e of [-1, 1]) g.add(M(GEO.box, shut, 0.05, 1.04, 0.24, s * (hw + 0.05), fy + 1.7, e * 0.69));
+    g.add(M(GEO.box, '#2b2b2b', 0.05, 0.3, 0.18, dw / 2 + 0.35, fy + 2.15, dz + sg * 0.1)); g.add(M(GEO.box, '#2b2b2b', 0.2, 0.04, 0.2, dw / 2 + 0.35, fy + 2.14, dz + sg * 0.24)); g.add(M(GEO.box, winGlow(), 0.14, 0.2, 0.14, dw / 2 + 0.35, fy + 2.0, dz + sg * 0.24));
+  }
   // interior shell: plank walls with darker wainscoting and a skirting board, inside window frames, floorboards, beams and a
   // ceiling (it casts shadow, so rooms are shaded like real rooms once the roof hides when you step inside)
   if (o.interior !== false) {
