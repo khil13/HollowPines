@@ -11,7 +11,7 @@ const Game = {
     Post.init(this.renderer); Terrain.build(this.scene); Sky.init(this.scene); FX.init(this.scene); World.build(); Town.posterInit(); Grass.build(this.scene); Fishing.init(); Ambient.init(); this.applyQuality();
     this.player = new Player(); this.horse = new Horse(); UI.init();
     this.restoreFromState(true);
-    $('loading').textContent = ''; $('bNew').onclick = () => this.start(false); $('bCont').disabled = !Save.has(); $('bCont').onclick = () => this.start(true);
+    $('loading').textContent = ''; $('bNew').onclick = () => this.start(false); $('bClassic').onclick = () => this.start(false, 'classic'); $('bCont').disabled = !Save.has(); $('bCont').onclick = () => this.start(true);
     this.last = performance.now(); requestAnimationFrame(t => this.frame(t));
     try { const hot = window.claude && window.claude.hot; if (hot && hot.snapshot) hot.snapshot(() => this.running ? Save.snapshot() : null); } catch (e) {}
   },
@@ -22,10 +22,12 @@ const Game = {
     Post.setQuality(q); Grass.setQuality(q); for (const m of this.treeCasters) m.castShadow = q === 'high'; this.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   },
   resize() { const w = innerWidth, h = innerHeight; this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); if (typeof Post !== 'undefined' && Post.r) Post.resize(); },
-  start(cont) {
+  start(cont, story) {
     Sfx.init(); document.body.classList.add('playing'); $('title').hidden = true; ['tl', 'tr'].forEach(id => $(id).hidden = false); this.running = true; Input.setTouch(Input.touch || matchMedia('(pointer:coarse)').matches);
     if (cont && Save.load()) return;
-    S = freshState(); this.restoreFromState(); journal('Eli\'s letters stopped coming in April. Eight years since I rode out of Juniper Gap. Mae Holloway runs the store now. Eli trusted her.', 'note');
+    S = freshState(); S.story = story || (window.CLASSIC_STORY ? 'classic' : 'saga');
+    if (SAGA.on()) { SAGA.begin(); this.restoreFromState(); Missions._silent = true; Missions.refresh(); Missions._silent = false; SAGA.opening(); Save.save(true); return; }
+    this.restoreFromState(); journal('Eli\'s letters stopped coming in April. Eight years since I rode out of Juniper Gap. Mae Holloway runs the store now. Eli trusted her.', 'note');
     UI.banner('Chapter 1', 'The Long Way Home', 'Juniper Gap is just over the rise.'); Missions._silent = true; Missions.refresh(); Missions._silent = false; Missions.start('intro');
   },
   restoreFromState(silent) {

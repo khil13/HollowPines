@@ -129,6 +129,7 @@ body.lefty #tcluster .big{right:auto;left:64px}body.lefty #tJump{right:auto;left
 .tb.cue{animation:cue .35s ease-in-out infinite alternate;background:var(--ember);color:var(--pine)}@keyframes cue{to{transform:scale(1.15)}}
 .cards{display:flex;gap:8px;flex-wrap:wrap;min-height:74px;margin:4px 0 10px}.card{display:grid;place-items:center;width:50px;height:70px;border-radius:7px;background:#fffaf0;border:2px solid #cdbb94;font:900 19px var(--body);color:#1d2a25;box-shadow:0 2px 4px #0003}.card.red{color:#b3261e}.card.back{background:repeating-linear-gradient(45deg,#8a3b3b 0 6px,#7a2f2f 6px 12px);color:#f4ead3;border-color:#5a2020}
 .bjmsg{min-height:22px;font-weight:800;margin:6px 0}.bjrow{display:flex;gap:8px;flex-wrap:wrap}.bjrow .btn.on{background:var(--ember);color:var(--pine)}
+.linkbtn{background:none;border:0;color:var(--paper);opacity:.75;text-decoration:underline;font:700 13px var(--body);margin-top:10px;padding:6px 0;pointer-events:auto;text-align:left}
 /* Dead Eye: an amber wash with dark edges, and an X on each painted target */
 #deTint{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(232,150,40,.14) 0%,rgba(180,90,10,.26) 55%,rgba(40,14,0,.72) 100%);mix-blend-mode:multiply}
 #deMarks{position:fixed;inset:0;z-index:4;pointer-events:none}.demark{position:absolute;left:0;top:0;font:900 26px var(--body);color:#e0261a;text-shadow:0 0 6px #000,0 0 2px #fff}
@@ -189,6 +190,7 @@ body.framed #tl,body.framed #tr,body.framed #objective,body.framed #wanted,body.
     <h1>Hollow Pines</h1>
     <p class="tag2">Drift into Juniper Gap, a frontier town on the edge of the high pines. Ride, hunt, trade, help folks or rob them. The town remembers.</p>
     <div class="row"><button class="cta" id="bNew">New game</button><button class="cta sec2" id="bCont" disabled>Continue</button></div>
+    <button id="bClassic" class="linkbtn">Play the classic story instead (The Long Way Home)</button>
     <div id="loading">Building the valley…</div>
     <div class="keys" id="keys"></div>
   </div>

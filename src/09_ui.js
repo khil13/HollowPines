@@ -62,8 +62,9 @@ const UI = {
     return h;
   },
   render_story() {
-    let h = '<div class="sec">Chapters</div><div class="journal">' + CHAPTERS.map(c => `<p class="${c.n < S.chapter ? 'done' : ''}"><b>${c.n}. ${esc(c.title)}</b>${c.playable ? '' : ' <small>(designed, not yet playable)</small>'}<br>${esc(c.text)}</p>`).join('') + '</div>';
-    h += '<div class="sec">People</div>'; for (const [k, c] of Object.entries(CAST)) { if (k === 'wren') continue; const r = S.rel[k]; const st = S.chars[k]; h += `<div class="stat"><span>${esc(c.name)} <small style="color:#7b7a68">${esc(c.role)}</small></span><span>${st && st !== 'alive' && st !== 'home' ? esc(st) + ' · ' : ''}${r !== undefined ? Rep.mood(k) : ''}</span></div>`; }
+    const saga = SAGA.on(), CHAPTERS_ = saga ? SAGA.CHAPTERS : CHAPTERS, CAST_ = saga ? SAGA.CAST : CAST;
+    let h = '<div class="sec">Chapters</div><div class="journal">' + CHAPTERS_.map(c => `<p class="${c.n < S.chapter ? 'done' : ''}"><b>${c.n}. ${esc(c.title)}</b>${c.playable ? '' : ' <small>(still being written)</small>'}<br>${esc(c.text)}</p>`).join('') + '</div>';
+    h += '<div class="sec">People</div>'; for (const [k, c] of Object.entries(CAST_)) { if (k === 'wren') continue; const r = S.rel[k]; const st = S.chars[k]; h += `<div class="stat"><span>${esc(c.name)} <small style="color:#7b7a68">${esc(c.role)}</small></span><span>${st && st !== 'alive' && st !== 'home' ? esc(st) + ' · ' : ''}${r !== undefined ? Rep.mood(k) : ''}</span></div>`; }
     h += '<div class="sec">Factions</div>' + Object.entries(S.factions).map(([f, v]) => `<div class="stat"><span>${{ town: 'Juniper Gap', crane: 'Crane gang', railroad: 'Halvorsen Railroad', greer: 'Greer family' }[f]}</span><span>${v > 30 ? 'allied' : v > 0 ? 'friendly' : v > -30 ? 'wary' : 'hostile'} (${v})</span></div>`).join('');
     h += `<div class="sec">Reputation</div><div class="stat"><span>Honor</span><span>${S.honor.toFixed(0)}</span></div><div class="stat"><span>Bounty</span><span>$${S.bounty.toFixed(2)}${S.wanted ? ' · WANTED' : ''}</span></div>`;
     const ev = Object.keys(S.evidence); h += `<div class="sec">Evidence (${ev.length})</div><div class="journal">` + (ev.length ? S.log.filter(l => l.kind === 'evidence').map(l => `<p>${esc(l.text)}</p>`).join('') : '<p>Nothing yet.</p>') + '</div>';
