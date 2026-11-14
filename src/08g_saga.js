@@ -4,7 +4,7 @@
    in him. What is left of the outfit is hiding at Hollow Cabin, broke, hungry and hunted. Over six chapters the jobs get
    bigger and Josiah Marlowe gets harder to follow, and Wren has to decide what she owes a family that is coming apart.
    New games start this story (S.story === 'saga'); the original land-grab story stays in the game as the classic story.
-   Playable so far: Chapters 1 and 2. Chapters 3 to 6 are outlined in SAGA.CHAPTERS and will be built on this file. */
+   Playable so far: Chapters 1 to 3. Chapters 4 to 6 are outlined in SAGA.CHAPTERS and will be built on this file. */
 const SAGA = {
   on() { return S.story === 'saga'; },
   CAMP: { x: -146.5, z: -76.5 }, BED: { x: -151.6, z: -83.7 },
@@ -22,7 +22,7 @@ const SAGA = {
   CHAPTERS: [
     { n: 1, title: 'Ashes', playable: true, text: 'Eleven days after Bitter Creek. Eli is gut-shot, the camp is starving, and nobody has said out loud that the job was a mistake.' },
     { n: 2, title: 'Honest Work', playable: true, text: 'Marlowe wants a stake. The Crane gang\'s whiskey money sits at Coyote Mill, and Fenwick Crane does not know the outfit is in his valley yet.' },
-    { n: 3, title: 'The Halvorsen Payroll', playable: false, text: 'The same railroad, the same money, a second try: the payroll comes through Tamarack Pass. Scout it, plan it, and choose how loud it gets.' },
+    { n: 3, title: 'The Halvorsen Payroll', playable: true, text: 'The same railroad, the same money, a second try: the payroll comes through Tamarack Pass. Scout it, plan it, and choose how loud it gets.' },
     { n: 4, title: 'Thicker Than Water', playable: false, text: 'A railroad detective reaches Juniper Gap with a list of names. Somebody in camp has been talking to her.' },
     { n: 5, title: 'Preacher\'s War', playable: false, text: 'Marlowe means to burn his way out of the valley, starting with the town. Wren can ride with him or ride ahead of him.' },
     { n: 6, title: 'The Last Good Country', playable: false, text: 'What is left, who is left, and where they go. The ending follows Wren\'s honor and the choices made on the way.' },
@@ -47,13 +47,14 @@ const SAGA = {
   /* the camp at Hollow Cabin: a fire in the yard, a cook pot, bedrolls, the wagon they got away in */
   build() {
     const C = this.CAMP, T = (x, z) => Terrain.height(x, z); World.campfire(C.x, C.z, true);
-    place('gangFireA', C.x + 1.4, C.z + 1.2, Math.atan2(-1.4, -1.2), 'idle'); place('gangFireB', C.x - 1.7, C.z + 0.4, Math.atan2(1.7, -0.4), 'sit'); place('gangFireC', C.x + 0.3, C.z + 1.9, Math.PI, 'sit');
+    place('gangFireA', C.x + 1.4, C.z + 1.2, Math.atan2(-1.4, -1.2), 'idle'); place('gangFireB', C.x - 1.7, C.z + 0.4, Math.atan2(1.7, -0.4), 'sit'); place('gangFireC', C.x - 1.0, C.z + 2.4, Math.atan2(1.0, -2.4), 'sit');
     place('gangPot', C.x + 0.4, C.z - 2.0, 0, 'work'); place('gangPorch', -150, -81.4, 0, 'idle'); place('gangWatch', -139, -68, 0.6, 'idle', { wander: 3 }); place('gangHorses', -140.2, -79, Math.PI / 2, 'work'); place('gangBed', this.BED.x, this.BED.z, Math.PI / 2, 'sleep');
     const sc = Game.scene, add = (m, x, z, y = 0) => { m.position.x += x; m.position.z += z; m.position.y += T(x, z) + y; sc.add(m); return m; };
     add(M(GEO.cyl, '#2b2b2b', 0.28, 0.26, 0.28, 0, 0.5, 0), C.x + 0.4, C.z - 1.2); for (const s of [-1, 1]) add(M(GEO.cyl, '#3b2a1e', 0.03, 1.1, 0.03, s * 0.45, 0.55, 0), C.x + 0.4, C.z - 1.2); add(M(GEO.cyl, '#3b2a1e', 0.025, 1.0, 0.025, 0, 1.08, 0).rotateZ(Math.PI / 2), C.x + 0.4, C.z - 1.2); // cook pot on a spit
     for (const [x, z, ry, c] of [[C.x - 2.6, C.z + 1.6, 0.5, '#6b5a4a'], [C.x + 2.7, C.z + 2.2, -0.6, '#4f6b8a'], [C.x - 0.6, C.z + 3.1, 1.5, '#8a3b3b']]) { const b = M(GEO.box, c, 0.75, 0.08, 1.8, 0, 0.04, 0); b.rotation.y = ry; add(b, x, z); const p = M(GEO.box, '#e6dcc5', 0.5, 0.1, 0.3, 0, 0.1, 0); p.rotation.y = ry; add(p, x - Math.sin(ry) * 0.7, z - Math.cos(ry) * 0.7); } // bedrolls
     { const x = -141.5, z = -82.5, g = new THREE.Group(); g.position.set(x, T(x, z), z); g.rotation.y = 0.35; sc.add(g); g.add(M(GEO.box, '#7a5232', 1.5, 0.5, 2.8, 0, 0.95, 0)); g.add(M(GEO.box, '#d9c58f', 1.56, 0.9, 2.2, 0, 1.6, -0.2)); for (const [wx, wz] of [[-0.85, -1], [0.85, -1], [-0.85, 1], [0.85, 1]]) { const w = M(GEO.cyl, '#3b2a1e', 0.5, 0.1, 0.5, wx, 0.5, wz); w.rotation.z = Math.PI / 2; g.add(w); } g.add(M(GEO.box, '#5a3a22', 0.1, 0.08, 1.8, 0, 0.75, 2.2)); Col.circle(x, z, 1.5, T(x, z) - 1, T(x, z) + 2, { block: true, cover: true }); } // the freight wagon
     for (const [x, z] of [[C.x + 3.2, C.z - 1.5], [C.x + 3.7, C.z - 0.9]]) add(M(GEO.box, '#8b6a47', 0.6, 0.6, 0.6, 0, 0.3, 0), x, z); // crates
+    pickup({ id: 'saga_letter', item: 'rail_letter', x: 88, z: -158, y: Terrain.height(88, -158) + 1.0, when: () => SAGA.on() && ['camp', 'escape'].includes(SAGA.stage('s4')) && !Inv.count('rail_letter'), mesh: M(GEO.box, '#5a3a22', 0.4, 0.12, 0.28) });
     const doc = Buildings.find(b => b.name === "Doc Pell's"); // the doctor's bag, on the washstand: the quiet way to get it
     pickup({ id: 'saga_medkit', item: 'medkit', x: doc.x + 3.3, z: doc.z - 1.6, y: doc.floor + 0.9, owner: 'doc', when: () => SAGA.on() && SAGA.stage('s1') === 'med' && !Inv.count('medkit'), mesh: M(GEO.box, '#3b2a1e', 0.34, 0.22, 0.2) });
   },
@@ -100,6 +101,9 @@ const SAGA = {
   line(n, lines) { return pick(lines); },
   talkMarlowe(n) {
     const s1 = Missions.st('s1'), s2 = Missions.st('s2'), s3 = Missions.st('s3'), st = this.stage('s1'), st3 = this.stage('s3'), P = Game.player, box = P.carry && P.carry.id === 'strongbox';
+    const s4 = Missions.st('s4'), st4 = this.stage('s4');
+    if (st4 === 'return' && box) return this.payTree(n);
+    if (s4.status === 'available' || s4.status === 'active' || s4.status === 'done') return this.marloweCh3(n, s4, st4);
     if (st3 === 'return' && box) return this.boxTree(n);
     if (s3.status === 'available' || s3.status === 'active' || s3.status === 'done') return this.marloweCh2(n, s3, st3);
     return {
@@ -141,6 +145,60 @@ const SAGA = {
       brief: { text: 'Four of them at most. Fenwick, two hands, and the boy on lookout, name of Dutchy. Buy the boy, scare him or go round him, I do not care which. Tess wanted to come and I said no; one rider is a traveler, two is a raid. Take the box and bring it here. Not to Bill, not to Cole. To me.' },
       creek: { text: 'Somebody told the Halvorsen men we were coming. I have gone through it every night since, name by name. Do not ask me again until I have an answer I can live with.' },
     };
+  },
+  /* ---------- Chapter 3: the payroll at Tamarack Pass ---------- */
+  marloweCh3(n, s4, st4) {
+    const plan = () => S.decisions.s4_plan;
+    return {
+      start: { text: () => s4.status === 'available' ? 'Sit, Wren. All of you, sit. The Halvorsen paymaster reached Survey Camp 3 last night, up at Tamarack Pass, with six weeks of wages for the grading crews. It goes out to the crews the day after tomorrow. Until then it sits in a tent, in an iron chest, with four hired guns around it. The same money, Wren. The Lord has sent it round again.'
+          : st4 === 'return' ? 'I heard the horse a mile off. Is it on the saddle? Bring it into the light.'
+          : s4.status === 'active' ? (plan() === 'quiet' ? 'Tess\'s way, then. In the dark, on your own, with her rifle on the ridge if it sours. Go after nine, when the camp has eaten.' : 'Cole\'s way. Hard and fast, and Tess on the ridge to thin them. Do not stop to argue with anyone.')
+          : this.line(n, [S.decisions.s4_letter === 'josiah' ? 'I have read that telegram forty times. "Our friend in the Marlowe party." A friend. I am going to find out who has friends.' : 'We are rich by the standards of a week ago, and I have never slept worse. Somebody sold Bitter Creek. I can feel them at my fire.', 'When the railroad counts its chest and finds it gone, they will send someone cleverer than hired guns. We should be ready to be clever back.']),
+        choices: [
+          { text: 'How do we take it?', hide: () => s4.status !== 'available', next: 'plans' },
+          { text: 'The last time we went after this money, two of us died.', hide: () => s4.status !== 'available', next: 'doubt' },
+          { text: 'Not yet.', hide: () => s4.status !== 'available', next: null },
+          { text: 'Later.', hide: () => s4.status === 'available', next: null },
+        ] },
+      doubt: { text: 'And I have counted them every morning since. That is why you are going to hear two plans and choose between them, instead of hearing one from me. I am capable of learning, Wren. It is only that it costs so much.', next: 'plans' },
+      plans: { who: 'Tess Arden', text: 'Mine is simple. One person, after dark. The guards walk the same four paths all night; I watched them two evenings running. Wren goes in low, lifts the chest, walks out. I sit on the ridge over the gate with the rifle and nobody ever knows I was there unless it goes wrong.', next: 'plans2' },
+      plans2: { who: 'Cole Riker', text: 'And if the chest weighs what six weeks of wages weighs, she\'s crawling out with it on her back past four rifles. I say we ride in at supper, shoot the lamps, shoot anyone holding a gun, and ride out. Ninety seconds. They\'re clerks\' guards, not soldiers.', choices: [
+          { text: 'Tess\'s plan. Quiet, after dark.', do: () => { S.decisions.s4_plan = 'quiet'; Missions.start('s4'); }, next: 'quiet' },
+          { text: 'Cole\'s plan. Fast and loud.', do: () => { S.decisions.s4_plan = 'loud'; Missions.start('s4'); }, next: 'loud' } ] },
+      quiet: { text: 'Quiet, then. Cole, you will hold the horses at the trailhead and you will not improve on the plan. Wren: Tamarack Pass is east over Willow Bridge and then south, up the switchback. Tess will be on the overlook above the gate. Go after nine.' },
+      loud: { text: 'Loud. So be it. But it is Wren who goes through the gate, and Tess who covers her from the overlook, and you, Cole, who hold the horses, because I have seen what you do when you are excited. East over Willow Bridge, south up the switchback.' },
+    };
+  },
+  payTree(n) {
+    const letter = Inv.count('rail_letter') > 0;
+    const give = how => { const P = Game.player, b = P.carry; P.carry = null; if (b) Carry.remove(b); S.flags.s4_delivered = true; if (letter) { S.decisions.s4_letter = how; if (how !== 'kept') Inv.take('rail_letter', 1); }
+      if (how === 'josiah') journal('I gave Josiah the paymaster\'s telegram. He read it standing up and then he looked at each of us in turn, the way you look at a hand of cards.', 'decision');
+      else if (how === 'tess') { Rep.rel('tess', 20); journal('I showed the telegram to Tess and nobody else. She said: so it\'s true. Then she said: we tell Josiah when we know who, not before. He\'ll shoot the wrong one.', 'decision'); }
+      else if (how === 'kept') journal('The telegram is in my boot. I haven\'t told anyone. If one of them sold us, I don\'t know yet which one I\'d be telling.', 'decision'); };
+    return {
+      start: { text: 'Open it. ...Would you look at that. Would you look at what they pay men to dig a ditch for a railroad. Six weeks of other men\'s sweat, and tonight it belongs to people who bled for it.', choices: [
+          { text: '[Hand over the chest]', hide: () => letter, do: () => give('none'), next: 'done' },
+          { text: '[Give Josiah the telegram too] This was on the paymaster\'s desk. Read it.', hide: () => !letter, do: () => give('josiah'), next: 'josiah' },
+          { text: '[Hand over the chest; show the telegram to Tess later]', hide: () => !letter, do: () => give('tess'), next: 'done' },
+          { text: '[Hand over the chest; keep the telegram to yourself]', hide: () => !letter, do: () => give('kept'), next: 'done' } ] },
+      josiah: { text: '"...as arranged with our friend in the Marlowe party, who is to be paid the balance of two hundred dollars on delivery." Our friend. ...Nobody leaves this camp tonight. Nobody. Bill, count the money where I can see your hands. All of you, where I can see your hands.' },
+      done: { text: 'Shares at sunup. Eat. Sleep. For one night let us be a family that won.' },
+    };
+  },
+  /* the railroad guns at Survey Camp 3, and Tess covering from the overlook */
+  s4Spawn() {
+    this.s4Despawn(); const look = { skin: '#e8b48c', shirt: '#3b3b5b', vest: '#5a5a5a', hair: '#3b2a1e', hatColor: '#2b2b2b' };
+    const gun = (k, nm, x, z, route, o) => NPC.spawn(Object.assign({ key: k, name: nm, x, z, lawful: false, group: 'rail3', state: 'patrol', gun: 'revolver', hp: 90, maxHp: 90, fleeHp: 20, accuracy: 0.4, sense: 0.85, wild: true, tags: ['story', 's4', 's4foe'], route, look }, o));
+    gun('pg1', 'Railroad guard', 92, -153, [{ x: 92, z: -153, wait: 10 }, { x: 98, z: -156, wait: 6 }]); gun('pg2', 'Railroad guard', 84, -160, [{ x: 84, z: -160, wait: 8 }, { x: 80, z: -170, wait: 8 }]);
+    gun('pg3', 'Railroad guard', 104, -168, [{ x: 104, z: -168, wait: 8 }, { x: 104, z: -158, wait: 8 }]); gun('pg4', 'Paymaster\'s man', 92, -172, [{ x: 92, z: -172, wait: 12 }, { x: 96, z: -168, wait: 5 }], { gun: 'rifle', accuracy: 0.45 });
+    const t = NPC.byKey('tess'); if (t && t.alive) { t.pos.set(T_OVERLOOK.x, Col.ground(T_OVERLOOK.x, T_OVERLOOK.z, 99), T_OVERLOOK.z); t.state = 'scripted'; t.path = null; t.coverT = 2; t.script = (dt, me) => this.tessCover(dt, me); }
+  },
+  s4Despawn() { for (const n of NPC.all.slice()) if (n.tags.includes('s4')) NPC.despawn(n); const t = NPC.byKey('tess'); if (t && t.state === 'scripted') { NPC.despawn(t); } },
+  tessCover(dt, me) { // she holds the ridge; once the alarm is up she picks off whoever is shooting at Wren
+    me.sp = 0; const m = Missions.st('s4'); if (!m.c.alarm) return; me.coverT -= dt; if (me.coverT > 0) return; me.coverT = 2.6;
+    const foe = NPC.all.filter(n => n.tags.includes('s4foe') && n.alive && !n.downed && !n.fled && n.state === 'combat').sort((a, b) => a.distP - b.distP)[0]; if (!foe) return;
+    me.yaw = Math.atan2(foe.pos.x - me.pos.x, foe.pos.z - me.pos.z); const a = new THREE.Vector3(me.pos.x, me.pos.y + 1.4, me.pos.z), b = new THREE.Vector3(foe.pos.x, foe.pos.y + 1.1, foe.pos.z);
+    Sfx.shot(true); FX.tracer(a, b, 'none'); if (Math.random() < 0.7) { foe.takeHit({ dmg: 55, from: me, gun: 'rifle', dir: fwd(me.yaw) }); m.c.tessHits = (m.c.tessHits || 0) + 1; if (m.c.tessHits === 1) UI.toast('Tess\'s rifle opens up from the ridge', 'good'); }
   },
   /* setting the strongbox down in front of Marlowe: hand it all over, or keep some back first */
   boxTree(n) {
@@ -292,11 +350,41 @@ Missions.def({ id: 's3', saga: true, type: 'main', chapter: 2, title: 'Crane Mon
     S.locations.mill = 'abandoned'; for (const n of NPC.all.slice()) if (n.group === 'crane') NPC.despawn(n); S.chapter = Math.max(S.chapter, 3);
     m.outcome = `${S.decisions.s3_box === 'all' ? 'Gave Josiah every dollar' : 'Kept $45 back from the outfit'} · ${{ loud: 'the Cranes saw who robbed them', bribe: 'bought the lookout', offer: 'offered Dutchy Moss a way out', stealth: 'in and out unseen' }[S.decisions.s3_approach]}${S.chars.fenwick === 'dead' ? ' · Fenwick Crane killed' : ''}`;
     journal(m.c.alarm ? 'The Cranes know who took their money. Josiah calls that a message. Bill calls it a second set of people who want us dead.' : 'Fenwick Crane is turning his mill over looking for a thief. Nobody there saw my face.', 'note');
-    later(() => UI.banner('End of Chapter 2', 'Honest Work', 'Chapter 3, "The Halvorsen Payroll", is still being written. The valley is open: bounties, strangers, hunting and the saloon.'), 4500); },
+    later(() => UI.banner('Chapter 3', 'The Halvorsen Payroll', 'Josiah has heard when the railroad money moves. Speak with him.'), 4500); },
   cleanup: () => { for (const c of Carry.list.slice()) if (c.id === 'strongbox') Carry.remove(c); },
   failOutcome: () => 'The Cranes kept their money.',
 });
 SAGA.ensureBox = () => { const P = Game.player; if (S.flags.s3_delivered || S.horseCarry || (P.carry && P.carry.id === 'strongbox') || Carry.list.some(c => c.id === 'strongbox')) return; const f = fwd(P.yaw); Carry.make('strongbox', P.pos.x + f.x, P.pos.z + f.z); };
+
+ITEMS.rail_letter = { name: 'Paymaster\'s telegram', cat: 'quest', col: '#f4ead3', d: '"...as arranged with our friend in the Marlowe party, who is to be paid the balance of two hundred dollars on delivery. — R. Calder, Halvorsen Detective Service."' };
+Missions.def({ id: 's4', saga: true, type: 'main', chapter: 3, title: 'The Halvorsen Payroll', giver: 'marlowe', summary: 'Six weeks of railroad wages sit in an iron chest at Survey Camp 3, Tamarack Pass. The same money that got two of the outfit killed.',
+  prereq: () => SAGA.on() && Missions.st('s3').status === 'done',
+  start: () => { const n = NPC.byKey('marlowe'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : null; },
+  stages: [
+    { id: 'ride', text: 'Ride to Tamarack Pass: east over Willow Bridge, then south up the switchback to the overlook.', enter: () => SAGA.s4Spawn(),
+      objectives: [O.goto('overlook', 'Meet Tess at the overlook above the camp', T_OVERLOOK.x, T_OVERLOOK.z, 12), O.check('dark', 'Optional: go in after dark (9 at night to 4 in the morning)', ctx => ctx.m.c.dark, null, { optional: true, hide: () => S.decisions.s4_plan !== 'quiet' })] },
+    { id: 'camp', text: 'Take the pay chest from outside the paymaster\'s tent at Survey Camp 3.',
+      objectives: [O.check('chest', 'Take the pay chest', ctx => ctx.m.c.boxTaken, () => ({ x: T_OFFICE.x + 1, z: T_OFFICE.z + 3.2, y: 4 })), O.item('desk', 'Optional: search the paymaster\'s dispatch case', 'rail_letter', 1, () => ({ x: 88, z: -158, y: 3 }), { optional: true }), O.check('unseen', 'Optional: take it without raising the alarm', ctx => ctx.m.c.boxTaken && !ctx.m.c.alarm, null, { optional: true })],
+      enter: ctx => { const h = S.time.hour; if (h >= 21 || h < 4) ctx.m.c.dark = 1; if (!NPC.all.some(n => n.tags.includes('s4foe'))) SAGA.s4Spawn(); if (!Carry.list.some(c => c.id === 'strongbox') && !ctx.m.c.boxTaken) { const b = Carry.make('strongbox', T_OFFICE.x + 1, T_OFFICE.z + 3.2); b.onPick = () => { ctx.m.c.boxTaken = 1; }; }
+        if (S.decisions.s4_plan === 'loud') { const g = NPC.all.find(n => n.tags.includes('s4foe') && n.alive); if (g) later(() => { if (Missions.active === 's4' && g.alive) g.alertGroup(Game.player.pos); }, 1500); } },
+      on: { alarm: (d, ctx) => { if (d.group === 'rail3') ctx.m.c.alarm = 1; } },
+      next: ctx => ctx.m.c.alarm && NPC.all.some(n => n.tags.includes('s4foe') && n.alive && !n.downed && !n.fled) ? 'escape' : 'return' },
+    { id: 'escape', text: 'The camp is awake. Lose the railroad guns or put them down.', enter: () => SAGA.ensurePay(), on: { alarm: (d, ctx) => { if (d.group === 'rail3') ctx.m.c.alarm = 1; } }, objectives: [O.check('lose', 'Lose the railroad guns or defeat them', () => NPC.all.filter(n => n.tags.includes('s4foe') && n.alive && !n.downed && !n.fled && n.state === 'combat').every(n => n.distP > 85))] },
+    { id: 'return', text: 'Carry the pay chest back to Josiah at Hollow Cabin.', enter: () => SAGA.ensurePay(), on: { alarm: (d, ctx) => { if (d.group === 'rail3') ctx.m.c.alarm = 1; } },
+      objectives: [O.flag('deliver', 'Bring the pay chest to Josiah (carry it to him)', 's4_delivered', () => { const n = NPC.byKey('marlowe'); return n ? { x: n.pos.x, z: n.pos.z, y: n.pos.y + 2.4 } : { x: SAGA.CAMP.x, z: SAGA.CAMP.z }; })] },
+  ],
+  fail: [],
+  complete: ctx => { const m = ctx.m, killed = ['pg1', 'pg2', 'pg3', 'pg4'].filter(k => S.chars[k] === 'dead' || (NPC.byKey(k) && !NPC.byKey(k).alive)).length;
+    SAGA.s4Despawn(); World.apply(); S.chapter = Math.max(S.chapter, 4); Inv.money(60, 'your share of the payroll');
+    if (m.c.alarm) { S.flags.rail_knows = true; S.bounty = Math.round((S.bounty + 25) * 100) / 100; UI.toast('The Halvorsen Railroad has put $25 on the woman who hit Camp 3', 'bad'); } else if (!killed) Rep.honor(5, 'nobody died for it');
+    m.outcome = `${S.decisions.s4_plan === 'quiet' ? 'Tess\'s plan' : 'Cole\'s plan'} · ${m.c.alarm ? 'the camp was woken' : 'in and out unseen'}${S.decisions.s4_letter ? { josiah: ' · gave Josiah the telegram', tess: ' · showed Tess the telegram', kept: ' · kept the telegram secret', none: '' }[S.decisions.s4_letter] : ' · never saw the telegram'}`;
+    journal('We have the payroll. We also have, somewhere in this camp, a person the railroad calls "our friend".' + (S.decisions.s4_letter ? '' : ' I only know that because Josiah keeps saying somebody sold Bitter Creek.'), 'note');
+    later(() => UI.banner('End of Chapter 3', 'The Halvorsen Payroll', 'Chapter 4, "Thicker Than Water", is still being written. The valley is open: bounties, strangers, hunting and the saloon.'), 4500); },
+  cleanup: () => { for (const c of Carry.list.slice()) if (c.id === 'strongbox') Carry.remove(c); SAGA.s4Despawn(); World.apply(); },
+  failOutcome: () => 'The railroad kept its payroll.',
+});
+Missions.defs.s4.stages.forEach(s => { const u = s.update; s.update = (dt, ctx) => { const h = S.time.hour; if (ctx.m.stage < 2 && (h >= 21 || h < 4)) ctx.m.c.dark = 1; if (u) u(dt, ctx); }; });
+SAGA.ensurePay = () => { const P = Game.player; if (S.flags.s4_delivered || S.horseCarry || (P.carry && P.carry.id === 'strongbox') || Carry.list.some(c => c.id === 'strongbox')) return; const f = fwd(P.yaw); Carry.make('strongbox', P.pos.x + f.x, P.pos.z + f.z); };
 
 /* ---------- wiring: the saga and the classic story share one world ---------- */
 { // classic main missions only run in the classic story
