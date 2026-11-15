@@ -272,7 +272,7 @@ const QGEO = {
 };
 let GRAD8 = null; const _animalMats = {};
 function animalMat(c) { if (!GRAD8) { GRAD8 = new THREE.DataTexture(new Uint8Array([105, 140, 170, 195, 215, 232, 246, 255]), 8, 1, THREE.LuminanceFormat); GRAD8.minFilter = GRAD8.magFilter = THREE.LinearFilter; GRAD8.needsUpdate = true; }
-  return _animalMats[c] || (_animalMats[c] = new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8 })); }
+  return _animalMats[c] || (_animalMats[c] = rimLit(new THREE.MeshToonMaterial({ color: c, gradientMap: GRAD8 }))); }
 /* a smooth lofted tube: elliptical rings along a centreline in the y-z plane, capped at both ends. Each section is
    [y, z, rx, ry] with rx the half-width (x) and ry the half-depth across the centreline. One continuous surface reads as
    an animal's body far better than overlapping balls. */

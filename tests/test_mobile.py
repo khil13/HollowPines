@@ -71,6 +71,52 @@ async def main():
         check('portrait: held upright, the phone asks to be turned sideways (and the notice clears in landscape)', rot == 'grid' and rot2 == 'none', [rot, rot2])
         await ev(pg, "X.reset()")
 
+        # --- Call of Duty Mobile style controls ---
+        r = await ev(pg, """(()=>{ const P = HP.Game.player; if (HP.Missions.active) HP.Missions.abandon(true); HP.tp(-100, -20); HP.S.weapons.rifle = 1; HP.S.ammoClip.revolver = 6; HP.S.ammoClip.rifle = 5; P.inv = 1e9; HP.sim(0.3);
+          const rc = id => { const e = typeof id === 'string' ? document.querySelector(id) : id, r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, hid: e.hidden || !e.offsetParent }; };
+          const ev = (el, type, x, y, id = 7) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true }));
+          const tapB = sel => { const el = document.querySelector(sel), c = rc(el); ev(el, 'pointerdown', c.x, c.y); HP.sim(1 / 30, 1 / 30); ev(el, 'pointerup', c.x, c.y); HP.sim(0.2, 1 / 30); };
+          const out = {}; tapB('#tweap [data-b="w2"]'); out.rev = P.weapon; tapB('#tweap [data-b="w3"]'); out.rifle = P.weapon; tapB('#tweap [data-b="w2"]'); HP.sim(0.2);
+          const fire = rc('#tcluster [data-b="attack"]'), aim = rc('#tAim'), jump = rc('#tJump'), left = rc('#tFireL'), stick = rc('#stick'), rel = rc('#tReload');
+          out.layout = { fireBig: fire.w >= 70, aimAboveRight: aim.y < fire.y && aim.x > fire.x, jumpRight: jump.x > fire.x, leftFire: !left.hid && left.x < 200 && left.y < stick.y, slotOn: document.querySelector('#tweap [data-b="w2"]').classList.contains('on') };
+          /* hold the fire button: keeps shooting; drag it: the view turns */
+          const fb = document.querySelector('#tcluster [data-b="attack"]'), yaw0 = HP.Game.cam.yaw, a0 = HP.S.ammoClip.revolver; ev(fb, 'pointerdown', fire.x, fire.y); HP.sim(0.1, 1 / 30); for (let i = 1; i <= 20; i++) { ev(fb, 'pointermove', fire.x - i * 3, fire.y); HP.sim(0.1, 1 / 30); } ev(fb, 'pointerup', fire.x - 60, fire.y); HP.sim(0.3, 1 / 30);
+          out.held = { shots: a0 - HP.S.ammoClip.revolver, turned: +Math.abs(HP.Game.cam.yaw - yaw0).toFixed(2) }; out.reloadShown = !rc('#tReload').hid;
+          /* auto-fire: sights on an attacker fires; sights on a bystander does not */
+          HP.S.ammoClip.revolver = 6; const mk = (k, hostile) => { const n = HP.NPC.spawn({ key: k, name: 'T', x: P.pos.x, z: P.pos.z + 10, lawful: !hostile, wild: true, hp: 500, maxHp: 500, tags: ['generic'], look: {} }); n.update = () => {}; n.hostileToPlayer = hostile; return n; };
+          const look = n => { const C = HP.Game.cam; for (let i = 0; i < 14; i++) { const d = C.dir(), ex = n.pos.x - C.pos.x, ey = n.pos.y + 1.0 - C.pos.y, ez = n.pos.z - C.pos.z; C.yaw += Math.atan2(ex, ez) - Math.atan2(d.x, d.z); C.pitch -= Math.atan2(ey, Math.hypot(ex, ez)) - Math.atan2(d.y, Math.hypot(d.x, d.z)); C.snapT = 0; C.snapTgt = null; HP.sim(1 / 60, 1 / 60); } };
+          Input.aimToggle = true; const by = mk('afB', false); HP.sim(0.3); look(by); const b0 = HP.S.ammoClip.revolver; HP.sim(1, 1 / 60); look(by); HP.sim(0.5, 1 / 60); out.bystander = b0 - HP.S.ammoClip.revolver; HP.NPC.despawn(by);
+          const foe = mk('afF', true); HP.sim(0.3); const f0 = HP.S.ammoClip.revolver; for (let i = 0; i < 5; i++) { look(foe); HP.sim(0.35, 1 / 60); } /* re-aim after each shot's kick */ out.attacker = f0 - HP.S.ammoClip.revolver; out.hurt = foe.hp < 500;
+          Settings.v.autoFire = false; HP.S.ammoClip.revolver = 6; look(foe); HP.sim(1, 1 / 60); out.off = 6 - HP.S.ammoClip.revolver; delete Settings.v.autoFire; HP.NPC.despawn(foe); Input.aimToggle = false; tapB('#tweap [data-b="w1"]'); out.fists = P.weapon; HP.S.wanted = 0; HP.S.bounty = 0; return out; })()""")
+        check('cod: weapon slots along the bottom switch between fists, revolver and rifle', r['rev'] == 'revolver' and r['rifle'] == 'rifle' and r['fists'] == 'fists' and r['layout']['slotOn'], r)
+        check('cod: big fire button with aim above it, jump at the edge, a second fire button above the stick, reload beside fire', all(r['layout'].values()) and r['reloadShown'], r['layout'])
+        check('cod: holding fire keeps shooting, and dragging the fire button turns the view', r['held']['shots'] >= 3 and r['held']['turned'] > 0.15, r['held'])
+        check('cod: sights on an attacker fire by themselves, never at a bystander, and the setting turns it off', r['attacker'] >= 2 and r['hurt'] and r['bystander'] == 0 and r['off'] == 0, r)
+        # --- aim assist on phones ---
+        r = await ev(pg, """(()=>{ const P = HP.Game.player, C = HP.Game.cam; if (HP.Missions.active) HP.Missions.abandon(true); HP.tp(-100, -20); P.yaw = 0; C.yaw = 0; C.pitch = 0.1; P.inv = 1e9; P.setWeapon('revolver'); HP.S.ammoClip.revolver = 6; Settings.v.autoFire = false; HP.sim(0.4, 1 / 60);
+          const mk = (k, dx, dz) => { const n = HP.NPC.spawn({ key: k, name: 'T', x: P.pos.x + dx, z: P.pos.z + dz, lawful: false, wild: true, hp: 60, maxHp: 60, tags: ['generic'], look: {} }); n.update = () => {}; n.hostileToPlayer = true; return n; };
+          const off = n => { const d = C.dir(), ex = n.pos.x - C.pos.x, ey = n.pos.y + 1.15 - C.pos.y, ez = n.pos.z - C.pos.z, l = Math.hypot(ex, ey, ez); return +(Math.acos(Math.min(1, (d.x * ex + d.y * ey + d.z * ez) / l)) * 57.3).toFixed(1); };
+          const a = mk('aaA', 0, 14); HP.sim(0.2, 1 / 60); C.yaw = Math.atan2(a.pos.x - C.pos.x, a.pos.z - C.pos.z) + 0.16; C.pitch = 0.02; Input.aimToggle = true; HP.sim(1 / 60, 1 / 60); C.snapT = 0; C.yaw += 0.16; const before = off(a); HP.sim(0.8, 1 / 60); const after = off(a), onA = !!(P.hover && P.hover.h === a);
+          /* it follows a target that moves */ for (let i = 0; i < 60; i++) { a.pos.x += 0.05; HP.sim(1 / 60, 1 / 60); } const tracked = off(a), stillOn = !!(P.hover && P.hover.h === a);
+          /* a near miss on the locked target still lands */ Settings.v.aimAssist = 0; HP.sim(0.1, 1 / 60); C.yaw += 0.065; HP.sim(0.4, 1 / 60); const missAim = !(P.hover && P.hover.h === a); const hp0 = a.hp; Input.mouse.lp = true; HP.sim(1 / 60, 1 / 60); Input.mouse.lp = false; HP.sim(0.3, 1 / 60); const nearHit = a.hp < hp0;
+          /* when a target drops, the sights swing to the next attacker */ delete Settings.v.aimAssist; const b = mk('aaB', 4, 13); HP.sim(0.4, 1 / 60); a.takeHit({ dmg: 999, from: P, gun: 'revolver' }); HP.sim(0.9, 1 / 60); const next = off(b), onB = !!(P.hover && P.hover.h === b);
+          Settings.v.aimAssist = 0; C.yaw += 0.2; HP.sim(0.6, 1 / 60); const offStays = off(b) > 6; delete Settings.v.aimAssist; delete Settings.v.autoFire; Input.aimToggle = false; for (const k of ['aaA', 'aaB']) { const n = HP.NPC.byKey(k); if (n) HP.NPC.despawn(n); } P.setWeapon('fists'); HP.sim(0.3);
+          return { before, after, onA, tracked, stillOn, missAim, nearHit, next, onB, offStays, sel: (UI.open('system'), !!document.getElementById('setAA') && !!document.getElementById('setAsens')) }; })()""")
+        await ev(pg, "UI.close()")
+        check('aim assist: sights a few degrees off an attacker are pulled onto them, and follow as they move', r['after'] < 2.5 and r['onA'] and r['tracked'] < 3.5 and r['stillOn'], r)
+        check('aim assist: a near miss on the locked target still lands; when one drops the sights swing to the next attacker', r['missAim'] and r['nearHit'] and r['onB'] and r['next'] < 3, r)
+        check('aim assist: turning it off leaves the sights where you put them, and the settings offer strength and aim speed', r['offStays'] and r['sel'], r)
+        # --- Call of Duty Mobile style shooting: the gun stays down until you fire ---
+        r = await ev(pg, """(()=>{ const P = HP.Game.player, C = HP.Game.cam; HP.tp(-100, -20); P.yaw = 0; C.yaw = 0; C.pitch = 0.1; P.inv = 1e9; Input.aimToggle = false; P.setWeapon('revolver'); HP.S.ammoClip.revolver = 6; Settings.v.autoFire = false; HP.sim(0.6, 1 / 60);
+          const n = HP.NPC.spawn({ key: 'hipT', name: 'T', x: P.pos.x + 2.5, z: P.pos.z + 12, lawful: false, wild: true, hp: 400, maxHp: 400, tags: ['generic'], look: {} }); n.update = () => {}; n.hostileToPlayer = true; HP.sim(1.2, 1 / 60);
+          const out = { downAiming: P.aiming, downCross: !document.getElementById('cross').hidden };
+          const hp0 = n.hp; Input.btnP.add('attack'); HP.sim(1 / 60, 1 / 60); out.firstHit = hp0 - n.hp > 0; HP.sim(0.5, 1 / 60); out.up = { aiming: P.aiming, hip: P.hipOnly, cross: !document.getElementById('cross').hidden, on: !!(P.hover && P.hover.h === n), fov: Math.round(HP.Game.camera.fov) };
+          const hp1 = n.hp; Input.btnP.add('attack'); HP.sim(1 / 60, 1 / 60); HP.sim(0.3, 1 / 60); out.secondHit = hp1 - n.hp > 0; const sHip = P.spread();
+          Input.aimToggle = true; HP.sim(0.8, 1 / 60); out.ads = { hip: P.hipOnly, fov: Math.round(HP.Game.camera.fov), tighter: P.spread() < sHip }; Input.aimToggle = false; HP.sim(2.2, 1 / 60); out.lowered = !P.aiming && document.getElementById('cross').hidden;
+          Settings.v.codAim = false; Input.btnP.add('attack'); HP.sim(1 / 60, 1 / 60); HP.sim(0.2, 1 / 60); out.offAiming = P.aiming; delete Settings.v.codAim; delete Settings.v.autoFire; P.setWeapon('fists'); HP.sim(0.3, 1 / 60); HP.NPC.despawn(n); return out; })()""")
+        check('shooting: with a gun drawn but not fired the gun stays down (no crosshair); pressing Fire raises it and the first shot lands on the attacker in view', not r['downAiming'] and not r['downCross'] and r['firstHit'], r)
+        check('shooting: the crosshair then stays up on the attacker, further shots go where it points, and it lowers a moment after the last shot', r['up']['aiming'] and r['up']['hip'] and r['up']['cross'] and r['up']['on'] and r['secondHit'] and r['lowered'], r)
+        check('shooting: Aim zooms in and tightens the shot; the setting turns fire-to-raise off', not r['ads']['hip'] and r['ads']['fov'] <= 50 and r['ads']['tighter'] and not r['offAiming'], r)
         bad = [e for e in errs if 'favicon' not in e]
         check('no page errors', not bad, bad[:5])
         await b.close()

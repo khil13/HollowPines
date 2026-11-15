@@ -58,11 +58,16 @@ function makeModelHumanoid(o = {}) {
   rig.R.hand = aligned(B('FistR'), [0, -0.02, 0.03]); rig.L.hand = aligned(B('FistL'), [0, -0.02, 0.03]);
   const headTop = aligned(B('Head'), [0, 0.62, 0.02]); rig.head = headTop;
   const hat = new THREE.Group(); headTop.add(hat); rig.hat = hat; rig.baseHatZ = o.hatTilt || 0;
-  if (o.hat !== false) { const hc = o.hatColor || '#6b4a2f'; hat.add(M(GEO.cyl, hc, 0.5, 0.04, 0.48, 0, 0, 0)); const cr = M(GEO.cyl, hc, 0.26, 0.24, 0.24, 0, 0.12, 0); cr.geometry = new THREE.CylinderGeometry(0.8, 1, 1, 14); hat.add(cr); hat.add(M(GEO.cyl, o.band || '#2b1d14', 0.265, 0.05, 0.245, 0, 0.03, 0)); if (o.hatTilt) hat.rotation.z = o.hatTilt; }
+  if (o.hat !== false) { const hc = o.hatColor || '#6b4a2f'; hat.add(M(GEO.cyl, hc, 0.5, 0.04, 0.48, 0, 0, 0)); const cr = M(GEO.cyl, hc, 0.26, 0.24, 0.24, 0, 0.12, 0); cr.geometry = new THREE.CylinderGeometry(0.8, 1, 1, 14); hat.add(cr); hat.add(M(GEO.cyl, o.band || '#2b1d14', 0.265, 0.05, 0.245, 0, 0.03, 0)); if (o.hatTilt) hat.rotation.z = o.hatTilt;
+    for (const s of [-1, 1]) { const curl = M(GEO.box, hc, 0.07, 0.035, 0.7, s * 0.47, 0.035, 0); curl.rotation.z = s * 0.7; hat.add(curl); } hat.add(M(GEO.box, shadeHex(hc, 0.8), 0.06, 0.03, 0.36, 0, 0.245, 0)); /* curled brim and a crease in the crown */
+    if (o.hair && !o.longHair) headTop.add(M(GEO.sph, o.hair, 0.305, 0.13, 0.3, 0, -0.1, -0.05)); /* hair showing under the hat */ }
   else if (o.hair) { hat.add(M(GEO.sph, o.hair, 0.33, 0.16, 0.32, 0, -0.04, -0.03)); if (o.longHair) hat.add(M(GEO.sph, o.hair, 0.28, 0.26, 0.16, 0, -0.26, -0.24)); }
   if (o.hair && o.hat !== false && o.longHair) { const hr = M(GEO.sph, o.hair, 0.27, 0.24, 0.15, 0, -0.27, -0.25); headTop.add(hr); rig.hair = hr; }
   if (o.beard) headTop.add(M(GEO.sph, o.beard, 0.25, 0.15, 0.17, 0, -0.5, 0.17));
   if (o.mustache) headTop.add(M(GEO.box, o.mustache, 0.18, 0.04, 0.05, 0, -0.43, 0.29));
+  { const ch = aligned(B('Torso'), [0, 0, 0]); // clothes worn over the body: an open vest with buttons, a belt and buckle
+    if (o.vest && !o.apron) { for (const s of [-1, 1]) { ch.add(M(GEO.box, o.vest, 0.13, 0.36, 0.035, s * 0.125, -0.02, 0.2)); ch.add(M(GEO.sphLo, '#d9c58f', 0.014, 0.014, 0.014, s * 0.065, -0.1, 0.222)); } }
+    if (!o.apron) { ch.add(M(GEO.box, '#3b2a1e', 0.4, 0.05, 0.035, 0, -0.335, 0.19)); ch.add(M(GEO.box, '#c9a23a', 0.07, 0.065, 0.02, 0, -0.335, 0.212)); } }
   if (o.scarf || o.badge || o.apron) { const ch = aligned(B('Torso'), [0, 0, 0]); if (o.scarf) ch.add(M(GEO.sph, o.scarf, 0.2, 0.07, 0.17, 0, 0.27, 0.04)); if (o.apron) ch.add(M(GEO.box, o.apron, 0.36, 0.42, 0.04, 0, -0.18, 0.2)); if (o.badge) ch.add(M(GEO.cyl, '#e9c46a', 0.045, 0.02, 0.045, 0.12, 0.08, 0.2)).rotation.x = Math.PI / 2; }
   return rig;
 }

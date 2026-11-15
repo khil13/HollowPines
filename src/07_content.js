@@ -62,6 +62,7 @@ const Sky = {
     this.hemi.intensity = 0.17 + day * 0.43; this.hemi.color.set('#3a4a78').lerp(new THREE.Color('#cfe3f0').lerp(new THREE.Color('#ffd2a0'), dusk * 0.55), day); this.hemi.groundColor.set('#1e1a14').lerp(new THREE.Color('#6b5a3a'), day); this.amb.intensity = 0.065 + day * 0.055 + this.flash * 1.4; if (this.flash > 0.05) Game.scene.background = hor.clone().lerp(new THREE.Color('#e8eeff'), this.flash * 0.8);
     this.cloudMat.color.set(raining ? '#8e979e' : '#ffffff'); for (const c of this.clouds.children) { c.position.x += dt * 1.5; if (c.position.x > 280) c.position.x = -280; c.visible = Math.random() < 2 && (c.id % 3 < 1 + this.cloud * 2); }
     this.rain.visible = raining; if (raining) { this.rain.position.set(Game.cam.pos.x, Game.cam.pos.y - 8, Game.cam.pos.z); const a = this.rain.geometry.attributes.position.array; for (let i = 0; i < a.length; i += 6) { a[i + 1] -= dt * 26; a[i + 4] -= dt * 26; if (a[i + 1] < 0) { a[i + 1] += 22; a[i + 4] += 22; } } this.rain.geometry.attributes.position.needsUpdate = true; }
+    RIM.value.set('#5a6ea8').lerp(new THREE.Color('#fff2dc').lerp(new THREE.Color('#ffb070'), dusk * 0.8), day).multiplyScalar(0.35 + day * 0.65); CLOUDS.uCT.value += dt; CLOUDS.uCS.value = day * (raining ? 0.08 : 0.3 - this.cloud * 0.12); if (WINGLOW) WINGLOW.emissiveIntensity = (h > 18.8 || h < 6.4) && !(h > 0.5 && h < 5) ? 0.35 + (1 - day) * 0.75 : 0; /* edge light follows the sky; cloud shadows by day; windows lit in the evening and before dawn */
     const lampOn = h > 19 || h < 6.2; for (const l of Game.lamps) l.intensity = lampOn ? 1.15 + (1 - day) * 0.6 : 0; // lanterns matter once it's dark
     // ambience
     Sfx.bed('wind', 0.05 + clamp((P.y - 10) / 30, 0, 0.12) + this.cloud * 0.04); Sfx.bed('rain', storm ? 0.28 : raining ? 0.18 : 0);
@@ -130,11 +131,11 @@ const World = {
     const sc = Game.scene;
     /* --- Juniper Gap --- */
     const store = building({ x: -58, z: 8, w: 10, d: 8, door: 'S', wall: '#d79a5b', roof: '#8a4b33', sign: 'GENERAL STORE', facade: true, name: 'General store' });
-    const saloon = building({ x: -40, z: 7, w: 12, d: 10, door: 'S', wall: '#b9644a', roof: '#5d3a2a', sign: 'THE PINE KNOT', facade: true, name: 'Saloon' });
+    const saloon = building({ x: -40, z: 7, w: 12, d: 10, door: 'S', wall: '#b9644a', roof: '#5d3a2a', sign: 'THE PINE KNOT', facade: true, name: 'Saloon', paper: true, inside: '#a8474a', wainscot: '#5a3220' });
     const sheriff = building({ x: -22, z: 8, w: 8, d: 7, door: 'S', wall: '#c9b18b', roof: '#4a5a6a', sign: 'SHERIFF', facade: true, name: "Sheriff's office" });
-    const maeH = building({ x: -58, z: 34, w: 7, d: 6, door: 'N', wall: '#a8c3a0', roof: '#6b4a3a', name: "Mae's house" });
-    const docH = building({ x: -40, z: 34, w: 8, d: 7, door: 'N', wall: '#e6dcc5', roof: '#a33a2e', sign: 'DOCTOR', name: "Doc Pell's" });
-    const board = building({ x: -22, z: 34, w: 8, d: 6, door: 'N', wall: '#9fb6c9', roof: '#5a4a3a', name: 'Boarding house' });
+    const maeH = building({ x: -58, z: 34, w: 7, d: 6, door: 'N', wall: '#a8c3a0', roof: '#6b4a3a', name: "Mae's house", paper: true, inside: '#b7cdb0' });
+    const docH = building({ x: -40, z: 34, w: 8, d: 7, door: 'N', wall: '#e6dcc5', roof: '#a33a2e', sign: 'DOCTOR', name: "Doc Pell's", paper: true, inside: '#e2dcc6', wainscot: '#8a6a4a' });
+    const board = building({ x: -22, z: 34, w: 8, d: 6, door: 'N', wall: '#9fb6c9', roof: '#5a4a3a', name: 'Boarding house', paper: true, inside: '#a9bccd' });
     store.door.locked = () => (S.time.hour >= 20 || S.time.hour < 7); store.owner = 'mae'; store.private = () => store.door.locked();
     maeH.owner = 'mae'; maeH.private = () => true; docH.owner = 'doc'; docH.private = () => S.time.hour >= 21 || S.time.hour < 7; board.owner = 'hank'; board.private = () => true;
     for (const b of [store, saloon, sheriff, maeH, docH, board]) doorInteract(b.door);
@@ -183,7 +184,7 @@ const World = {
     place('well', -38.6, 21.5, -Math.PI / 2, 'chat'); place('well2', -41.4, 18.6, Math.PI / 2, 'chat'); place('street', -52, 21, 0, 'idle', { wander: 6 }); place('streetE', -14, 20, 0, 'idle', { wander: 5 }); place('storePorch', -61, 13.4, 0, 'sit'); place('patrolW', -66, 20, 0, 'idle', { wander: 8 }); place('patrolE', -12, 21, 0, 'idle', { wander: 8 });
     store.g.add(M(GEO.box, '#6b4226', 1.6, 0.45, 0.45, -3, 0.55, 5.3)); // porch bench
     /* --- Greer farm --- */
-    const farmH = building({ x: -125, z: 88, w: 8, d: 7, door: 'S', wall: '#e0c590', roof: '#7a3b2e', name: 'Greer farmhouse' }); doorInteract(farmH.door); farmH.owner = 'ezra'; farmH.private = () => S.locations.farm === 'occupied' && (S.time.hour >= 21 || S.time.hour < 6) && (S.rel.ezra || 0) < 30;
+    const farmH = building({ x: -125, z: 88, w: 8, d: 7, door: 'S', wall: '#e0c590', roof: '#7a3b2e', name: 'Greer farmhouse', paper: true, inside: '#e0cf9c' }); doorInteract(farmH.door); farmH.owner = 'ezra'; farmH.private = () => S.locations.farm === 'occupied' && (S.time.hour >= 21 || S.time.hour < 6) && (S.rel.ezra || 0) < 30;
     bed(farmH, -2, 1.5); container({ id: 'farm_chest', label: 'hope chest', x: -122.5, z: 89.8, y: farmH.floor, owner: null, loot: [['deed', 1]], once: true, restock: 999 });
     const barn = building({ x: -106, z: 82, w: 10, d: 9, door: 'S', wall: '#a3392e', roof: '#5a3a2a', trim: '#f4ead3', name: 'Greer barn', porch: false, lamp: false }); doorInteract(barn.door); this.barn = barn; this.farmH = farmH;
     for (let i = 0; i < 4; i++) { barn.g.add(M(GEO.box, '#e0c068', 1.2, 0.8, 0.9, -3.5 + i * 2.2, 0.75, -3)); Col.box(-106 - 3.5 + i * 2.2 - 0.6, -106 - 3.5 + i * 2.2 + 0.6, 78.6, 79.5, barn.y - 1, barn.y + 1.15, { walk: true, block: true }); }
@@ -214,7 +215,7 @@ const World = {
     /* --- Rook's hideout at the ford (bounty) --- */
     const fx = riverX(-120) + 22, fz = -128; this.campfire(fx, fz, false); const tt = new THREE.Group(); tt.position.set(fx + 3, Terrain.height(fx + 3, fz - 3), fz - 3); sc.add(tt); const tc = M(GEO.cone, '#a0794f', 1.6, 1.8, 1.6, 0, 0.9, 0); tc.geometry = new THREE.ConeGeometry(1, 1, 4); tt.add(tc); Col.circle(fx + 3, fz - 3, 1.1, Terrain.height(fx + 3, fz - 3) - 1, Terrain.height(fx + 3, fz - 3) + 2, { block: true, cover: true });
     /* --- vegetation, rocks, gatherables --- */
-    Interiors.build(); this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
+    Interiors.build(); Parlor.build(); SAGA.build(); this.vegetation(); this.horizon(); this.decor(); Camps.build(); CH5.build(); SIDE.build();
     /* --- graves near the cabin: environmental story --- */
     for (let i = 0; i < 2; i++) { const gx = -158 + i * 1.6, gz = -78; const g = new THREE.Group(); g.position.set(gx, Terrain.height(gx, gz), gz); sc.add(g); g.add(M(GEO.box, '#8b6a47', 0.1, 1.0, 0.1, 0, 0.5, 0)); g.add(M(GEO.box, '#8b6a47', 0.6, 0.1, 0.1, 0, 0.75, 0)); g.add(M(GEO.box, '#7a6a52', 0.7, 0.15, 1.6, 0, 0.07, 0.9)); }
     Interact.add({ pos: () => ({ x: -157.2, y: Terrain.height(-157, -78), z: -78 }), r: 1.8, opts: () => [{ label: 'Read grave markers', fn: () => { UI.banner('Hollow Cabin', 'Two markers', '"T. Ashby, homesteader. Sold to the railroad, never left." The ground is older than Eli\'s visit. Someone else lost this land first.'); if (!S.evidence.graves) { S.evidence.graves = true; journal('Two graves by Hollow Cabin. The Ashbys "sold to the railroad" and never left. Same story as the Greers, years earlier.', 'evidence'); } } }] });
@@ -300,6 +301,19 @@ const World = {
     // gatherables
     const RG = mulberry(5); let nb = 0, ns = 0; for (let i = 0; i < 600 && (nb < 34 || ns < 30); i++) { const x = (RG() - 0.5) * 420, z = (RG() - 0.5) * 420; if (avoid(x, z)) continue; const h = Terrain.height(x, z); if (h < WORLD.waterY + 0.6 || h > 20) continue; if (nb < 34 && RG() < 0.5) { gatherable('berries', x, z); nb++; } else if (ns < 30) { gatherable('sage', x, z); ns++; } }
     for (const [x, z] of [[-30, 48], [-80, 0], [-20, -10], [-160, -70], [-60, -128], [-110, 60]]) gatherable(x % 20 ? 'berries' : 'sage', x, z);
+    // --- reeds and cattails along the river banks and pond shores; old stumps scattered through the woods
+    { const reeds = [], tails = [], stumps = [], band = (x, z) => { const h = Terrain.height(x, z); return h > WORLD.waterY - 0.12 && h < WORLD.waterY + 0.4; };
+      for (let z = -WORLD.half + 20; z < WORLD.half - 20; z += 1.3) for (const s of [-1, 1]) { const x = riverX(z) + s * (3 + R() * 9), zz = z + (R() - 0.5); if (band(x, zz) && trailDist(x, zz) > 5) { for (let k = 0; k < 3; k++) reeds.push([x + (R() - 0.5) * 0.9, zz + (R() - 0.5) * 0.9, 0.7 + R() * 0.7]); if (R() < 0.4) tails.push([x + (R() - 0.5) * 0.6, zz + (R() - 0.5) * 0.6, 0.9 + R() * 0.5]); } }
+      for (const p of PONDS) for (let a = 0; a < TAU; a += 0.09) { const r = p.r + (R() - 0.5) * 3, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r; if (band(x, z) && R() < 0.75) { for (let k = 0; k < 3; k++) reeds.push([x + (R() - 0.5) * 0.9, z + (R() - 0.5) * 0.9, 0.7 + R() * 0.7]); if (R() < 0.45) tails.push([x, z, 0.9 + R() * 0.5]); } }
+      for (let i = 0; i < 2600 && stumps.length < 90; i++) { const x = (R() - 0.5) * WORLD.half * 1.8, z = (R() - 0.5) * WORLD.half * 1.8, h = Terrain.height(x, z); if (avoid(x, z, 2) || forestD(x, z) < 0.62 || h < WORLD.waterY + 0.6 || h > 18 || Math.hypot(x + 40, z - 20) < 45) continue; stumps.push([x, z, 0.28 + R() * 0.22, 0.3 + R() * 0.35]); }
+      const blade = new THREE.ConeGeometry(0.035, 1, 4); blade.translate(0, 0.5, 0);
+      inst(blade, toon('#7d9a4a'), reeds, (d, [x, z, s]) => { d.position.set(x, Terrain.height(x, z) - 0.05, z); d.rotation.set((R() - 0.5) * 0.35, R() * TAU, (R() - 0.5) * 0.35); d.scale.set(1.6, s, 1.6); }, false);
+      inst(blade, toon('#6b8a45'), tails, (d, [x, z, s]) => { d.position.set(x, Terrain.height(x, z) - 0.05, z); d.rotation.set(0, 0, 0); d.scale.set(0.8, s * 1.25, 0.8); }, false);
+      inst(new THREE.CylinderGeometry(0.045, 0.045, 0.24, 6), toon('#5a3a20'), tails, (d, [x, z, s]) => { d.position.set(x, Terrain.height(x, z) + s * 1.05, z); d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); }, false);
+      inst(cylUp, toon('#6b4a2f'), stumps, (d, [x, z, r, h]) => { d.position.set(x, Terrain.height(x, z) - 0.05, z); d.rotation.set(0, R() * TAU, 0); d.scale.set(r, h, r); });
+      inst(new THREE.CylinderGeometry(1, 1, 0.03, 9), toon('#d9b98a'), stumps, (d, [x, z, r, h]) => { d.position.set(x, Terrain.height(x, z) - 0.05 + h, z); d.rotation.set(0, 0, 0); d.scale.set(r * 0.7, 1, r * 0.7); }, false);
+      for (const [x, z, r] of stumps) Col.circle(x, z, r * 0.9, Terrain.height(x, z) - 1, Terrain.height(x, z) + 0.6, { block: true });
+    }
   },
   inCanopy(x, y, z) { if (!this.canopy) return false; const i0 = Math.floor(x / 8), j0 = Math.floor(z / 8); for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const l = this.canopy.get(i * 1000 + j); if (l) for (const c of l) { const dx = x - c[0], dy = (y - c[1]) * 1.25, dz = z - c[2]; if (dx * dx + dy * dy + dz * dz < c[3] * c[3]) return true; } } return false; },
   cullChunks() { const P = Game.cam.pos, f = Game.cam.dir(), r = { low: 55, medium: 70, high: 90 }[Game.quality] || 80; for (const g of this.grassChunks || []) { const dx = g.userData.c.x - P.x, dz = g.userData.c.z - P.z, d = Math.hypot(dx, dz); g.visible = d < r + 28 && (d < 40 || (dx * f.x + dz * f.z) / d > -0.2); } },

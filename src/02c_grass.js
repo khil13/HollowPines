@@ -29,10 +29,11 @@ const Grass = {
   },
   makeMat(L) {
     const m = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }); const U = this.U;
-    m.onBeforeCompile = sh => { Object.assign(sh.uniforms, U, L, { uTime: WIND.uTime, uStr: WIND.uStrength });
+    m.onBeforeCompile = sh => { Object.assign(sh.uniforms, U, L, CLOUDS, { uTime: WIND.uTime, uStr: WIND.uStrength });
       sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
-        uniform sampler2D tH; uniform sampler2D tC; uniform float uN; uniform float uHalf; uniform float uRes; uniform float uS; uniform float uIn; uniform float uW; uniform vec2 uC; uniform vec2 uCam; uniform vec3 uPushA; uniform vec3 uPushB; uniform float uTime; uniform float uStr; uniform float uWet;
+        uniform sampler2D tH; uniform sampler2D tC; uniform float uN; uniform float uHalf; uniform float uRes; uniform float uS; uniform float uIn; uniform float uW; uniform vec2 uC; uniform vec2 uCam; uniform vec3 uPushA; uniform vec3 uPushB; uniform float uTime; uniform float uStr; uniform float uWet; uniform float uCS; uniform float uCT;
         attribute vec4 aI; varying vec3 vGC;
+        ${VNOISE3}
         float hAt(vec2 g){ vec2 i = floor(g), f = g - i; float a = texture2D(tH, (i + 0.5) / uN).r, b = texture2D(tH, (i + vec2(1.5, 0.5)) / uN).r, c = texture2D(tH, (i + vec2(0.5, 1.5)) / uN).r, d = texture2D(tH, (i + 1.5) / uN).r; return mix(mix(a, b, f.x), mix(c, d, f.x), f.y); }
         vec2 push(vec3 P, vec2 w, float gy){ vec2 dp = w - P.xz; float pd = length(dp) + 1e-3; return dp / pd * (1.0 - smoothstep(0.25, 1.25, pd)) * step(P.y - gy, 1.6) * 1.1; }`)
         .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);') // lit like the ground, so blades melt into it
@@ -48,7 +49,8 @@ const Grass = {
         vec2 bend = wd * (0.15 + gust * gust * 0.85 + flut) * uStr * 0.32 + push(uPushA, w, gy) + push(uPushB, w, gy);
         float bl = min(length(bend), 1.2); bend = bend / max(length(bend), 1e-3) * bl;
         vec3 transformed = vec3(w.x + p.x + bend.x * k * s, gy - 0.04 + p.y * (1.0 - 0.35 * bl * k), w.y + p.z + bend.y * k * s);
-        vGC = gc.rgb * mix(0.58, 1.08, position.y) * (0.88 + 0.24 * fract(aI.w * 7.3)) * (1.0 - uWet * 0.28) * (1.0 + gust * 0.08 * position.y);`);
+        vGC = gc.rgb * mix(0.58, 1.08, position.y) * (0.88 + 0.24 * fract(aI.w * 7.3)) * (1.0 - uWet * 0.28) * (1.0 + gust * 0.08 * position.y)
+          * (1.0 - uCS * smoothstep(0.5, 0.72, vn3(vec3(w * 0.011 + vec2(uCT * 0.012, uCT * 0.004), 0.3)) * 0.75 + vn3(vec3(w * 0.035 + uCT * 0.01, 2.0)) * 0.25));`);
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vGC;').replace('#include <color_fragment>', 'diffuseColor.rgb *= vGC;').replace(/gl_FrontFacing/g, 'true');
     };
     m.customProgramCacheKey = () => 'grass'; return m;

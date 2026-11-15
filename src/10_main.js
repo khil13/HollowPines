@@ -11,7 +11,7 @@ const Game = {
     Post.init(this.renderer); Terrain.build(this.scene); Sky.init(this.scene); FX.init(this.scene); World.build(); Town.posterInit(); Grass.build(this.scene); Fishing.init(); Ambient.init(); this.applyQuality();
     this.player = new Player(); this.horse = new Horse(); UI.init();
     this.restoreFromState(true);
-    $('loading').textContent = ''; $('bNew').onclick = () => this.start(false); $('bCont').disabled = !Save.has(); $('bCont').onclick = () => this.start(true);
+    $('loading').textContent = ''; $('bNew').onclick = () => this.start(false); $('bClassic').onclick = () => this.start(false, 'classic'); $('bCont').disabled = !Save.has(); $('bCont').onclick = () => this.start(true);
     this.last = performance.now(); requestAnimationFrame(t => this.frame(t));
     try { const hot = window.claude && window.claude.hot; if (hot && hot.snapshot) hot.snapshot(() => this.running ? Save.snapshot() : null); } catch (e) {}
   },
@@ -22,16 +22,18 @@ const Game = {
     Post.setQuality(q); Grass.setQuality(q); for (const m of this.treeCasters) m.castShadow = q === 'high'; this.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   },
   resize() { const w = innerWidth, h = innerHeight; this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); if (typeof Post !== 'undefined' && Post.r) Post.resize(); },
-  start(cont) {
+  start(cont, story) {
     Sfx.init(); document.body.classList.add('playing'); $('title').hidden = true; ['tl', 'tr'].forEach(id => $(id).hidden = false); this.running = true; Input.setTouch(Input.touch || matchMedia('(pointer:coarse)').matches);
     if (cont && Save.load()) return;
-    S = freshState(); this.restoreFromState(); journal('Eli\'s letters stopped coming in April. Eight years since I rode out of Juniper Gap. Mae Holloway runs the store now. Eli trusted her.', 'note');
+    S = freshState(); S.story = story || (window.CLASSIC_STORY ? 'classic' : 'saga');
+    if (SAGA.on()) { SAGA.begin(); this.restoreFromState(); Missions._silent = true; Missions.refresh(); Missions._silent = false; SAGA.opening(); Save.save(true); return; }
+    this.restoreFromState(); journal('Eli\'s letters stopped coming in April. Eight years since I rode out of Juniper Gap. Mae Holloway runs the store now. Eli trusted her.', 'note');
     UI.banner('Chapter 1', 'The Long Way Home', 'Juniper Gap is just over the rise.'); Missions._silent = true; Missions.refresh(); Missions._silent = false; Missions.start('intro');
   },
   restoreFromState(silent) {
     // rebuild dynamic world from S (used for new game, load, mission retry)
     this.gen = (this.gen || 0) + 1; if (Dialog.open) Dialog.close(); if (Fishing.on) Fishing.stop(); Camp.pending = false; // timers from before this point stand down
-    Brawl.clear(); Town.clear(); for (const n of NPC.all.slice()) NPC.despawn(n); Riders.clear(); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
+    Brawl.clear(); Town.clear(); DeadEye.stop(); for (const n of NPC.all.slice()) NPC.despawn(n); Riders.clear(); for (const a of Animal.all.slice()) Animal.remove(a); for (const c of Carry.list.slice()) Carry.remove(c);
     STORY._cab = STORY._cave = false; if (STORY._trail) { for (const m of STORY._trail) this.scene.remove(m); STORY._trail = null; }
     const P = this.player; P.state = 'ground'; P.carry = null; P.alive = true; P.weapon = 'fists'; P.teleport(S.p.x, S.p.z, S.p.yaw); P.buildRig();
     const H = this.horse; H.pos.set(S.h.x, Col.ground(S.h.x, S.h.z, 99), S.h.z); H.yaw = S.h.yaw; H.rider = null; H.speed = 0; H.state = 'idle'; H.box.visible = !!S.horseCarry; H.cargoMesh = null;
@@ -64,24 +66,25 @@ const Game = {
     Post.render(this.scene, this.camera); Input.endFrame(); requestAnimationFrame(tt => this.frame(tt));
   },
   titleUpdate(dt) { this.tT = (this.tT || 0) + dt; World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time); const a = this.tT * 0.05; this.camera.position.set(-40 + Math.cos(a) * 42, 16, 20 + Math.sin(a) * 42); this.camera.lookAt(-40, 3, 20); this.cam.pos.copy(this.camera.position); S.time.hour = 17.2; Sky.update(0); for (const n of NPC.all) n.update(dt, false); FX.update(dt); this.fireFlicker(); },
-  fireFlicker() { for (const f of this.fires) { const k = 0.85 + Math.sin(this.time * 13 + f.x) * 0.1 + Math.random() * 0.08; f.fl.scale.set(0.3 * k, 0.7 * k * 1.1, 0.3 * k); f.light.intensity = 1.2 * k; } },
+  fireFlicker() { for (let i = 0; i < Interiors.flames.length; i++) { const k = 0.85 + Math.sin(this.time * 11 + i * 2.1) * 0.12 + Math.random() * 0.1; Interiors.flames[i].scale.set(0.2 * k, 0.45 * k * 1.1, 0.12); } for (const f of this.fires) { const k = 0.85 + Math.sin(this.time * 13 + f.x) * 0.1 + Math.random() * 0.08; f.fl.scale.set(0.3 * k, 0.7 * k * 1.1, 0.3 * k); f.light.intensity = 1.2 * k; } },
   update(dt) {
     const P = this.player, H = this.horse; Input.tick(dt);
     if (!Dialog.open && !UI.panelOpen) { if (Input.hit('tab') || Input.hit('i') || Input.tb('menu')) UI.open('items'); else if (Input.hit('m')) UI.open('map'); else if (Input.hit('j')) UI.open('journal'); }
     else if (UI.panelOpen && (Input.hit('escape') || Input.hit('tab') || Input.tb('menu'))) UI.close();
     if (UI.panelOpen || Missions.failing) { UI.update(0); return; } // menus and the fail screen pause the world
+    const rdt = dt; dt = DeadEye.tick(rdt, P); // Dead Eye slows the world; the camera and HUD stay in real time
     Sky.update(dt); P.update(dt); H.update(dt); Fishing.update(dt);
     for (const n of NPC.all) { const d = Math.hypot(n.pos.x - P.pos.x, n.pos.z - P.pos.z); n.update(dt, d > 110 && !n.tags.includes('story')); }
     for (const a of Animal.all) a.update(dt, a.distP > 150);
     DoorSys.update(dt); Law.update(dt); Missions.update(dt); Encounters.update(dt); Camps.update(dt); SIDE.update(dt); Riders.update(dt); Brawl.update(dt); Town.update(dt); Tactics.update(dt); this.wildlifeTick(dt); Dialog.update();
     if (!Dialog.open && !UI.panelOpen) Interact.update(P); else UI.prompts([]);
-    FX.update(dt); this.fireFlicker(); this.cam.update(dt); World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time);
+    FX.update(dt); this.fireFlicker(); this.cam.update(rdt); Parlor.update(rdt); Parlor.tilt(this.camera, this.time); World.cullChunks(); Grass.update(); Ambient.update(dt); Terrain.waterUpdate(this.time); Terrain.groundUpdate(this.time);
     // discovery
     for (const p of POIS) if (!S.discovered[p.id] && Math.hypot(P.pos.x - p.x, P.pos.z - p.z) < p.r) { S.discovered[p.id] = true; UI.banner('Discovered', p.name); journal(`Found ${p.name}.`); Missions.emit('discover', { id: p.id }); }
     // ambience
     const inTown = Math.hypot(P.pos.x + 40, P.pos.z - 20) < 50; Sfx.music(dt, inTown && !S.wanted && !NPC.all.some(n => n.state === 'combat'), Sky.night());
     const nf = this.fires.reduce((m, f) => Math.min(m, Math.hypot(f.x - P.pos.x, f.z - P.pos.z)), 99); Sfx.bed('fire', clamp(1 - nf / 10, 0, 1) * 0.05);
-    UI.update(dt); this.autosaveT = (this.autosaveT || 0) + dt; if (this.autosaveT > 120 && !Missions.active && !S.wanted) { this.autosaveT = 0; Save.save(true); }
+    UI.update(rdt); this.autosaveT = (this.autosaveT || 0) + dt; if (this.autosaveT > 120 && !Missions.active && !S.wanted) { this.autosaveT = 0; Save.save(true); }
   },
 };
 
@@ -99,7 +102,7 @@ class CamRig {
     if (Input.uiOpen) dx = dy = 0;
     if (!Input.uiOpen) { if (Input.wheel) this.zoom = clamp(this.zoom + Input.wheel * 0.45, 2.4, 9); if (Input.pinch) this.zoom = clamp(this.zoom - Input.pinch * 0.015, 2.4, 9); if (Input.wheel || Input.pinch) { Settings.v.zoom = this.zoom; clearTimeout(this._zs); this._zs = setTimeout(() => Settings.save(), 600); } } /* remember the zoom once you stop scrolling */
     // clamp per-frame rotation so a big mouse jump or touch glitch can never spin the camera
-    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { dx *= 0.55; dy *= 0.55; } // finer thumb aim // zoomed in: same feel per degree
+    dx = clamp(dx, -0.35, 0.35); dy = clamp(dy, -0.25, 0.25); if (P.aiming && !Input.touch) { dx *= 0.8; dy *= 0.8; } else if (P.aiming) { const a = (P.hipOnly ? 0.85 : 0.6) * (Settings.v.aimSens || 1) * (P.hover && P.hover.h ? 0.6 : 1); dx *= a; dy *= a; } // finer thumb aim, finer still with the sights on someone
     this.yaw -= dx; this.pitch = clamp(this.pitch + dy, -0.42, 1.15); const manual = Math.abs(dx) + Math.abs(dy) > 0.0005; this.idleT = manual ? 0 : this.idleT + dt;
     if (Dialog.open && Dialog.npc && Dialog.npc.pos && P.state !== 'ride') { if (P.rig && P.rig.root) P.rig.root.visible = true; return this.convo(dt); }
     const riding = P.state === 'ride', aim = P.aiming, H = Game.horse;
@@ -110,14 +113,19 @@ class CamRig {
     if (this.snapT > 0) { this.snapT -= dt; const t = this.snapTgt; if (!aim || !t || !t.alive) this.snapT = 0; else { // steer the actual view ray onto the target's chest
       const d = this.dir(), tx = t.pos.x - this.pos.x, ty = t.pos.y + t.hitH - this.pos.y, tz = t.pos.z - this.pos.z, k = 1 - Math.exp(-28 * dt);
       this.yaw += angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)) * k; this.pitch = clamp(this.pitch - (Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1))) * k, -0.42, 1.15); } }
-    if (aim && P.lock && Input.touch) { const l = P.lock; const a = Math.atan2(l.pos.x - P.pos.x, l.pos.z - P.pos.z); this.yaw = dampAngle(this.yaw, a, 6, dt); }
+    { // aim assist: the sights are drawn onto the locked target and stay with it as it moves. It works on the real view ray
+      // (yaw and pitch), eases off while the thumb is steering so you can still pull up to the head or across to someone else
+      const lvl = Settings.v.aimAssist === undefined ? (Input.touch ? 2 : 0) : +Settings.v.aimAssist, l = P.lock; this.assist = 0;
+      if (aim && l && l.alive && lvl > 0 && this.snapT <= 0 && !DeadEye.firing) { const d = this.dir(), tx = l.pos.x - this.pos.x, ty = l.pos.y + l.hitH * (l instanceof Person ? 1.05 : 1) - this.pos.y, tz = l.pos.z - this.pos.z;
+        const ey = angDiff(Math.atan2(d.x, d.z), Math.atan2(tx, tz)), ep = Math.atan2(ty, Math.hypot(tx, tz)) - Math.asin(clamp(d.y, -1, 1)), k = 1 - Math.exp(-(manual ? (lvl > 1 ? 4 : 2) : (lvl > 1 ? 11 : 6)) * dt);
+        this.yaw += ey * k; this.pitch = clamp(this.pitch - ep * k * (manual ? 0.5 : 1), -0.42, 1.15); this.assist = 1; } }
     // combat framing: pull back and bias the view toward the nearest active threat
     let foe = null, fd = 26; for (const n of NPC.all) if (n.alive && !n.downed && n.state === 'combat' && n.distP < fd) { fd = n.distP; foe = n; } for (const a of Animal.all) if (a.alive && a.state === 'attack' && a.distP < fd) { fd = a.distP; foe = a; }
     // close-quarters framing (grab, counter, duel, a fistfight at arm's length): tighter, over the shoulder, both fighters in view
     const lc = Brawl.lastCounter, close = aim || riding ? null : P.grab || (lc && Game.time - lc.t < 1.4 && lc.n.alive ? lc.n : null) || (Duel.on ? Duel.n : null) || (foe && fd < 2.6 && P.weapon === 'fists' && foe instanceof Person && (foe.fists || !foe.gun) ? foe : null);
     this.cine = damp(this.cine || 0, close ? 1 : 0, 4, dt); this.closeFoe = close;
     if (close && this.idleT > 0.35) { const a = Math.atan2(close.pos.x - P.pos.x, close.pos.z - P.pos.z) + 0.38; this.yaw = dampAngle(this.yaw, a, 5 * this.cine, dt); this.pitch = damp(this.pitch, 0.14, 3 * this.cine, dt); }
-    const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? 2.1 : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
+    const hip = aim && P.hipOnly; const want = close ? (Duel.on ? 3.4 : 2.5) : aim ? (hip ? (riding ? 4.6 : 3.1) : 2.1) : riding ? this.zoom + 2.4 : P.state === 'swim' ? this.zoom + 0.4 : DoorSys.inside ? Math.min(this.zoom, 3.4) : this.zoom + (foe ? 1.0 : 0);
     this.dist = damp(this.dist, want, aim ? 16 : 8, dt); // aiming in is quick, like RDR2's over-the-shoulder snap
     let ty = P.pos.y + (riding ? 2.4 : P.crouch ? 1.15 : 1.45) + (P.state === 'swim' ? 0.4 : 0);
     // during a jump hold the take-off height so hops don't bob the view; drops below it are followed
@@ -138,7 +146,7 @@ class CamRig {
     this.cam.position.copy(this.pos); const look = V[5].copy(base).add(this.lookOff); look.y += aim ? 0.15 : 0; this.cam.lookAt(look);
     if (P.rig && P.rig.root) P.rig.root.visible = this.pos.distanceTo(base) > 0.85 || P.state === 'ride'; // pressed into a corner: don't look out from inside Wren's head
     if (Game.shakeA > 0) { this.cam.position.x += rand(-1, 1) * Game.shakeA * 0.12; this.cam.position.y += rand(-1, 1) * Game.shakeA * 0.12; Game.shakeA = Math.max(0, Game.shakeA - dt * 2); }
-    const fov = damp(this.cam.fov, aim ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
+    const fov = damp(this.cam.fov, aim && !hip ? 48 : riding && H.speed > 10 ? 68 : (innerWidth < innerHeight ? 66 : 60), aim ? 16 : 7, dt); if (Math.abs(fov - this.cam.fov) > 1e-3) { this.cam.fov = fov; this.cam.updateProjectionMatrix(); }
   }
   convo(dt) { // two-shot conversation framing
     const P = Game.player, N = Dialog.npc.pos, dxx = N.x - P.pos.x, dzz = N.z - P.pos.z, L = Math.hypot(dxx, dzz) || 1, ux = dxx / L, uz = dzz / L; const mid = new THREE.Vector3((N.x + P.pos.x) / 2, Math.max(N.y, P.pos.y) + 1.45, (N.z + P.pos.z) / 2);

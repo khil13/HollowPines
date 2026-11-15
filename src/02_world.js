@@ -89,14 +89,15 @@ const Terrain = {
     g.setAttribute('aDirt', new THREE.BufferAttribute(dirtA, 1));
     // rain turns trails and pond edges to dark mud, and puddles gather in them, reflecting the sky, rings spreading where drops land
     this.mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: groundTexture() }); this.groundU = { uWet: { value: 0 }, uRainT: { value: 0 }, uRain: { value: 0 }, uSkyC: { value: new THREE.Color('#cfe5ee') } }; const GU = this.groundU;
-    this.mat.onBeforeCompile = sh => { Object.assign(sh.uniforms, GU);
+    this.mat.onBeforeCompile = sh => { Object.assign(sh.uniforms, GU, CLOUDS);
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aDirt; varying float vDirt; varying vec3 vGp;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvDirt = aDirt; vGp = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet; uniform float uRainT; uniform float uRain; uniform vec3 uSkyC; varying float vDirt; varying vec3 vGp; float pud = 0.0;\n' + VNOISE3)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet; uniform float uRainT; uniform float uRain; uniform vec3 uSkyC; uniform float uCS; uniform float uCT; varying float vDirt; varying vec3 vGp; float pud = 0.0;\n' + VNOISE3)
         .replace('#include <color_fragment>', `#include <color_fragment>
           if (uWet > 0.01) { float n = vn3(vec3(vGp.xz * 0.32, 1.7)) * 0.7 + vn3(vec3(vGp.xz * 1.1, 4.1)) * 0.3;
             pud = smoothstep(0.62, 0.68, n + vDirt * 0.22 - (1.0 - uWet) * 0.5) * smoothstep(0.25, 0.6, vDirt) * uWet;
             diffuseColor.rgb *= (1.0 - uWet * 0.3 * vDirt) * (1.0 - pud * 0.7); }
-          diffuseColor.rgb *= 1.0 - uWet * 0.28; /* everything darkens a little when wet */`)
+          diffuseColor.rgb *= 1.0 - uWet * 0.28; /* everything darkens a little when wet */
+          diffuseColor.rgb *= 1.0 - uCS * smoothstep(0.5, 0.72, vn3(vec3(vGp.xz * 0.011 + vec2(uCT * 0.012, uCT * 0.004), 0.3)) * 0.75 + vn3(vec3(vGp.xz * 0.035 + uCT * 0.01, 2.0)) * 0.25); /* drifting cloud shadows */`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
           if (pud > 0.0) { vec2 cell = floor(vGp.xz * 1.4), f = fract(vGp.xz * 1.4) - 0.5; float hs = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5), ph = fract(uRainT * 0.9 + hs); f -= (vec2(hs, fract(hs * 7.31)) - 0.5) * 0.5; float ring = smoothstep(0.03, 0.0, abs(length(f) - ph * 0.35)) * (1.0 - ph) * uRain * step(0.35, fract(hs * 3.7));
             totalEmissiveRadiance += uSkyC * pud * (0.24 + ring * 0.22); }`); };
@@ -201,10 +202,18 @@ const Col = {
 
 /* ---------- Materials & mesh helpers (asset layer: swap these for real models later) ---------- */
 const MAT = {}; let GRAD;
+/* Atmosphere shared by several shaders: RIM is the sky-coloured edge light on people and animals; CLOUDS drives the
+   soft cloud shadows that drift over the ground and grass (strength, time); WINGLOW lights windows at night. */
+const RIM = { value: new THREE.Color('#fff2dc') }, CLOUDS = { uCS: { value: 0 }, uCT: { value: 0 } };
+function rimLit(m) { m.onBeforeCompile = sh => { sh.uniforms.uRim = RIM; sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uRim;')
+    .replace('#include <dithering_fragment>', 'float rimK = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 2.6); gl_FragColor.rgb += uRim * rimK * (0.25 + 0.75 * clamp(normal.y * 0.5 + 0.5, 0.0, 1.0)) * 0.42;\n#include <dithering_fragment>'); }; m.customProgramCacheKey = () => 'rim'; return m; }
+function shadeHex(c, k) { return '#' + new THREE.Color(c).multiplyScalar(k).getHexString(); }
+let WINGLOW = null;
+function winGlow() { if (!GRAD) toon('#fff'); return WINGLOW || (WINGLOW = new THREE.MeshToonMaterial({ color: '#3c5a6e', gradientMap: GRAD, emissive: '#ffb65c', emissiveIntensity: 0 })); }
 function toon(color, o = {}) {
   const k = color + JSON.stringify(o); if (MAT[k]) return MAT[k];
   if (!GRAD) { GRAD = new THREE.DataTexture(new Uint8Array([135, 180, 222, 255]), 4, 1, THREE.LuminanceFormat); GRAD.minFilter = GRAD.magFilter = THREE.NearestFilter; GRAD.needsUpdate = true; }
-  return MAT[k] = new THREE.MeshToonMaterial(Object.assign({ color, gradientMap: GRAD }, o));
+  MAT[k] = new THREE.MeshToonMaterial(Object.assign({ color, gradientMap: GRAD }, o)); if (o.skinning) rimLit(MAT[k]); /* skinned = a person: give them the edge light */ return MAT[k];
 }
 const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1), sph: new THREE.SphereGeometry(1, 16, 12), sphLo: new THREE.SphereGeometry(1, 10, 8),
@@ -226,6 +235,11 @@ const SURF = {
   siding: () => canvasTex('siding', 256, (g, S, R) => { const n = 8, bh = S / n; for (let i = 0; i < n; i++) { const v = 205 + R() * 40; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(0, i * bh, S, bh); for (let k = 0; k < 9; k++) { const y = i * bh + 3 + R() * (bh - 6), a = 0.06 + R() * 0.1; g.strokeStyle = `rgba(60,40,20,${a})`; g.lineWidth = 1; g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= S; x += 32) g.lineTo(x, y + Math.sin(x * 0.04 + k) * 1.2); g.stroke(); }
       g.fillStyle = 'rgba(0,0,0,0.38)'; g.fillRect(0, i * bh + bh - 3, S, 3); g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(0, i * bh, S, 1.5); for (let x = 20 + R() * 40; x < S; x += 90 + R() * 60) { g.fillStyle = 'rgba(40,30,20,0.5)'; g.fillRect(x, i * bh + bh * 0.5, 2, 2); } } }),
   panel: () => canvasTex('panel', 256, (g, S, R) => { const n = 6, bw = S / n; for (let i = 0; i < n; i++) { const v = 200 + R() * 45; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * bw, 0, bw, S); for (let k = 0; k < 7; k++) { const x = i * bw + 3 + R() * (bw - 6); g.strokeStyle = `rgba(60,40,20,${0.05 + R() * 0.1})`; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= S; y += 32) g.lineTo(x + Math.sin(y * 0.05 + k) * 1.3, y); g.stroke(); } g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(i * bw + bw - 2.5, 0, 2.5, S); } }),
+  // parlor wallpaper: broad stripes with a small repeating motif (tinted by the wall colour)
+  paper: () => canvasTex('paper', 256, (g, S, R) => { g.fillStyle = 'rgb(232,232,232)'; g.fillRect(0, 0, S, S); const n = 4, bw = S / n;
+    for (let i = 0; i < n; i++) { g.fillStyle = 'rgba(0,0,0,0.13)'; g.fillRect(i * bw + bw * 0.3, 0, bw * 0.4, S); g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(i * bw + bw * 0.3 - 2, 0, 2, S); g.fillRect(i * bw + bw * 0.7, 0, 2, S);
+      for (let k = 0; k < 4; k++) { const cx = i * bw + bw * 0.5, cy = (k + 0.5) * S / 4; g.fillStyle = 'rgba(0,0,0,0.22)'; g.beginPath(); g.moveTo(cx, cy - 13); g.quadraticCurveTo(cx + 9, cy, cx, cy + 13); g.quadraticCurveTo(cx - 9, cy, cx, cy - 13); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.beginPath(); g.arc(cx, cy, 2.5, 0, 6.3); g.fill();
+        g.fillStyle = 'rgba(0,0,0,0.12)'; g.beginPath(); g.arc(i * bw + bw * 0.02, cy + S / 8, 4, 0, 6.3); g.fill(); } } }),
   floor: () => canvasTex('floor', 256, (g, S, R) => { const n = 5, bw = S / n; for (let i = 0; i < n; i++) { const v = 195 + R() * 45; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * bw, 0, bw, S); for (let k = 0; k < 8; k++) { const x = i * bw + 2 + R() * (bw - 4); g.strokeStyle = `rgba(50,30,15,${0.06 + R() * 0.12})`; g.beginPath(); g.moveTo(x, 0); for (let y = 0; y <= S; y += 32) g.lineTo(x + Math.sin(y * 0.06 + k) * 1.5, y); g.stroke(); }
       const cut = R() * S; g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(i * bw, cut, bw, 2); g.fillRect(i * bw + bw - 2, 0, 2, S); if (R() < 0.6) { g.fillStyle = 'rgba(70,45,25,0.45)'; g.beginPath(); g.ellipse(i * bw + bw * 0.5, R() * S, 4, 6, 0, 0, 6.3); g.fill(); } } }),
   shingle: () => canvasTex('shingle', 256, (g, S, R) => { const n = 8, rw = S / n; // rows run down the slope's u axis, so courses lie along the ridge
@@ -258,13 +272,21 @@ function building(o) {
   addWall(-hw, -hw + t, -hd, hd); addWall(hw - t, hw, -hd, hd);
   // trim + windows
   const trim = o.trim || '#f4ead3';
-  for (const s of [-1, 1]) { const wx = s * hw * 0.55; if (W > 6) { g.add(M(GEO.box, '#3c5a6e', 1.1, 1.0, 0.06, wx, fy + 1.7, dz + (side === 'S' ? 0.02 : -0.02) * 1)); g.add(M(GEO.box, trim, 1.3, 0.12, 0.1, wx, fy + 1.15, dz)); } }
-  g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, hw + 0.02, fy + 1.7, 0)); g.add(M(GEO.box, '#3c5a6e', 0.06, 1.0, 1.1, -hw - 0.02, fy + 1.7, 0));
+  const glass = o.lamp === false ? '#3c5a6e' : winGlow(); /* lived-in buildings light their windows after dark */
+  for (const s of [-1, 1]) { const wx = s * hw * 0.55; if (W > 6) { g.add(M(GEO.box, glass, 1.1, 1.0, 0.06, wx, fy + 1.7, dz + (side === 'S' ? 0.02 : -0.02) * 1)); g.add(M(GEO.box, trim, 1.3, 0.12, 0.1, wx, fy + 1.15, dz)); } }
+  g.add(M(GEO.box, glass, 0.06, 1.0, 1.1, hw + 0.02, fy + 1.7, 0)); g.add(M(GEO.box, glass, 0.06, 1.0, 1.1, -hw - 0.02, fy + 1.7, 0));
+  if (o.lamp !== false) { // lived-in buildings: painted shutters, window boxes on the homes, and a lantern by the door that glows after dark
+    const sg = side === 'S' ? 1 : -1, hash = (o.name || 'x').length * 7 + Math.round(o.x), shut = o.shutter || ['#3f5f4a', '#7a3b3b', '#3c5a6e', '#5a4a3a', '#8a6a3a'][Math.abs(hash) % 5], fl = ['#e9c46a', '#c8443a', '#f4ead3', '#d98ac0'];
+    if (W > 6) for (const s of [-1, 1]) { const wx = s * hw * 0.55; for (const e of [-1, 1]) g.add(M(GEO.box, shut, 0.24, 1.04, 0.05, wx + e * 0.69, fy + 1.7, dz + sg * 0.05));
+      if (!o.facade) { g.add(M(GEO.box, '#6b4226', 1.2, 0.16, 0.22, wx, fy + 1.06, dz + sg * 0.16)); for (let k = 0; k < 6; k++) g.add(M(GEO.sphLo, k % 2 ? '#4f8a4a' : fl[(k + Math.abs(hash)) % 4], 0.09, 0.09, 0.09, wx - 0.45 + k * 0.18, fy + 1.2, dz + sg * 0.16)); } }
+    for (const s of [-1, 1]) for (const e of [-1, 1]) g.add(M(GEO.box, shut, 0.05, 1.04, 0.24, s * (hw + 0.05), fy + 1.7, e * 0.69));
+    g.add(M(GEO.box, '#2b2b2b', 0.05, 0.3, 0.18, dw / 2 + 0.35, fy + 2.15, dz + sg * 0.1)); g.add(M(GEO.box, '#2b2b2b', 0.2, 0.04, 0.2, dw / 2 + 0.35, fy + 2.14, dz + sg * 0.24)); g.add(M(GEO.box, winGlow(), 0.14, 0.2, 0.14, dw / 2 + 0.35, fy + 2.0, dz + sg * 0.24));
+  }
   // interior shell: plank walls with darker wainscoting and a skirting board, inside window frames, floorboards, beams and a
   // ceiling (it casts shadow, so rooms are shaded like real rooms once the roof hides when you step inside)
   if (o.interior !== false) {
     const iw = o.inside || '#b98f65', wain = o.wainscot || '#7a5232', inT = 0.02, ix = hw - t - inT, iz = hd - t - inT;
-    const pm = texMat('panel', iw), wm2 = texMat('panel', wain), panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; const up = new THREE.Mesh(uvBox(w, H - 1.05, d, 1.6), pm); up.position.set(cx, fy + 1.05 + (H - 1.05) / 2, cz); up.receiveShadow = true; g.add(up); const lo = new THREE.Mesh(uvBox(w, 1.0, d, 0.9), wm2); lo.position.set(cx, fy + 0.5, cz); lo.receiveShadow = true; g.add(lo); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
+    const pm = texMat(o.paper ? 'paper' : 'panel', iw), wm2 = texMat('panel', wain), panel = (lx0, lx1, lz0, lz1) => { const w = Math.max(lx1 - lx0, 0.04), d = Math.max(lz1 - lz0, 0.04), cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2; const up = new THREE.Mesh(uvBox(w, H - 1.05, d, 1.6), pm); up.position.set(cx, fy + 1.05 + (H - 1.05) / 2, cz); up.receiveShadow = true; g.add(up); const lo = new THREE.Mesh(uvBox(w, 1.0, d, 0.9), wm2); lo.position.set(cx, fy + 0.5, cz); lo.receiveShadow = true; g.add(lo); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.06, d + 0.01, cx, fy + 1.03, cz)); g.add(M(GEO.box, '#3b2a1e', w + 0.01, 0.12, d + 0.01, cx, fy + 0.06, cz)); };
     const doorZ = side === 'S' ? iz : -iz;
     for (const zc of [iz, -iz]) { const dzc = zc + (zc > 0 ? -inT : inT); if ((zc > 0) === (side === 'S') && side !== 'W') { panel(-ix, -dw / 2, dzc - inT, dzc + inT); panel(dw / 2, ix, dzc - inT, dzc + inT); } else panel(-ix, ix, dzc - inT, dzc + inT); }
     for (const xc of [ix, -ix]) panel(xc - inT, xc + inT, -iz, iz);
